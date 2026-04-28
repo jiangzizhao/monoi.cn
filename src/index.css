@@ -1,0 +1,69 @@
+@import "tailwindcss";
+
+@layer base {
+  /* Light theme (default) */
+  :root {
+    --bg:            #f4f5f7;
+    --bg-chat:       #ffffff;
+    --bg-card:       #ffffff;
+    --bg-input:      #f0f1f5;
+    --bg-hover:      #e8eaf0;
+    --border:        #dde0e8;
+    --border-subtle: #e8eaf0;
+    --text:          #1a1b2e;
+    --text-2:        #5a5b7a;
+    --text-3:        #9a9bb8;
+    --indigo:        #6366f1;
+    --indigo-2:      #4f52d5;
+    --indigo-dim:    rgba(99,102,241,0.10);
+    --amber:         #d97706;
+    --amber-dim:     rgba(217,119,6,0.10);
+  }
+
+  /* Dark theme (system preference) */
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:            #0a0b10;
+      --bg-chat:       #111118;
+      --bg-card:       #1a1a26;
+      --bg-input:      #16161f;
+      --bg-hover:      #1f1f2e;
+      --border:        #2a2a3d;
+      --border-subtle: #1e1e2d;
+      --text:          #e8e9f2;
+      --text-2:        #9898b8;
+      --text-3:        #55557a;
+      --indigo:        #6366f1;
+      --indigo-2:      #818cf8;
+      --indigo-dim:    rgba(99,102,241,0.12);
+      --amber:         #fbbf24;
+      --amber-dim:     rgba(251,191,36,0.10);
+    }
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body, #root {
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', 'Noto Sans SC', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection { background: var(--indigo-dim); color: var(--indigo-2); }
+
+  ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text-3); }
+}
+
+@keyframes fadeSlideUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.msg-enter { animation: fadeSlideUp 0.22s ease both; }
+
+@keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
+.cursor-blink { display: inline-block; width: 2px; height: 1em; background: var(--indigo-2); border-radius: 1px; margin-left: 2px; vertical-align: text-bottom; animation: blink 1s step-end infinite; }
