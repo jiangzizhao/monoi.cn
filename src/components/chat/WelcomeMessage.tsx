@@ -1,4 +1,4 @@
-import { FileText, Mic, Video, Film, Scissors, Download } from 'lucide-react'
+import { FileText, Mic, Video, Film, Scissors, Image, Send, Download } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
 const MODULES: { id: string; label: string; Icon: LucideIcon; description: string }[] = [
@@ -7,6 +7,8 @@ const MODULES: { id: string; label: string; Icon: LucideIcon; description: strin
   { id: 'talking', label: '口播',  Icon: Video,     description: '自录 / 数字人 / AI生成' },
   { id: 'footage', label: '素材',  Icon: Film,      description: '文案拆词匹配视频素材' },
   { id: 'edit',    label: '剪辑',  Icon: Scissors,  description: '小林风格 · 剪映云渲染' },
+  { id: 'cover',   label: '封面',  Icon: Image,     description: 'AI生成封面图' },
+  { id: 'publish', label: '发布',  Icon: Send,      description: '一键多平台发布' },
   { id: 'export',  label: '导出',  Icon: Download,  description: '高清 MP4 成片输出' },
 ]
 
@@ -20,7 +22,7 @@ export function WelcomeMessage({ onChoose }: { onChoose: (label: string) => void
             你好！我是 monoi，帮你完成口播视频的全流程制作。<br/>
             <span className="text-[var(--text-2)]">从哪个环节开始？</span>
           </p>
-          <div className="grid grid-cols-3 gap-2 w-full max-w-lg">
+          <div className="grid grid-cols-4 gap-2 w-full max-w-xl">
             {MODULES.map(({ id, label, Icon, description }) => (
               <button
                 key={id}
