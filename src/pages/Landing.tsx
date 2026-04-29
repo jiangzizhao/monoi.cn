@@ -20,7 +20,7 @@ export default function Landing() {
       {/* Nav */}
       <nav className="flex items-center justify-between px-8 py-4 border-b border-[var(--border)]">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-xl bg-indigo-600 flex items-center justify-center text-white font-bold text-sm">M</div>
+          <div className="w-8 h-8 rounded-xl bg-[var(--text)] flex items-center justify-center text-[var(--bg)] font-bold text-sm">M</div>
           <span className="font-semibold text-[var(--text)]">monoi</span>
         </div>
         <div className="flex items-center gap-3">
@@ -29,7 +29,7 @@ export default function Landing() {
             登录
           </button>
           <button onClick={() => nav('/register')}
-            className="px-4 py-2 text-sm bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl transition-colors cursor-pointer">
+            className="px-4 py-2 text-sm bg-[var(--text)] hover:opacity-80 text-[var(--bg)] rounded-xl transition-all cursor-pointer font-medium">
             免费注册
           </button>
         </div>
@@ -37,23 +37,23 @@ export default function Landing() {
 
       {/* Hero */}
       <div className="flex flex-col items-center justify-center flex-1 px-6 py-24 text-center">
-        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-indigo-950/60 border border-indigo-800/40 text-indigo-400 text-xs mb-6">
+        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--bg-hover)] border border-[var(--border)] text-[var(--text-2)] text-xs mb-6">
           <Sparkles size={12}/> AI 驱动的口播视频全流程工具
         </div>
         <h1 className="text-5xl font-bold text-[var(--text)] mb-4 leading-tight">
           从文案到成片<br/>
-          <span className="text-indigo-500">一站搞定</span>
+          <span className="text-[var(--text-2)]">一站搞定</span>
         </h1>
         <p className="text-lg text-[var(--text-2)] max-w-md mb-10">
           monoi 帮你完成口播视频制作的每一个环节，文案、配音、数字人、素材、剪辑、发布，全流程 AI 辅助。
         </p>
         <div className="flex items-center gap-3">
           <button onClick={() => nav('/register')}
-            className="flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-medium transition-colors cursor-pointer">
+            className="flex items-center gap-2 px-6 py-3 bg-[var(--text)] hover:opacity-80 text-[var(--bg)] rounded-xl font-medium transition-all cursor-pointer">
             免费开始 <ArrowRight size={16}/>
           </button>
           <button onClick={() => nav('/login')}
-            className="px-6 py-3 border border-[var(--border)] text-[var(--text-2)] hover:text-[var(--text)] hover:border-indigo-500/50 rounded-xl font-medium transition-colors cursor-pointer">
+            className="px-6 py-3 border border-[var(--border)] text-[var(--text-2)] hover:text-[var(--text)] hover:border-[var(--text-3)] rounded-xl font-medium transition-colors cursor-pointer">
             已有账号登录
           </button>
         </div>
@@ -67,7 +67,7 @@ export default function Landing() {
             {MODULES.map(({ Icon, label, desc }) => (
               <div key={label}
                 className="flex flex-col gap-2 p-4 rounded-xl bg-[var(--bg-card)] border border-[var(--border)]">
-                <Icon size={18} className="text-indigo-500" strokeWidth={1.8}/>
+                <Icon size={18} className="text-[var(--text-2)]" strokeWidth={1.8}/>
                 <div className="text-sm font-medium text-[var(--text)]">{label}</div>
                 <div className="text-xs text-[var(--text-3)]">{desc}</div>
               </div>
