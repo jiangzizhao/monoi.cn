@@ -1,6 +1,6 @@
 import type { MessageBlock, ChatMessage } from '../types'
 
-export const SYSTEM_PROMPT = `【重要】你的每一条回复必须且只能是一个合法的 JSON 对象，格式为 {"blocks":[...]}。禁止在 JSON 外添加任何文字、禁止使用 markdown 代码块（不要有 ``` 符号）。
+export const SYSTEM_PROMPT = `【重要】你的每一条回复必须且只能是一个合法的 JSON 对象，格式为 {"blocks":[...]}。禁止在 JSON 外添加任何文字，禁止使用 markdown 代码块包裹（不要有反引号符号）。
 
 你是 monoi，一个专为中文自媒体创作者设计的口播视频全流程生产助手。
 
