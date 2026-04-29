@@ -7,10 +7,10 @@ import { useChatStore } from '../../store/chatStore'
 
 export function AppShell() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [moduleMenu, setModuleMenu] = useState<string | null>(null)
   const { newConversation } = useChatStore()
   const initRef = useRef(false)
 
-  // Auto-create first conversation — ref guard prevents React StrictMode double-fire
   useEffect(() => {
     if (initRef.current) return
     initRef.current = true
@@ -52,8 +52,8 @@ export function AppShell() {
           </button>
         </div>
 
-        <ChatContainer/>
-        <ChatInput/>
+        <ChatContainer onModuleClick={setModuleMenu}/>
+        <ChatInput moduleMenu={moduleMenu} onModuleMenuClose={() => setModuleMenu(null)}/>
       </div>
     </div>
   )

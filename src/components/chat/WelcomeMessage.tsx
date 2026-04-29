@@ -12,7 +12,7 @@ const MODULES: { id: string; label: string; Icon: LucideIcon; description: strin
   { id: 'export',  label: '导出',  Icon: Download,  description: '高清 MP4 成片输出' },
 ]
 
-export function WelcomeMessage({ onChoose }: { onChoose: (label: string) => void }) {
+export function WelcomeMessage({ onModuleClick }: { onModuleClick: (label: string) => void }) {
   return (
     <div className="flex flex-col items-start gap-4 msg-enter">
       <div className="flex items-start gap-3">
@@ -26,12 +26,12 @@ export function WelcomeMessage({ onChoose }: { onChoose: (label: string) => void
             {MODULES.map(({ id, label, Icon, description }) => (
               <button
                 key={id}
-                onClick={() => onChoose(label)}
-                className="flex flex-col gap-2 px-3.5 py-3 rounded-xl bg-[var(--bg-card)] border border-[var(--border)] hover:border-indigo-500/50 hover:bg-[var(--bg-hover)] transition-all duration-150 cursor-pointer text-left group"
+                onClick={() => onModuleClick(label)}
+                className="flex flex-col gap-2 px-3.5 py-3 rounded-xl bg-[var(--bg-card)] border border-[var(--border)] hover:border-[var(--text-3)] hover:bg-[var(--bg-hover)] transition-all duration-150 cursor-pointer text-left group"
               >
-                <Icon size={16} className="text-[var(--text-3)] group-hover:text-indigo-500 transition-colors" strokeWidth={1.8}/>
+                <Icon size={16} className="text-[var(--text-3)] group-hover:text-[var(--text)] transition-colors" strokeWidth={1.8}/>
                 <div>
-                  <div className="text-sm font-medium text-[var(--text)] group-hover:text-indigo-500 transition-colors">{label}</div>
+                  <div className="text-sm font-medium text-[var(--text)]">{label}</div>
                   <div className="text-xs text-[var(--text-3)] mt-0.5 leading-snug">{description}</div>
                 </div>
               </button>
