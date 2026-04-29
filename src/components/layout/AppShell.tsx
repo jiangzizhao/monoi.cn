@@ -52,8 +52,8 @@ export function AppShell() {
           </button>
         </div>
 
-        <ChatContainer onModuleClick={setModuleMenu}/>
-        <ChatInput moduleMenu={moduleMenu} onModuleMenuClose={() => setModuleMenu(null)}/>
+        <ChatContainer/>
+        <ChatInput moduleMenu={moduleMenu} onModuleClick={setModuleMenu} onModuleMenuClose={() => setModuleMenu(null)}/>
       </div>
     </div>
   )

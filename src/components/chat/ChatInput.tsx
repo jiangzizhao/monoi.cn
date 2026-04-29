@@ -1,9 +1,20 @@
 import { useState, useRef, useEffect } from 'react'
-import { ArrowUp } from 'lucide-react'
+import { ArrowUp, FileText, Mic, Video, Film, Scissors, Image, Send, Download } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { useChatStore } from '../../store/chatStore'
 import { useChat } from '../../hooks/useChat'
 
-// 每个模块点击后弹出的子选项
+const MODULES: { label: string; Icon: LucideIcon }[] = [
+  { label: '文案',  Icon: FileText  },
+  { label: '配音',  Icon: Mic       },
+  { label: '口播',  Icon: Video     },
+  { label: '素材',  Icon: Film      },
+  { label: '剪辑',  Icon: Scissors  },
+  { label: '封面',  Icon: Image     },
+  { label: '发布',  Icon: Send      },
+  { label: '导出',  Icon: Download  },
+]
+
 const MODULE_OPTIONS: Record<string, { id: string; label: string; desc: string }[]> = {
   '文案': [
     { id: '我想写一篇原创文案', label: '原创', desc: '从零写一篇新文案' },
@@ -38,10 +49,11 @@ const MODULE_OPTIONS: Record<string, { id: string; label: string; desc: string }
 
 interface Props {
   moduleMenu: string | null
+  onModuleClick: (label: string) => void
   onModuleMenuClose: () => void
 }
 
-export function ChatInput({ moduleMenu, onModuleMenuClose }: Props) {
+export function ChatInput({ moduleMenu, onModuleClick, onModuleMenuClose }: Props) {
   const [text, setText] = useState('')
   const textRef = useRef<HTMLTextAreaElement>(null)
   const { isGenerating } = useChatStore()
@@ -68,7 +80,14 @@ export function ChatInput({ moduleMenu, onModuleMenuClose }: Props) {
     send(optId)
   }
 
-  // Auto resize textarea
+  const handleModuleClick = (label: string) => {
+    if (moduleMenu === label) {
+      onModuleMenuClose()
+    } else {
+      onModuleClick(label)
+    }
+  }
+
   useEffect(() => {
     const el = textRef.current
     if (!el) return
@@ -76,7 +95,6 @@ export function ChatInput({ moduleMenu, onModuleMenuClose }: Props) {
     el.style.height = Math.min(el.scrollHeight, 160) + 'px'
   }, [text])
 
-  // Focus input when module menu opens
   useEffect(() => {
     if (moduleMenu) textRef.current?.focus()
   }, [moduleMenu])
@@ -85,7 +103,7 @@ export function ChatInput({ moduleMenu, onModuleMenuClose }: Props) {
   const hasText = text.trim().length > 0
 
   return (
-    <div className="border-t border-[var(--border)] bg-[var(--bg-chat)] px-4 py-3">
+    <div className="border-t border-[var(--border)] bg-[var(--bg-chat)] px-4 pt-3 pb-4">
       <div className="max-w-3xl mx-auto relative">
 
         {/* Module option popup */}
@@ -98,16 +116,16 @@ export function ChatInput({ moduleMenu, onModuleMenuClose }: Props) {
               <button
                 key={opt.id}
                 onClick={() => pickModuleOption(opt.id)}
-                className="flex items-center justify-between w-full px-4 py-3 hover:bg-[var(--bg-hover)] transition-colors cursor-pointer group"
+                className="flex items-center justify-between w-full px-4 py-3 hover:bg-[var(--bg-hover)] transition-colors cursor-pointer"
               >
-                <span className="text-sm font-medium text-[var(--text)] group-hover:text-[var(--text)]">{opt.label}</span>
+                <span className="text-sm font-medium text-[var(--text)]">{opt.label}</span>
                 <span className="text-xs text-[var(--text-3)]">{opt.desc}</span>
               </button>
             ))}
           </div>
         )}
 
-        {/* Backdrop to close on outside click */}
+        {/* Backdrop */}
         {moduleMenu && (
           <div className="fixed inset-0 z-10" onClick={onModuleMenuClose}/>
         )}
@@ -119,19 +137,18 @@ export function ChatInput({ moduleMenu, onModuleMenuClose }: Props) {
             value={text}
             onChange={e => setText(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="输入消息，或点击上方模块开始..."
+            placeholder="输入消息..."
             rows={1}
             className="flex-1 bg-transparent text-sm text-[var(--text)] placeholder:text-[var(--text-3)] focus:outline-none resize-none leading-relaxed py-1"
             style={{ minHeight: '24px', maxHeight: '160px' }}
           />
-
           <button
             onClick={isGenerating ? stop : handleSend}
             className={`p-2 rounded-xl transition-all duration-150 cursor-pointer flex-shrink-0 mb-0.5 ${
               isGenerating
                 ? 'bg-[var(--bg-hover)] text-[var(--text-2)] hover:bg-[var(--border)] border border-[var(--border)]'
                 : hasText
-                ? 'bg-[var(--text)] text-[var(--bg)] hover:opacity-80 shadow-sm'
+                ? 'bg-[var(--text)] text-[var(--bg)] hover:opacity-80'
                 : 'bg-[var(--bg-hover)] text-[var(--text-3)] cursor-not-allowed'
             }`}
             disabled={!isGenerating && !hasText}
@@ -142,7 +159,24 @@ export function ChatInput({ moduleMenu, onModuleMenuClose }: Props) {
             }
           </button>
         </div>
-        <p className="text-center text-[10px] text-[var(--text-3)] mt-2">Enter 发送 · Shift+Enter 换行</p>
+
+        {/* Module icons row */}
+        <div className="flex items-center gap-0.5 mt-2 px-1">
+          {MODULES.map(({ label, Icon }) => (
+            <button
+              key={label}
+              title={label}
+              onClick={() => handleModuleClick(label)}
+              className={`p-2 rounded-lg transition-all cursor-pointer ${
+                moduleMenu === label
+                  ? 'text-[var(--text)] bg-[var(--bg-hover)]'
+                  : 'text-[var(--text-3)] hover:text-[var(--text)] hover:bg-[var(--bg-hover)]'
+              }`}
+            >
+              <Icon size={15} strokeWidth={1.8}/>
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   )

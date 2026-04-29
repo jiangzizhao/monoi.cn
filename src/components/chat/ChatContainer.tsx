@@ -5,11 +5,7 @@ import { WelcomeMessage } from './WelcomeMessage'
 import { MessageBubble } from './MessageBubble'
 import type { FootageSentenceItem } from '../../types'
 
-interface Props {
-  onModuleClick: (module: string) => void
-}
-
-export function ChatContainer({ onModuleClick }: Props) {
+export function ChatContainer() {
   const { conversations, activeId, updateFootageGrid } = useChatStore()
   const { send, chooseOption } = useChat()
   const endRef = useRef<HTMLDivElement>(null)
@@ -33,7 +29,7 @@ export function ChatContainer({ onModuleClick }: Props) {
     <div className="flex-1 overflow-y-auto">
       <div className="max-w-3xl mx-auto px-4 py-8 flex flex-col gap-6">
         {messages.length === 0 && (
-          <WelcomeMessage onModuleClick={onModuleClick}/>
+          <WelcomeMessage/>
         )}
         {messages.map(msg => (
           <MessageBubble
