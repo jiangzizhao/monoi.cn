@@ -1,24 +1,20 @@
-const API = import.meta.env.VITE_API_URL || ''
-
-export async function register(username: string, email: string, password: string) {
-  const res = await fetch(`${API}/api/register`, {
+async function proxyRequest(path: string, body: object) {
+  const res = await fetch(`/api/proxy?path=${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, email, password }),
+    body: JSON.stringify(body),
   })
   const data = await res.json()
-  if (!res.ok) throw new Error(data.detail || '注册失败')
+  if (!res.ok) throw new Error(data.detail || data.error || '请求失败')
   return data
 }
 
+export async function register(username: string, email: string, password: string) {
+  return proxyRequest('/api/register', { username, email, password })
+}
+
 export async function login(email: string, password: string) {
-  const res = await fetch(`${API}/api/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
-  })
-  const data = await res.json()
-  if (!res.ok) throw new Error(data.detail || '登录失败')
+  const data = await proxyRequest('/api/login', { email, password })
   localStorage.setItem('monoi_token', data.token)
   localStorage.setItem('monoi_username', data.username)
   return data
