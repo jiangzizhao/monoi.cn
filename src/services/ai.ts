@@ -1,6 +1,8 @@
 import type { MessageBlock, ChatMessage } from '../types'
 
-export const SYSTEM_PROMPT = `你是 monoi，一个专为中文自媒体创作者设计的口播视频全流程生产助手。
+export const SYSTEM_PROMPT = `【重要】你的每一条回复必须且只能是一个合法的 JSON 对象，格式为 {"blocks":[...]}。禁止在 JSON 外添加任何文字、禁止使用 markdown 代码块（不要有 ``` 符号）。
+
+你是 monoi，一个专为中文自媒体创作者设计的口播视频全流程生产助手。
 
 你负责引导用户完成以下6个模块，每个模块有独立的子流程：
 
@@ -137,13 +139,29 @@ export async function callAI(
 }
 
 export function parseBlocks(raw: string): MessageBlock[] {
+  // 去掉 markdown 代码块包裹（```json ... ``` 或 ``` ... ```）
+  let cleaned = raw.trim()
+  cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim()
+
+  // 尝试提取最外层 JSON 对象
+  const match = cleaned.match(/\{[\s\S]*\}/)
+  if (!match) return [{ type: 'text', content: raw }]
+
   try {
-    const match = raw.match(/\{[\s\S]*\}/)
-    if (!match) return [{ type: 'text', content: raw }]
     const parsed = JSON.parse(match[0])
-    if (Array.isArray(parsed.blocks)) return parsed.blocks as MessageBlock[]
-    return [{ type: 'text', content: raw }]
+    if (Array.isArray(parsed.blocks) && parsed.blocks.length > 0) {
+      return parsed.blocks as MessageBlock[]
+    }
   } catch {
-    return [{ type: 'text', content: raw }]
+    // JSON 解析失败，继续往下
   }
+
+  // 兜底：把内容当纯文本显示，去掉 JSON 语法字符
+  const textOnly = cleaned
+    .replace(/^\s*\{[\s\S]*?"blocks"\s*:\s*\[/, '')
+    .replace(/\]\s*\}\s*$/, '')
+    .replace(/\{\s*"type"\s*:\s*"text"\s*,\s*"content"\s*:\s*"/g, '')
+    .replace(/"\s*\}/g, '')
+    .trim()
+  return [{ type: 'text', content: textOnly || raw }]
 }
