@@ -61,6 +61,8 @@ def register(req: RegisterRequest):
         raise HTTPException(400, "用户名至少2个字符")
     if len(req.password) < 6:
         raise HTTPException(400, "密码至少6位")
+    if len(req.password.encode()) > 72:
+        raise HTTPException(400, "密码不能超过72个字符")
     conn = get_db()
     try:
         hashed = pwd_context.hash(req.password)
