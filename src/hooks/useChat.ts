@@ -37,7 +37,8 @@ export function useChat() {
       const messages = [...conv.messages, userMsg]
       await callAI(messages, (chunk) => {
         rawText += chunk
-        store.updateLastAssistantBlocks(convId, [{ type: 'text', content: rawText, streaming: true }])
+        // 流式阶段只显示加载动画，不展示原始 JSON
+        store.updateLastAssistantBlocks(convId, [{ type: 'loading', label: 'AI 正在生成...' }])
       }, ctrl.signal)
 
       const rawBlocks = parseBlocks(rawText) as any[]
