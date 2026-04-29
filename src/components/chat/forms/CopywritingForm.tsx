@@ -10,156 +10,192 @@ const LENGTHS = [
   { label: '不限', desc: '自由发挥' },
 ]
 
+interface Answers {
+  platform?: string
+  style?: string
+  length?: string
+  industry?: string
+  audience?: string
+  url?: string
+}
+
 interface Props {
   mode: 'original' | 'rewrite'
   onSubmit: (message: string) => void
   onClose: () => void
 }
 
+// 原创步骤顺序
+const ORIGINAL_STEPS = ['platform', 'style', 'length', 'industry', 'audience']
+// 仿写步骤顺序
+const REWRITE_STEPS = ['url', 'platform', 'style', 'length']
+
 export function CopywritingForm({ mode, onSubmit, onClose }: Props) {
-  const [industry, setIndustry] = useState('')
-  const [audience, setAudience] = useState('')
-  const [url, setUrl] = useState('')
+  const [step, setStep] = useState(0)
+  const [answers, setAnswers] = useState<Answers>({})
+  const [inputVal, setInputVal] = useState('')
   const [fetching, setFetching] = useState(false)
   const [fetchError, setFetchError] = useState('')
-  const [platform, setPlatform] = useState('抖音')
-  const [style, setStyle] = useState('案例启发型')
-  const [length, setLength] = useState('不限')
 
-  const handleSubmit = async () => {
-    if (mode === 'original') {
-      if (!industry.trim()) return
-      onSubmit(`【原创文案】行业：${industry}，目标用户：${audience || '通用'}，平台：${platform}，风格：${style}，字数：${length}`)
+  const steps = mode === 'original' ? ORIGINAL_STEPS : REWRITE_STEPS
+  const currentStep = steps[step]
+  const isLastStep = step === steps.length - 1
+
+  const next = (key: string, value: string) => {
+    const newAnswers = { ...answers, [key]: value }
+    setAnswers(newAnswers)
+    setInputVal('')
+
+    if (isLastStep) {
+      handleSubmit(newAnswers)
     } else {
-      if (!url.trim()) return
+      setStep(s => s + 1)
+    }
+  }
+
+  const handleTextNext = async () => {
+    if (!inputVal.trim()) return
+
+    if (currentStep === 'url') {
       setFetching(true)
       setFetchError('')
       try {
         const res = await fetch('/api/fetch-content', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url }),
+          body: JSON.stringify({ url: inputVal.trim() }),
         })
         const data = await res.json()
         if (!res.ok) throw new Error(data.error || '抓取失败')
-        onSubmit(`【仿写文案】平台：${platform}，风格：${style}，字数：${length}\n\n参考原文：\n${data.content}`)
+        next('url', data.content)
       } catch (e: any) {
         setFetchError(e.message)
       } finally {
         setFetching(false)
       }
+    } else {
+      next(currentStep, inputVal.trim())
     }
   }
 
-  const isValid = mode === 'original' ? industry.trim().length > 0 : url.trim().length > 0
+  const handleSubmit = (finalAnswers: Answers) => {
+    if (mode === 'original') {
+      onSubmit(`【原创文案】平台：${finalAnswers.platform}，风格：${finalAnswers.style}，字数：${finalAnswers.length}，行业：${finalAnswers.industry}，目标用户：${finalAnswers.audience || '通用'}`)
+    } else {
+      onSubmit(`【仿写文案】平台：${finalAnswers.platform}，风格：${finalAnswers.style}，字数：${finalAnswers.length}\n\n参考原文：\n${finalAnswers.url}`)
+    }
+  }
+
+  // 每个步骤的问题
+  const questions: Record<string, string> = {
+    platform: '发布到哪个平台？',
+    style:    '选择文案风格',
+    length:   '字数要求',
+    industry: '你的行业或赛道是？',
+    audience: '目标用户是谁？（可跳过）',
+    url:      '粘贴参考链接',
+  }
+
+  // 已选择的摘要
+  const summary = Object.entries(answers)
+    .map(([k, v]) => {
+      if (k === 'url') return '链接 ✓'
+      return v
+    })
+    .join(' · ')
+
+  const isTextStep = ['industry', 'audience', 'url'].includes(currentStep)
 
   return (
     <>
-      {/* 点空白关闭 */}
       <div className="fixed inset-0 z-10" onClick={onClose}/>
-
       <div className="absolute bottom-full left-0 right-0 mb-2 z-20 bg-[var(--bg-card)] border border-[var(--border)] rounded-xl shadow-2xl overflow-hidden">
 
-        {/* 标题 */}
-        <div className="px-4 py-2.5 border-b border-[var(--border)]">
-          <span className="text-xs text-[var(--text-3)]">
-            {mode === 'original' ? '原创文案' : '仿写文案'} · 填写信息
-          </span>
+        {/* 进度 + 已选摘要 */}
+        <div className="px-4 py-2.5 border-b border-[var(--border)] flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            {steps.map((_, i) => (
+              <div key={i} className={`w-1.5 h-1.5 rounded-full transition-all ${i <= step ? 'bg-[var(--text)]' : 'bg-[var(--border)]'}`}/>
+            ))}
+          </div>
+          {summary && <span className="text-xs text-[var(--text-3)] truncate ml-3">{summary}</span>}
         </div>
 
-        <div className="p-4 flex flex-col gap-3">
+        {/* 当前问题 */}
+        <div className="px-4 pt-3 pb-1">
+          <p className="text-sm text-[var(--text)]">{questions[currentStep]}</p>
+        </div>
 
-          {/* 原创：行业 + 用户 */}
-          {mode === 'original' && (
-            <div className="flex gap-2">
-              <input
-                value={industry} onChange={e => setIndustry(e.target.value)}
-                placeholder="行业 / 赛道 *（如：美容院）"
-                className="flex-1 bg-[var(--bg-input)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-[var(--text)] placeholder:text-[var(--text-3)] focus:outline-none focus:border-[var(--text-3)] transition-colors"
-              />
-              <input
-                value={audience} onChange={e => setAudience(e.target.value)}
-                placeholder="目标用户（如：宝妈）"
-                className="flex-1 bg-[var(--bg-input)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-[var(--text)] placeholder:text-[var(--text-3)] focus:outline-none focus:border-[var(--text-3)] transition-colors"
-              />
-            </div>
-          )}
-
-          {/* 仿写：链接 */}
-          {mode === 'rewrite' && (
-            <div className="flex flex-col gap-1">
-              <input
-                value={url} onChange={e => { setUrl(e.target.value); setFetchError('') }}
-                placeholder="粘贴文章或视频链接..."
-                className="w-full bg-[var(--bg-input)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-[var(--text)] placeholder:text-[var(--text-3)] focus:outline-none focus:border-[var(--text-3)] transition-colors"
-              />
-              {fetchError && <p className="text-xs text-red-400 px-1">{fetchError}</p>}
-            </div>
-          )}
-
-          {/* 平台 */}
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-[var(--text-3)] flex-shrink-0 w-8">平台</span>
-            <div className="flex flex-wrap gap-1.5">
+        {/* 选项 or 输入框 */}
+        <div className="px-4 pb-4 pt-2">
+          {currentStep === 'platform' && (
+            <div className="flex flex-wrap gap-2">
               {PLATFORMS.map(p => (
-                <button key={p} onClick={() => setPlatform(p)}
-                  className={`px-2.5 py-1 rounded-lg text-xs border transition-all cursor-pointer ${
-                    platform === p
-                      ? 'bg-[var(--text)] text-[var(--bg)] border-[var(--text)]'
-                      : 'text-[var(--text-2)] border-[var(--border)] hover:border-[var(--text-3)]'
-                  }`}>
+                <button key={p} onClick={() => next('platform', p)}
+                  className="px-3 py-1.5 rounded-lg text-sm border border-[var(--border)] text-[var(--text-2)] hover:bg-[var(--text)] hover:text-[var(--bg)] hover:border-[var(--text)] transition-all cursor-pointer">
                   {p}
                 </button>
               ))}
             </div>
-          </div>
+          )}
 
-          {/* 风格 */}
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-[var(--text-3)] flex-shrink-0 w-8">风格</span>
-            <div className="flex flex-wrap gap-1.5">
+          {currentStep === 'style' && (
+            <div className="flex flex-wrap gap-2">
               {STYLES.map(s => (
-                <button key={s} onClick={() => setStyle(s)}
-                  className={`px-2.5 py-1 rounded-lg text-xs border transition-all cursor-pointer ${
-                    style === s
-                      ? 'bg-[var(--text)] text-[var(--bg)] border-[var(--text)]'
-                      : 'text-[var(--text-2)] border-[var(--border)] hover:border-[var(--text-3)]'
-                  }`}>
+                <button key={s} onClick={() => next('style', s)}
+                  className="px-3 py-1.5 rounded-lg text-sm border border-[var(--border)] text-[var(--text-2)] hover:bg-[var(--text)] hover:text-[var(--bg)] hover:border-[var(--text)] transition-all cursor-pointer">
                   {s}
                 </button>
               ))}
             </div>
-          </div>
+          )}
 
-          {/* 字数 */}
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-[var(--text-3)] flex-shrink-0 w-8">字数</span>
-            <div className="flex gap-1.5">
+          {currentStep === 'length' && (
+            <div className="flex gap-2">
               {LENGTHS.map(l => (
-                <button key={l.label} onClick={() => setLength(l.label)}
-                  className={`px-2.5 py-1 rounded-lg text-xs border transition-all cursor-pointer ${
-                    length === l.label
-                      ? 'bg-[var(--text)] text-[var(--bg)] border-[var(--text)]'
-                      : 'text-[var(--text-2)] border-[var(--border)] hover:border-[var(--text-3)]'
-                  }`}>
-                  {l.label}
-                  <span className={`ml-1 ${length === l.label ? 'opacity-60' : 'text-[var(--text-3)]'}`}>
-                    {l.desc}
-                  </span>
+                <button key={l.label} onClick={() => next('length', l.label)}
+                  className="flex-1 flex flex-col items-center py-2 rounded-lg border border-[var(--border)] text-[var(--text-2)] hover:bg-[var(--text)] hover:text-[var(--bg)] hover:border-[var(--text)] transition-all cursor-pointer group">
+                  <span className="text-sm font-medium">{l.label}</span>
+                  <span className="text-xs opacity-60">{l.desc}</span>
                 </button>
               ))}
             </div>
-          </div>
+          )}
 
-          {/* 提交 */}
-          <button
-            onClick={handleSubmit}
-            disabled={!isValid || fetching}
-            className="w-full py-2 bg-[var(--text)] text-[var(--bg)] rounded-lg text-sm font-medium hover:opacity-80 disabled:opacity-40 transition-all cursor-pointer flex items-center justify-center gap-2"
-          >
-            {fetching && <Loader2 size={13} className="animate-spin"/>}
-            {fetching ? '获取内容中...' : '开始生成'}
-          </button>
+          {isTextStep && (
+            <div className="flex flex-col gap-2">
+              <div className="flex gap-2">
+                <input
+                  autoFocus
+                  value={inputVal}
+                  onChange={e => { setInputVal(e.target.value); setFetchError('') }}
+                  onKeyDown={e => { if (e.key === 'Enter') handleTextNext() }}
+                  placeholder={
+                    currentStep === 'url' ? '粘贴链接，按回车确认...' :
+                    currentStep === 'industry' ? '例如：美容院、二手车、健身教练...' :
+                    '例如：25-35岁女性、创业者、宝妈...'
+                  }
+                  className="flex-1 bg-[var(--bg-input)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-[var(--text)] placeholder:text-[var(--text-3)] focus:outline-none focus:border-[var(--text-3)] transition-colors"
+                />
+                <button
+                  onClick={handleTextNext}
+                  disabled={fetching || (!inputVal.trim() && currentStep !== 'audience')}
+                  className="px-4 py-2 bg-[var(--text)] text-[var(--bg)] rounded-lg text-sm font-medium hover:opacity-80 disabled:opacity-40 transition-all cursor-pointer flex items-center gap-1.5"
+                >
+                  {fetching ? <Loader2 size={13} className="animate-spin"/> : null}
+                  {isLastStep ? '生成' : '下一步'}
+                </button>
+                {/* 目标用户可以跳过 */}
+                {currentStep === 'audience' && (
+                  <button onClick={() => next('audience', '通用用户')}
+                    className="px-3 py-2 text-sm text-[var(--text-3)] hover:text-[var(--text-2)] transition-colors cursor-pointer">
+                    跳过
+                  </button>
+                )}
+              </div>
+              {fetchError && <p className="text-xs text-red-400">{fetchError}</p>}
+            </div>
+          )}
         </div>
       </div>
     </>
