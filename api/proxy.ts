@@ -14,9 +14,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       headers: { 'Content-Type': 'application/json' },
       body: req.method !== 'GET' ? JSON.stringify(req.body) : undefined,
     })
-    const data = await upstream.json()
-    return res.status(upstream.status).json(data)
+    const text = await upstream.text()
+    try {
+      const data = JSON.parse(text)
+      return res.status(upstream.status).json(data)
+    } catch {
+      return res.status(502).json({ error: `后端返回非JSON响应 (${upstream.status}): ${text.slice(0, 200)}` })
+    }
   } catch (e: any) {
-    return res.status(500).json({ error: e.message })
+    return res.status(500).json({ error: `连接失败: ${e.message}` })
   }
 }
