@@ -7,6 +7,8 @@ import sqlite3
 import hashlib
 import os
 import binascii
+import tempfile
+import subprocess
 
 app = FastAPI()
 
@@ -107,6 +109,30 @@ def verify(payload: dict):
         return {"success": True, "username": data["username"], "user_id": data["sub"]}
     except JWTError:
         raise HTTPException(401, "无效或过期的token")
+
+class TranscribeRequest(BaseModel):
+    url: str
+
+@app.post("/api/transcribe")
+def transcribe(req: TranscribeRequest):
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            audio_path = os.path.join(tmpdir, "audio.mp3")
+            # 用 yt-dlp 下载音频
+            subprocess.run([
+                "yt-dlp", "-x", "--audio-format", "mp3",
+                "-o", audio_path, req.url
+            ], check=True, capture_output=True)
+
+            # 用 whisper 转录
+            import whisper
+            model = whisper.load_model("base")
+            result = model.transcribe(audio_path, language="zh")
+            return {"transcript": result["text"]}
+    except subprocess.CalledProcessError:
+        raise HTTPException(400, "视频下载失败，请检查链接是否有效")
+    except Exception as e:
+        raise HTTPException(500, f"转录失败: {str(e)}")
 
 @app.get("/api/health")
 def health():

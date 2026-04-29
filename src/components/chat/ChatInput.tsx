@@ -3,6 +3,7 @@ import { ArrowUp, FileText, Mic, Video, Film, Scissors, Image, Send, Download } 
 import type { LucideIcon } from 'lucide-react'
 import { useChatStore } from '../../store/chatStore'
 import { useChat } from '../../hooks/useChat'
+import { CopywritingForm } from './forms/CopywritingForm'
 
 const MODULES: { label: string; Icon: LucideIcon }[] = [
   { label: '文案',  Icon: FileText  },
@@ -17,8 +18,8 @@ const MODULES: { label: string; Icon: LucideIcon }[] = [
 
 const MODULE_OPTIONS: Record<string, { id: string; label: string; desc: string }[]> = {
   '文案': [
-    { id: '我想写一篇原创文案', label: '原创', desc: '从零写一篇新文案' },
-    { id: '我想仿写一篇爆款文案', label: '仿写', desc: '粘贴参考文案或链接改写' },
+    { id: '__form_original__', label: '原创', desc: '从零写一篇新文案' },
+    { id: '__form_rewrite__', label: '仿写', desc: '粘贴链接或视频改写' },
   ],
   '配音': [
     { id: '我想用预设音色配音', label: '预设音色', desc: '从音色库中选择' },
@@ -55,6 +56,7 @@ interface Props {
 
 export function ChatInput({ moduleMenu, onModuleClick, onModuleMenuClose }: Props) {
   const [text, setText] = useState('')
+  const [copyForm, setCopyForm] = useState<'original' | 'rewrite' | null>(null)
   const textRef = useRef<HTMLTextAreaElement>(null)
   const { isGenerating } = useChatStore()
   const { send, stop } = useChat()
@@ -77,7 +79,13 @@ export function ChatInput({ moduleMenu, onModuleClick, onModuleMenuClose }: Prop
 
   const pickModuleOption = (optId: string) => {
     onModuleMenuClose()
-    send(optId)
+    if (optId === '__form_original__') {
+      setCopyForm('original')
+    } else if (optId === '__form_rewrite__') {
+      setCopyForm('rewrite')
+    } else {
+      send(optId)
+    }
   }
 
   const handleModuleClick = (label: string) => {
@@ -103,6 +111,14 @@ export function ChatInput({ moduleMenu, onModuleClick, onModuleMenuClose }: Prop
   const hasText = text.trim().length > 0
 
   return (
+    <>
+    {copyForm && (
+      <CopywritingForm
+        mode={copyForm}
+        onSubmit={(msg) => { setCopyForm(null); send(msg) }}
+        onClose={() => setCopyForm(null)}
+      />
+    )}
     <div className="border-t border-[var(--border)] bg-[var(--bg-chat)] px-4 pt-3 pb-4">
       <div className="max-w-3xl mx-auto relative">
 
@@ -179,5 +195,6 @@ export function ChatInput({ moduleMenu, onModuleClick, onModuleMenuClose }: Prop
         </div>
       </div>
     </div>
+    </>
   )
 }
