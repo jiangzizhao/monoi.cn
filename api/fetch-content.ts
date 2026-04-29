@@ -1,13 +1,22 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 
+// 从文本中提取 URL
+function extractUrl(text: string): string {
+  const match = text.match(/https?:\/\/[^\s，。！？、]+/)
+  return match ? match[0] : text.trim()
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).end()
 
-  const { url } = req.body
-  if (!url) return res.status(400).json({ error: '缺少 url 参数' })
+  const { url: rawInput } = req.body
+  if (!rawInput) return res.status(400).json({ error: '缺少 url 参数' })
 
-  // 判断是否是视频链接，转给 Windows 服务器处理
-  const isVideo = /youtube\.com|youtu\.be|tiktok\.com|douyin\.com|bilibili\.com|v\.qq\.com/i.test(url)
+  // 从分享文本中提取真实 URL（兼容抖音分享文案格式）
+  const url = extractUrl(rawInput)
+
+  // 判断是否是视频链接 → 转给 Windows 服务器用 yt-dlp + Whisper 处理
+  const isVideo = /youtube\.com|youtu\.be|tiktok\.com|douyin\.com|v\.douyin\.com|bilibili\.com|v\.qq\.com|instagram\.com\/reel/i.test(url)
 
   if (isVideo) {
     const API_URL = process.env.API_URL || ''
@@ -17,6 +26,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url }),
+        signal: AbortSignal.timeout(120000), // 视频转录最多等2分钟
       })
       const data = await upstream.json()
       if (!upstream.ok) return res.status(upstream.status).json(data)
@@ -38,8 +48,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     })
 
     const html = await response.text()
-
-    // 提取正文：去掉 script/style/html 标签
     const text = html
       .replace(/<script[\s\S]*?<\/script>/gi, '')
       .replace(/<style[\s\S]*?<\/style>/gi, '')
@@ -51,7 +59,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .replace(/&quot;/g, '"')
       .replace(/\s{2,}/g, '\n')
       .trim()
-      .slice(0, 3000) // 最多取前3000字
+      .slice(0, 3000)
 
     if (!text || text.length < 50) {
       return res.status(422).json({ error: '无法提取页面内容，请直接粘贴原文' })
@@ -59,6 +67,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     return res.json({ content: text, source: 'webpage' })
   } catch (e: any) {
-    return res.status(500).json({ error: `页面抓取失败: ${e.message}，请直接粘贴原文` })
+    return res.status(500).json({ error: `页面抓取失败，请直接粘贴原文内容` })
   }
 }
