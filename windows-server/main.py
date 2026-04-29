@@ -1,11 +1,12 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from passlib.context import CryptContext
 from jose import jwt, JWTError
 from datetime import datetime, timedelta
 import sqlite3
+import hashlib
 import os
+import binascii
 
 app = FastAPI()
 
@@ -20,9 +21,22 @@ SECRET_KEY = "monoi-secret-key-2025"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_DAYS = 30
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# 用 Python 内置 hashlib，无需 bcrypt/passlib
+def hash_password(password: str) -> str:
+    salt = os.urandom(16)
+    key = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, 100000)
+    return binascii.hexlify(salt + key).decode()
 
-# 初始化数据库
+def verify_password(password: str, stored: str) -> bool:
+    try:
+        data = binascii.unhexlify(stored)
+        salt = data[:16]
+        key = data[16:]
+        new_key = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, 100000)
+        return key == new_key
+    except Exception:
+        return False
+
 def init_db():
     conn = sqlite3.connect("monoi.db")
     conn.execute("""
@@ -61,11 +75,9 @@ def register(req: RegisterRequest):
         raise HTTPException(400, "用户名至少2个字符")
     if len(req.password) < 6:
         raise HTTPException(400, "密码至少6位")
-    if len(req.password.encode()) > 72:
-        raise HTTPException(400, "密码不能超过72个字符")
     conn = get_db()
     try:
-        hashed = pwd_context.hash(req.password)
+        hashed = hash_password(req.password)
         conn.execute("INSERT INTO users (username, email, password) VALUES (?, ?, ?)",
                      (req.username, req.email, hashed))
         conn.commit()
@@ -81,7 +93,7 @@ def login(req: LoginRequest):
     try:
         row = conn.execute("SELECT id, username, password FROM users WHERE email = ?",
                            (req.email,)).fetchone()
-        if not row or not pwd_context.verify(req.password, row[2]):
+        if not row or not verify_password(req.password, row[2]):
             raise HTTPException(401, "邮箱或密码错误")
         token = create_token(row[0], row[1])
         return {"success": True, "token": token, "username": row[1]}
