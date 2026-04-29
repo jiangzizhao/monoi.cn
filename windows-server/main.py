@@ -110,29 +110,82 @@ def verify(payload: dict):
     except JWTError:
         raise HTTPException(401, "无效或过期的token")
 
-class TranscribeRequest(BaseModel):
+class FetchRequest(BaseModel):
     url: str
 
-@app.post("/api/transcribe")
-def transcribe(req: TranscribeRequest):
-    try:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            audio_path = os.path.join(tmpdir, "audio.mp3")
-            # 用 yt-dlp 下载音频
-            subprocess.run([
-                "yt-dlp", "-x", "--audio-format", "mp3",
-                "-o", audio_path, req.url
-            ], check=True, capture_output=True)
+def extract_url(text: str) -> str:
+    import re
+    match = re.search(r'https?://[^\s，。！？、]+', text)
+    return match.group(0) if match else text.strip()
 
-            # 用 whisper 转录
-            import whisper
-            model = whisper.load_model("base")
-            result = model.transcribe(audio_path, language="zh")
-            return {"transcript": result["text"]}
-    except subprocess.CalledProcessError:
-        raise HTTPException(400, "视频下载失败，请检查链接是否有效")
-    except Exception as e:
-        raise HTTPException(500, f"转录失败: {str(e)}")
+@app.post("/api/fetch")
+def fetch_content(req: FetchRequest):
+    """抓取链接内容：视频链接用 yt-dlp+Whisper 转录，网页链接直接抓正文"""
+    import re
+    url = extract_url(req.url)
+
+    is_video = bool(re.search(
+        r'youtube\.com|youtu\.be|tiktok\.com|douyin\.com|v\.douyin\.com|bilibili\.com|v\.qq\.com|instagram\.com/reel',
+        url, re.I
+    ))
+
+    if is_video:
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                audio_path = os.path.join(tmpdir, "audio.%(ext)s")
+                result = subprocess.run([
+                    "yt-dlp", "-x", "--audio-format", "mp3",
+                    "--audio-quality", "0",
+                    "-o", audio_path, url
+                ], capture_output=True, text=True, timeout=120)
+
+                if result.returncode != 0:
+                    raise HTTPException(400, f"视频下载失败: {result.stderr[:200]}")
+
+                # 找到实际输出文件
+                import glob
+                files = glob.glob(os.path.join(tmpdir, "audio.*"))
+                if not files:
+                    raise HTTPException(500, "音频文件未找到")
+
+                import whisper
+                model = whisper.load_model("base")
+                transcript = model.transcribe(files[0], language="zh")
+                return {"content": transcript["text"], "source": "video"}
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(500, f"转录失败: {str(e)}")
+    else:
+        # 网页抓取
+        try:
+            import urllib.request
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+                'Accept-Language': 'zh-CN,zh;q=0.9',
+            }
+            req_obj = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req_obj, timeout=15) as response:
+                html = response.read().decode('utf-8', errors='ignore')
+
+            # 去除标签提取正文
+            text = re.sub(r'<script[\s\S]*?</script>', '', html, flags=re.I)
+            text = re.sub(r'<style[\s\S]*?</style>', '', text, flags=re.I)
+            text = re.sub(r'<[^>]+>', ' ', text)
+            text = text.replace('&nbsp;', ' ').replace('&amp;', '&')
+            text = re.sub(r'\s{2,}', '\n', text).strip()[:3000]
+
+            if len(text) < 50:
+                raise HTTPException(422, "无法提取页面内容")
+            return {"content": text, "source": "webpage"}
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(500, f"页面抓取失败: {str(e)}")
+
+@app.post("/api/transcribe")
+def transcribe(req: FetchRequest):
+    return fetch_content(req)
 
 @app.get("/api/health")
 def health():
