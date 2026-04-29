@@ -22,18 +22,15 @@ export function WelcomeMessage({ onModuleClick }: { onModuleClick: (label: strin
             你好！我是 monoi，帮你完成口播视频的全流程制作。<br/>
             <span className="text-[var(--text-2)]">从哪个环节开始？</span>
           </p>
-          <div className="grid grid-cols-4 gap-2 w-full max-w-xl">
-            {MODULES.map(({ id, label, Icon, description }) => (
+          <div className="flex flex-wrap gap-2">
+            {MODULES.map(({ id, label, Icon }) => (
               <button
                 key={id}
                 onClick={() => onModuleClick(label)}
-                className="flex flex-col gap-2 px-3.5 py-3 rounded-xl bg-[var(--bg-card)] border border-[var(--border)] hover:border-[var(--text-3)] hover:bg-[var(--bg-hover)] transition-all duration-150 cursor-pointer text-left group"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border)] hover:border-[var(--text-3)] hover:bg-[var(--bg-hover)] transition-all duration-150 cursor-pointer group"
               >
-                <Icon size={16} className="text-[var(--text-3)] group-hover:text-[var(--text)] transition-colors" strokeWidth={1.8}/>
-                <div>
-                  <div className="text-sm font-medium text-[var(--text)]">{label}</div>
-                  <div className="text-xs text-[var(--text-3)] mt-0.5 leading-snug">{description}</div>
-                </div>
+                <Icon size={13} className="text-[var(--text-3)] group-hover:text-[var(--text)] transition-colors flex-shrink-0" strokeWidth={1.8}/>
+                <span className="text-sm text-[var(--text)]">{label}</span>
               </button>
             ))}
           </div>
