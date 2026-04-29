@@ -101,7 +101,7 @@ export function MessageBubble({ message, ...props }: Props) {
   if (isUser) {
     return (
       <div className="flex justify-end msg-enter">
-        <div className="max-w-[75%] px-4 py-2.5 rounded-2xl rounded-tr-sm bg-indigo-600/20 border border-indigo-500/20 text-sm text-[var(--text)]">
+        <div className="max-w-[75%] px-4 py-2.5 rounded-2xl rounded-tr-sm bg-[var(--bg-card)] border border-[var(--border)] text-sm text-[var(--text)]">
           {message.blocks.map((b, i) => b.type === 'text' ? <span key={i}>{b.content}</span> : null)}
         </div>
       </div>
@@ -110,7 +110,7 @@ export function MessageBubble({ message, ...props }: Props) {
 
   return (
     <div className="flex items-start gap-3 msg-enter">
-      <div className="w-8 h-8 rounded-xl bg-indigo-600 flex items-center justify-center text-white text-sm font-bold flex-shrink-0 mt-0.5">V</div>
+      <div className="w-8 h-8 rounded-xl bg-[var(--text)] flex items-center justify-center text-[var(--bg)] text-sm font-bold flex-shrink-0 mt-0.5">M</div>
       <div className="flex-1 min-w-0 flex flex-col gap-3">
         {message.blocks.map((block, i) => (
           <Block key={i} block={block} msgId={message.id} blockIdx={i} props={{ message, ...props }}/>
