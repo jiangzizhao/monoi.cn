@@ -112,15 +112,17 @@ export function ChatInput({ moduleMenu, onModuleClick, onModuleMenuClose }: Prop
 
   return (
     <>
-    {copyForm && (
-      <CopywritingForm
-        mode={copyForm}
-        onSubmit={(msg) => { setCopyForm(null); send(msg) }}
-        onClose={() => setCopyForm(null)}
-      />
-    )}
     <div className="border-t border-[var(--border)] bg-[var(--bg-chat)] px-4 pt-3 pb-4">
       <div className="max-w-3xl mx-auto relative">
+
+        {/* Copywriting form popup */}
+        {copyForm && (
+          <CopywritingForm
+            mode={copyForm}
+            onSubmit={(msg) => { setCopyForm(null); send(msg) }}
+            onClose={() => setCopyForm(null)}
+          />
+        )}
 
         {/* Module option popup */}
         {moduleMenu && options.length > 0 && (
