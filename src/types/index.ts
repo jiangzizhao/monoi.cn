@@ -7,6 +7,7 @@ export interface ChoiceOption {
 
 export interface ScriptResult {
   script: string
+  original?: string  // 仿写时的原文
   analysis?: string
   titles: { douyin: string; xiaohongshu: string; shipinhao: string }
   tags: string[]

@@ -14,9 +14,27 @@ const PLATFORM_LABEL: Record<string, string> = {
 export function ScriptCard({ data, onRegenerate, onFootage, onStoryboard }:
   { data: ScriptResult; onRegenerate?: () => void; onFootage?: () => void; onStoryboard?: () => void }) {
   const [showAnalysis, setShowAnalysis] = useState(false)
+  const [showOriginal, setShowOriginal] = useState(false)
 
   return (
     <div className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg-card)] overflow-hidden">
+
+      {/* 原文（仿写时显示） */}
+      {data.original && (
+        <div className="border-b border-[var(--border)]">
+          <button onClick={() => setShowOriginal(v => !v)}
+            className="flex items-center gap-1.5 w-full px-4 py-2.5 text-xs text-[var(--text-2)] hover:text-[var(--text)] transition-colors cursor-pointer">
+            <ChevronDown size={13} className={`transition-transform duration-200 ${showOriginal ? 'rotate-180' : ''}`}/>
+            参考原文
+          </button>
+          {showOriginal && (
+            <div className="px-4 pb-3 text-xs text-[var(--text-3)] leading-relaxed whitespace-pre-wrap border-t border-[var(--border)] pt-3">
+              {data.original}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Script body */}
       <div className="relative p-4">
         <div className="absolute top-3 right-3 flex items-center gap-1">
