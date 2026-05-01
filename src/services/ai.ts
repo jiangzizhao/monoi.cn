@@ -204,11 +204,26 @@ function decodeStringLiteral(value: string) {
   }
 }
 
+function extractStringArrayContent(value: string) {
+  const lines: string[] = []
+  const pattern = /"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|`([\s\S]*?)`/g
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(value))) {
+    const content = match[1] ?? match[2] ?? match[3] ?? ''
+    const decoded = decodeStringLiteral(content).trim()
+    if (decoded) lines.push(decoded)
+  }
+  return lines.join('\n')
+}
+
 function extractScriptLikeContent(text: string) {
   const patterns = [
     /["']script["']\s*:\s*"((?:\\.|[^"\\])*)"/,
     /["']script["']\s*:\s*'((?:\\.|[^'\\])*)'/,
     /["']script["']\s*:\s*`([\s\S]*?)`/,
+    /\bscript\s*:\s*"((?:\\.|[^"\\])*)"/,
+    /\bscript\s*:\s*'((?:\\.|[^'\\])*)'/,
+    /\bscript\s*:\s*`([\s\S]*?)`/,
     /(?:const|let|var)\s+\w*(?:script|copy|text|content|文案)\w*\s*=\s*`([\s\S]*?)`/i,
     /(?:const|let|var)\s+\w*(?:script|copy|text|content|文案)\w*\s*=\s*"((?:\\.|[^"\\])*)"/i,
     /(?:const|let|var)\s+\w*(?:script|copy|text|content|文案)\w*\s*=\s*'((?:\\.|[^'\\])*)'/i,
@@ -222,22 +237,47 @@ function extractScriptLikeContent(text: string) {
     if (match?.[1]?.trim()) return decodeStringLiteral(match[1].trim())
   }
 
+  const arrayPatterns = [
+    /["']script["']\s*:\s*\[([\s\S]*?)\]\s*(?:\.join\s*\([^)]*\))?/,
+    /\bscript\s*:\s*\[([\s\S]*?)\]\s*(?:\.join\s*\([^)]*\))?/,
+    /(?:const|let|var)\s+\w*(?:script|copy|text|content|文案)\w*\s*=\s*\[([\s\S]*?)\]\s*(?:\.join\s*\([^)]*\))?/i,
+    /return\s+\[([\s\S]*?)\]\s*(?:\.join\s*\([^)]*\))?/i,
+  ]
+  for (const pattern of arrayPatterns) {
+    const match = text.match(pattern)
+    if (match?.[1]?.trim()) {
+      const content = extractStringArrayContent(match[1])
+      if (content.trim()) return content
+    }
+  }
+
   return text
 }
 
 function stripCodeArtifactLines(text: string) {
   return text
     .split('\n')
+    .map((line) => {
+      const trimmed = line.trim()
+      const quoted = trimmed.match(/^["'`]([\s\S]*?)["'`]\s*,?$/)
+      return quoted ? decodeStringLiteral(quoted[1]) : line
+    })
     .filter((line) => {
       const trimmed = line.trim()
       if (!trimmed) return true
       if (/^(?:import|export|interface|type|function|const|let|var|return|if|else|try|catch)\b/.test(trimmed)) return false
+      if (/^(?:JSON\.|Object\.|Array\.|console\.|new\s+)/.test(trimmed)) return false
       if (/^(?:\{|\}|\[|\]|\),?|\};?|,\s*)$/.test(trimmed)) return false
       if (/^["']?(?:type|blocks|data|script|original|analysis|titles|tags|douyin|xiaohongshu|shipinhao)["']?\s*:/.test(trimmed)) return false
+      if (/^(?:\]\.join|\)\.join)/.test(trimmed)) return false
       if (/^(?:```|\/\/|\/\*|\*\/)/.test(trimmed)) return false
       return true
     })
     .join('\n')
+}
+
+function looksLikeCodeArtifact(text: string) {
+  return /```|["']?(?:blocks|script_card|type|data)["']?\s*:|(?:const|let|var|function|return)\b|JSON\.stringify|=>/.test(text)
 }
 
 export function cleanScriptText(raw: string) {
@@ -258,12 +298,22 @@ export function cleanScriptText(raw: string) {
     text = extractScriptLikeContent(text)
   }
 
-  return stripCodeArtifactLines(stripMarkdownFence(text))
+  const cleaned = stripCodeArtifactLines(stripMarkdownFence(text))
     .replace(/^\s*(?:最终文案|文案正文|口播文案)\s*[:：]\s*/i, '')
     .replace(/^\s*json\s*/i, '')
     .replace(/^\s*(?:const|let|var)\s+\w+\s*=\s*/i, '')
     .replace(/```/g, '')
     .trim()
+
+  if (looksLikeCodeArtifact(cleaned)) {
+    const lines = cleaned
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line && !looksLikeCodeArtifact(line))
+    if (lines.length > 0) return lines.join('\n')
+  }
+
+  return cleaned
 }
 
 export async function callScriptAI(
