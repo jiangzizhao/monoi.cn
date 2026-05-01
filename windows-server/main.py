@@ -120,12 +120,11 @@ def extract_url(text: str) -> str:
     return match.group(0) if match else text.strip()
 
 def download_video_playwright(url: str, tmpdir: str) -> tuple | None:
-    """用 Playwright 打开视频页，拦截 CDN 视频+音频地址"""
+    """用 Playwright 打开视频页，拦截 CDN 视频+音频地址，选最大的"""
     import re
     from playwright.sync_api import sync_playwright
 
-    video_url = None
-    audio_url = None
+    candidates = []  # (content_length, is_audio, url)
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -135,7 +134,6 @@ def download_video_playwright(url: str, tmpdir: str) -> tuple | None:
         page = context.new_page()
 
         def on_response(response):
-            nonlocal video_url, audio_url
             resp_url = response.url
             if re.search(r'\.(css|js|png|jpg|jpeg|gif|svg|woff|ico|json|xml)(\?|$)', resp_url, re.I):
                 return
@@ -143,17 +141,16 @@ def download_video_playwright(url: str, tmpdir: str) -> tuple | None:
                 return
             content_type = response.headers.get("content-type", "")
             content_length = int(response.headers.get("content-length", "0"))
+            if content_length < 10000:
+                return
 
             is_audio = "audio" in content_type or re.search(r'\.(m4a|aac|mp3|opus)(\?|$)', resp_url, re.I)
             is_video = ("video" in content_type or "octet-stream" in content_type or
-                        re.search(r'(douyinvod|bytecdn|\.mp4)([^a-z]|$)', resp_url, re.I))
+                        re.search(r'(douyinvod|bytecdn|\.mp4)', resp_url, re.I))
 
-            if is_audio and not audio_url and content_length > 10000:
-                print(f"[playwright] audio: {resp_url[:120]}")
-                audio_url = resp_url
-            elif is_video and not video_url and content_length > 100000:
-                print(f"[playwright] video: {resp_url[:120]}")
-                video_url = resp_url
+            if is_audio or is_video:
+                print(f"[playwright] {'audio' if is_audio else 'video'} {content_length//1024}KB: {resp_url[:100]}")
+                candidates.append((content_length, is_audio, resp_url))
 
         page.on("response", on_response)
 
@@ -162,14 +159,25 @@ def download_video_playwright(url: str, tmpdir: str) -> tuple | None:
         except Exception:
             pass
 
-        # 尝试点击视频触发播放
         try:
             page.click("video", timeout=3000)
         except Exception:
             pass
 
-        page.wait_for_timeout(8000)
+        page.wait_for_timeout(10000)
         browser.close()
+
+    if not candidates:
+        return None
+
+    # 选最大的音频和最大的视频
+    audio_candidates = [(cl, u) for cl, ia, u in candidates if ia]
+    video_candidates = [(cl, u) for cl, ia, u in candidates if not ia]
+
+    audio_url = max(audio_candidates, key=lambda x: x[0])[1] if audio_candidates else None
+    video_url = max(video_candidates, key=lambda x: x[0])[1] if video_candidates else None
+
+    print(f"[playwright] best video={video_url and video_url[:80]} audio={audio_url and audio_url[:80]}")
 
     if audio_url:
         return (video_url, audio_url)
