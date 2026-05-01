@@ -217,14 +217,19 @@ def fetch_content(req: FetchRequest):
     if is_douyin:
         try:
             with tempfile.TemporaryDirectory() as tmpdir:
+                print(f"[douyin] start playwright: {url}")
                 video_path = download_video_playwright(url, tmpdir)
+                print(f"[douyin] video_path={video_path}")
                 if not video_path:
                     raise HTTPException(422, "未能捕获视频地址，请稍后重试")
+                print(f"[douyin] start transcribe")
                 text = transcribe_video(video_path)
+                print(f"[douyin] done, length={len(text)}")
                 return {"content": text, "source": "video"}
         except HTTPException:
             raise
         except Exception as e:
+            print(f"[douyin error] {e}")
             raise HTTPException(500, f"转录失败: {str(e)}")
 
     # 其他视频平台 → yt-dlp
