@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Loader2 } from 'lucide-react'
+import { Loader2, AlertCircle } from 'lucide-react'
 
 const PLATFORMS = ['抖音', '视频号', '小红书', 'B站', 'YouTube', 'Reels']
 const STYLES = ['案例启发型', '避坑指南型', '反常认知型', '共鸣观点型', '问题解决型']
@@ -33,8 +33,7 @@ export function CopywritingForm({ mode, onSubmit, onClose }: Props) {
   const [answers, setAnswers] = useState<Answers>({})
   const [inputVal, setInputVal] = useState('')
   const [fetching, setFetching] = useState(false)
-  const [fetchFailed, setFetchFailed] = useState(false) // 抓取失败，切换到粘贴模式
-  const [pasteVal, setPasteVal] = useState('')
+  const [fetchError, setFetchError] = useState('')
 
   const steps = mode === 'original' ? ORIGINAL_STEPS : REWRITE_STEPS
   const currentStep = steps[step]
@@ -62,6 +61,7 @@ export function CopywritingForm({ mode, onSubmit, onClose }: Props) {
   const handleUrlNext = async () => {
     if (!inputVal.trim()) return
     setFetching(true)
+    setFetchError('')
     try {
       const res = await fetch('/api/fetch-content', {
         method: 'POST',
@@ -69,20 +69,13 @@ export function CopywritingForm({ mode, onSubmit, onClose }: Props) {
         body: JSON.stringify({ url: inputVal.trim() }),
       })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error)
+      if (!res.ok) throw new Error(data.error || '获取失败')
       next('url', data.content)
-    } catch {
-      // 抓取失败 → 切换到粘贴模式
-      setFetchFailed(true)
+    } catch (e: any) {
+      setFetchError(e.message || '链接内容获取失败，请换一个链接试试')
     } finally {
       setFetching(false)
     }
-  }
-
-  const handlePasteSubmit = () => {
-    if (!pasteVal.trim()) return
-    setFetchFailed(false)
-    next('url', pasteVal.trim())
   }
 
   const handleTextNext = () => {
@@ -164,39 +157,28 @@ export function CopywritingForm({ mode, onSubmit, onClose }: Props) {
           )}
 
           {/* 链接输入 */}
-          {currentStep === 'url' && !fetchFailed && (
-            <div className="flex gap-2">
-              <input
-                autoFocus
-                value={inputVal}
-                onChange={e => setInputVal(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') handleUrlNext() }}
-                placeholder="粘贴链接，按回车..."
-                className="flex-1 bg-[var(--bg-input)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-[var(--text)] placeholder:text-[var(--text-3)] focus:outline-none focus:border-[var(--text-3)] transition-colors"
-              />
-              <button onClick={handleUrlNext} disabled={fetching || !inputVal.trim()}
-                className="px-4 py-2 bg-[var(--text)] text-[var(--bg)] rounded-lg text-sm font-medium hover:opacity-80 disabled:opacity-40 cursor-pointer flex items-center gap-1.5">
-                {fetching ? <Loader2 size={13} className="animate-spin"/> : '确认'}
-              </button>
-            </div>
-          )}
-
-          {/* 抓取失败 → 粘贴模式 */}
-          {currentStep === 'url' && fetchFailed && (
+          {currentStep === 'url' && (
             <div className="flex flex-col gap-2">
-              <p className="text-xs text-[var(--text-3)]">链接内容无法自动获取，请直接粘贴原文：</p>
-              <textarea
-                autoFocus
-                value={pasteVal}
-                onChange={e => setPasteVal(e.target.value)}
-                placeholder="把原文案内容粘贴到这里..."
-                rows={5}
-                className="w-full bg-[var(--bg-input)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-[var(--text)] placeholder:text-[var(--text-3)] focus:outline-none focus:border-[var(--text-3)] transition-colors resize-none"
-              />
-              <button onClick={handlePasteSubmit} disabled={!pasteVal.trim()}
-                className="w-full py-2 bg-[var(--text)] text-[var(--bg)] rounded-lg text-sm font-medium hover:opacity-80 disabled:opacity-40 cursor-pointer">
-                下一步
-              </button>
+              <div className="flex gap-2">
+                <input
+                  autoFocus
+                  value={inputVal}
+                  onChange={e => { setInputVal(e.target.value); setFetchError('') }}
+                  onKeyDown={e => { if (e.key === 'Enter') handleUrlNext() }}
+                  placeholder="粘贴链接，按回车..."
+                  className={`flex-1 bg-[var(--bg-input)] border rounded-lg px-3 py-2 text-sm text-[var(--text)] placeholder:text-[var(--text-3)] focus:outline-none transition-colors ${fetchError ? 'border-red-500/60' : 'border-[var(--border)] focus:border-[var(--text-3)]'}`}
+                />
+                <button onClick={handleUrlNext} disabled={fetching || !inputVal.trim()}
+                  className="px-4 py-2 bg-[var(--text)] text-[var(--bg)] rounded-lg text-sm font-medium hover:opacity-80 disabled:opacity-40 cursor-pointer flex items-center gap-1.5">
+                  {fetching ? <Loader2 size={13} className="animate-spin"/> : '确认'}
+                </button>
+              </div>
+              {fetchError && (
+                <div className="flex items-center gap-1.5 text-xs text-red-400">
+                  <AlertCircle size={12}/>
+                  <span>{fetchError}</span>
+                </div>
+              )}
             </div>
           )}
 

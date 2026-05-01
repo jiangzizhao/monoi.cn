@@ -4,6 +4,7 @@ import type { LucideIcon } from 'lucide-react'
 import { useChatStore } from '../../store/chatStore'
 import { useChat } from '../../hooks/useChat'
 import { CopywritingForm } from './forms/CopywritingForm'
+import { VoiceForm } from './forms/VoiceForm'
 
 const MODULES: { label: string; Icon: LucideIcon }[] = [
   { label: '文案',  Icon: FileText  },
@@ -22,9 +23,9 @@ const MODULE_OPTIONS: Record<string, { id: string; label: string; desc: string }
     { id: '__form_rewrite__', label: '仿写', desc: '粘贴链接或视频改写' },
   ],
   '配音': [
-    { id: '我想用预设音色配音', label: '预设音色', desc: '从音色库中选择' },
-    { id: '我想上传已有录音', label: '上传录音', desc: '已录好的音频直接用' },
-    { id: '我想克隆我的声音', label: '克隆声音', desc: '上传样本复刻你的声音' },
+    { id: '__voice_preset__', label: '预设音色', desc: '从音色库中选择' },
+    { id: '__voice_upload__', label: '上传录音', desc: '已录好的音频直接用' },
+    { id: '__voice_clone__', label: '克隆声音', desc: '上传样本复刻你的声音' },
   ],
   '口播': [
     { id: '我想上传自己录制的口播视频', label: '自录上传', desc: '上传已录好的口播' },
@@ -57,6 +58,7 @@ interface Props {
 export function ChatInput({ moduleMenu, onModuleClick, onModuleMenuClose }: Props) {
   const [text, setText] = useState('')
   const [copyForm, setCopyForm] = useState<'original' | 'rewrite' | null>(null)
+  const [voiceForm, setVoiceForm] = useState<'preset' | 'upload' | 'clone' | null>(null)
   const textRef = useRef<HTMLTextAreaElement>(null)
   const { isGenerating } = useChatStore()
   const { send, stop } = useChat()
@@ -83,6 +85,12 @@ export function ChatInput({ moduleMenu, onModuleClick, onModuleMenuClose }: Prop
       setCopyForm('original')
     } else if (optId === '__form_rewrite__') {
       setCopyForm('rewrite')
+    } else if (optId === '__voice_preset__') {
+      setVoiceForm('preset')
+    } else if (optId === '__voice_upload__') {
+      setVoiceForm('upload')
+    } else if (optId === '__voice_clone__') {
+      setVoiceForm('clone')
     } else {
       send(optId)
     }
@@ -121,6 +129,13 @@ export function ChatInput({ moduleMenu, onModuleClick, onModuleMenuClose }: Prop
             mode={copyForm}
             onSubmit={(msg) => { setCopyForm(null); send(msg) }}
             onClose={() => setCopyForm(null)}
+          />
+        )}
+        {voiceForm && (
+          <VoiceForm
+            mode={voiceForm}
+            onSubmit={(msg) => { setVoiceForm(null); send(msg) }}
+            onClose={() => setVoiceForm(null)}
           />
         )}
 
