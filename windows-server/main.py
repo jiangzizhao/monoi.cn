@@ -139,10 +139,15 @@ def download_video_playwright(url: str, tmpdir: str) -> str | None:
             if video_url:
                 return
             resp_url = response.url
-            # 抖音视频 CDN 特征
-            if re.search(r'(douyinvod|bytecdn|bytegoodscdn|douyinstatic|douyin\.com.*\.mp4)', resp_url, re.I):
-                if response.status == 200 or response.status == 206:
-                    video_url = resp_url
+            # 必须是视频文件，排除 css/js/图片等静态资源
+            if re.search(r'\.(css|js|png|jpg|jpeg|gif|svg|woff|ico)(\?|$)', resp_url, re.I):
+                return
+            content_type = response.headers.get("content-type", "")
+            is_video_ct = "video" in content_type or "octet-stream" in content_type
+            is_video_url = re.search(r'(douyinvod|v\d+-[a-z]+\.douyinvod|bytecdn|snssdk.*video|aweme.*video|\.mp4)', resp_url, re.I)
+            if (is_video_ct or is_video_url) and (response.status == 200 or response.status == 206):
+                print(f"[playwright] captured: {resp_url[:100]} ct={content_type[:30]}")
+                video_url = resp_url
 
         page.on("response", on_response)
 
