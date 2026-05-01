@@ -1,5 +1,6 @@
 from __future__ import annotations
-from fastapi import FastAPI, HTTPException
+from typing import Optional
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from jose import jwt, JWTError
@@ -177,31 +178,31 @@ class LoginRequest(BaseModel):
     password: str
 
 class VoiceAssetCreateRequest(BaseModel):
-    user_id: int | None = None
+    user_id: Optional[int] = None
     asset_name: str
     source_type: str
-    file_name: str | None = None
-    file_path: str | None = None
-    duration_seconds: float | None = 0
-    sample_rate: int | None = None
-    transcript: str | None = None
-    note: str | None = None
+    file_name: Optional[str] = None
+    file_path: Optional[str] = None
+    duration_seconds: Optional[float] = 0
+    sample_rate: Optional[int] = None
+    transcript: Optional[str] = None
+    note: Optional[str] = None
 
 class VoiceCloneCreateRequest(BaseModel):
-    user_id: int | None = None
+    user_id: Optional[int] = None
     clone_name: str
     source_asset_id: int
-    accent: str | None = None
-    emotion_hint: str | None = None
-    sample_text: str | None = None
+    accent: Optional[str] = None
+    emotion_hint: Optional[str] = None
+    sample_text: Optional[str] = None
 
 class VoiceSynthesizeRequest(BaseModel):
     text: str
-    preset_key: str | None = None
-    clone_id: int | None = None
-    speed: str | None = None
-    emotion: str | None = None
-    output_name: str | None = None
+    preset_key: Optional[str] = None
+    clone_id: Optional[int] = None
+    speed: Optional[str] = None
+    emotion: Optional[str] = None
+    output_name: Optional[str] = None
 
 def get_db():
     return sqlite3.connect("monoi.db")
@@ -611,7 +612,7 @@ def create_voice_asset(req: VoiceAssetCreateRequest):
         conn.close()
 
 @app.get("/api/voice/assets")
-def list_voice_assets(user_id: int | None = None):
+def list_voice_assets(user_id: Optional[int] = None):
     conn = get_db()
     conn.row_factory = sqlite3.Row
     try:
@@ -650,7 +651,7 @@ def create_voice_clone(req: VoiceCloneCreateRequest):
         conn.close()
 
 @app.get("/api/voice/clones")
-def list_voice_clones(user_id: int | None = None):
+def list_voice_clones(user_id: Optional[int] = None):
     conn = get_db()
     conn.row_factory = sqlite3.Row
     try:
