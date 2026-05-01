@@ -110,6 +110,20 @@ export function isScriptPrompt(text: string) {
   return text.startsWith('【原创文案】') || text.startsWith('【仿写文案】')
 }
 
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function fetchWithRetry(input: RequestInfo | URL, init: RequestInit, retries = 2): Promise<Response> {
+  try {
+    return await fetch(input, init)
+  } catch (error) {
+    if (init.signal?.aborted || retries <= 0) throw error
+    await wait((3 - retries) * 800)
+    return fetchWithRetry(input, init, retries - 1)
+  }
+}
+
 function toAPIMessages(msgs: ChatMessage[]): AIMessage[] {
   const textMsgs = msgs.slice(-20).flatMap((m) =>
     m.blocks
@@ -133,7 +147,7 @@ export async function callAI(
   onChunk: (text: string) => void,
   signal?: AbortSignal
 ): Promise<string> {
-  const res = await fetch('/api/chat', {
+  const res = await fetchWithRetry('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ system: SYSTEM_PROMPT, messages: toAPIMessages(messages), stream: true }),
@@ -322,7 +336,7 @@ export async function callScriptAI(
   signal?: AbortSignal
 ): Promise<string> {
   const mode = prompt.startsWith('【仿写文案】') ? 'rewrite' : 'original'
-  const res = await fetch('/api/chat', {
+  const res = await fetchWithRetry('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
