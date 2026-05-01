@@ -127,9 +127,13 @@ def download_video_playwright(url: str, tmpdir: str) -> tuple | None:
     candidates = []  # (content_length, is_audio, url)
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(
+            headless=True,
+            args=["--autoplay-policy=no-user-gesture-required", "--disable-web-security"]
+        )
         context = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            permissions=["autoplay"],
         )
         page = context.new_page()
 
@@ -159,12 +163,17 @@ def download_video_playwright(url: str, tmpdir: str) -> tuple | None:
         except Exception:
             pass
 
+        # 强制触发视频播放
+        try:
+            page.evaluate("document.querySelectorAll('video').forEach(v => { v.muted=false; v.play(); })")
+        except Exception:
+            pass
         try:
             page.click("video", timeout=3000)
         except Exception:
             pass
 
-        page.wait_for_timeout(10000)
+        page.wait_for_timeout(12000)
         browser.close()
 
     if not candidates:
