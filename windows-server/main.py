@@ -1,3 +1,4 @@
+from __future__ import annotations
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -118,17 +119,115 @@ def extract_url(text: str) -> str:
     match = re.search(r'https?://[^\s，。！？、]+', text)
     return match.group(0) if match else text.strip()
 
+def download_video_playwright(url: str, tmpdir: str) -> str | None:
+    """用 Playwright 打开视频页，拦截 CDN 视频地址后下载"""
+    import re
+    import urllib.request
+    from playwright.sync_api import sync_playwright
+
+    video_url = None
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
+        page = context.new_page()
+
+        def on_response(response):
+            nonlocal video_url
+            if video_url:
+                return
+            resp_url = response.url
+            # 抖音视频 CDN 特征
+            if re.search(r'(douyinvod|bytecdn|bytegoodscdn|douyinstatic|douyin\.com.*\.mp4)', resp_url, re.I):
+                if response.status == 200 or response.status == 206:
+                    video_url = resp_url
+
+        page.on("response", on_response)
+
+        try:
+            page.goto(url, wait_until="networkidle", timeout=30000)
+            page.wait_for_timeout(5000)
+        except Exception:
+            pass
+
+        browser.close()
+
+    if not video_url:
+        return None
+
+    # 下载视频文件
+    video_path = os.path.join(tmpdir, "video.mp4")
+    req_obj = urllib.request.Request(video_url, headers={
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+        "Referer": "https://www.douyin.com/",
+    })
+    with urllib.request.urlopen(req_obj, timeout=120) as resp:
+        with open(video_path, "wb") as f:
+            f.write(resp.read())
+
+    return video_path
+
+
+def transcribe_video(video_path: str) -> str:
+    """ffmpeg 提取音频 + Whisper 转录"""
+    import glob
+    import shutil
+
+    # 优先用系统 ffmpeg，找不到就用 Playwright 自带的
+    ffmpeg_bin = shutil.which("ffmpeg")
+    if not ffmpeg_bin:
+        candidate = os.path.join(
+            os.environ.get("LOCALAPPDATA", ""),
+            "ms-playwright", "ffmpeg-1011", "ffmpeg-win64", "ffmpeg.exe"
+        )
+        if os.path.exists(candidate):
+            ffmpeg_bin = candidate
+    if not ffmpeg_bin:
+        raise Exception("找不到 ffmpeg，请安装 ffmpeg 或确认 Playwright 已安装")
+
+    audio_path = video_path.replace(".mp4", ".mp3")
+    result = subprocess.run([
+        ffmpeg_bin, "-i", video_path, "-vn", "-acodec", "mp3", audio_path, "-y"
+    ], capture_output=True, timeout=120)
+    if result.returncode != 0:
+        err = result.stderr.decode(errors='ignore')
+        print(f"[ffmpeg error] {err}")
+        raise Exception(f"ffmpeg 提取音频失败: {err[:200]}")
+    import whisper
+    model = whisper.load_model("base")
+    transcript = model.transcribe(audio_path, language="zh")
+    return transcript["text"]
+
+
 @app.post("/api/fetch")
 def fetch_content(req: FetchRequest):
-    """抓取链接内容：视频链接用 yt-dlp+Whisper 转录，网页链接直接抓正文"""
+    """抓取链接内容：视频链接用 Playwright+Whisper 转录，网页链接直接抓正文"""
     import re
     url = extract_url(req.url)
 
+    is_douyin = bool(re.search(r'douyin\.com|v\.douyin\.com', url, re.I))
     is_video = bool(re.search(
-        r'youtube\.com|youtu\.be|tiktok\.com|douyin\.com|v\.douyin\.com|bilibili\.com|v\.qq\.com|instagram\.com/reel',
+        r'youtube\.com|youtu\.be|tiktok\.com|bilibili\.com|v\.qq\.com|instagram\.com/reel',
         url, re.I
     ))
 
+    # 抖音 → Playwright 拦截 CDN 地址
+    if is_douyin:
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                video_path = download_video_playwright(url, tmpdir)
+                if not video_path:
+                    raise HTTPException(422, "未能捕获视频地址，请稍后重试")
+                text = transcribe_video(video_path)
+                return {"content": text, "source": "video"}
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(500, f"转录失败: {str(e)}")
+
+    # 其他视频平台 → yt-dlp
     if is_video:
         try:
             with tempfile.TemporaryDirectory() as tmpdir:
@@ -142,7 +241,6 @@ def fetch_content(req: FetchRequest):
                 if result.returncode != 0:
                     raise HTTPException(400, f"视频下载失败: {result.stderr[:200]}")
 
-                # 找到实际输出文件
                 import glob
                 files = glob.glob(os.path.join(tmpdir, "audio.*"))
                 if not files:
