@@ -154,43 +154,25 @@ def download_video_playwright(url: str, tmpdir: str) -> str | None:
 
         browser.close()
 
-    if not video_url:
-        return None
-
-    # 下载视频文件
-    video_path = os.path.join(tmpdir, "video.mp4")
-    req_obj = urllib.request.Request(video_url, headers={
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
-        "Referer": "https://www.douyin.com/",
-    })
-    with urllib.request.urlopen(req_obj, timeout=120) as resp:
-        with open(video_path, "wb") as f:
-            f.write(resp.read())
-
-    return video_path
+    return video_url
 
 
-def transcribe_video(video_path: str) -> str:
-    """ffmpeg 提取音频 + Whisper 转录"""
-    import glob
+def transcribe_video(video_url: str, tmpdir: str) -> str:
+    """ffmpeg 直接从 CDN URL 提取音频 + Whisper 转录"""
     import shutil
 
-    # 优先用系统 ffmpeg，找不到就用 Playwright 自带的
     ffmpeg_bin = shutil.which("ffmpeg")
     if not ffmpeg_bin:
-        candidate = os.path.join(
-            os.environ.get("LOCALAPPDATA", ""),
-            "ms-playwright", "ffmpeg-1011", "ffmpeg-win64", "ffmpeg.exe"
-        )
-        if os.path.exists(candidate):
-            ffmpeg_bin = candidate
-    if not ffmpeg_bin:
-        raise Exception("找不到 ffmpeg，请安装 ffmpeg 或确认 Playwright 已安装")
+        raise Exception("找不到 ffmpeg")
 
-    audio_path = video_path.replace(".mp4", ".mp3")
+    audio_path = os.path.join(tmpdir, "audio.mp3")
     result = subprocess.run([
-        ffmpeg_bin, "-i", video_path, "-vn", "-acodec", "mp3", audio_path, "-y"
-    ], capture_output=True, timeout=120)
+        ffmpeg_bin,
+        "-user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+        "-headers", "Referer: https://www.douyin.com/\r\n",
+        "-i", video_url,
+        "-vn", "-acodec", "mp3", audio_path, "-y"
+    ], capture_output=True, timeout=180)
     if result.returncode != 0:
         err = result.stderr.decode(errors='ignore')
         print(f"[ffmpeg error] {err}")
@@ -219,11 +201,11 @@ def fetch_content(req: FetchRequest):
             with tempfile.TemporaryDirectory() as tmpdir:
                 print(f"[douyin] start playwright: {url}")
                 video_path = download_video_playwright(url, tmpdir)
-                print(f"[douyin] video_path={video_path}")
+                print(f"[douyin] video_url={video_path}")
                 if not video_path:
                     raise HTTPException(422, "未能捕获视频地址，请稍后重试")
                 print(f"[douyin] start transcribe")
-                text = transcribe_video(video_path)
+                text = transcribe_video(video_path, tmpdir)
                 print(f"[douyin] done, length={len(text)}")
                 return {"content": text, "source": "video"}
         except HTTPException:
