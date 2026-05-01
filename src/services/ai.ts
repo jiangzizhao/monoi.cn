@@ -192,6 +192,54 @@ function stripMarkdownFence(text: string) {
     .trim()
 }
 
+function decodeStringLiteral(value: string) {
+  try {
+    return JSON.parse(`"${value.replace(/"/g, '\\"')}"`)
+  } catch {
+    return value
+      .replace(/\\n/g, '\n')
+      .replace(/\\"/g, '"')
+      .replace(/\\'/g, "'")
+      .replace(/\\`/g, '`')
+  }
+}
+
+function extractScriptLikeContent(text: string) {
+  const patterns = [
+    /["']script["']\s*:\s*"((?:\\.|[^"\\])*)"/,
+    /["']script["']\s*:\s*'((?:\\.|[^'\\])*)'/,
+    /["']script["']\s*:\s*`([\s\S]*?)`/,
+    /(?:const|let|var)\s+\w*(?:script|copy|text|content|文案)\w*\s*=\s*`([\s\S]*?)`/i,
+    /(?:const|let|var)\s+\w*(?:script|copy|text|content|文案)\w*\s*=\s*"((?:\\.|[^"\\])*)"/i,
+    /(?:const|let|var)\s+\w*(?:script|copy|text|content|文案)\w*\s*=\s*'((?:\\.|[^'\\])*)'/i,
+    /return\s+`([\s\S]*?)`/i,
+    /return\s+"((?:\\.|[^"\\])*)"/i,
+    /return\s+'((?:\\.|[^'\\])*)'/i,
+  ]
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern)
+    if (match?.[1]?.trim()) return decodeStringLiteral(match[1].trim())
+  }
+
+  return text
+}
+
+function stripCodeArtifactLines(text: string) {
+  return text
+    .split('\n')
+    .filter((line) => {
+      const trimmed = line.trim()
+      if (!trimmed) return true
+      if (/^(?:import|export|interface|type|function|const|let|var|return|if|else|try|catch)\b/.test(trimmed)) return false
+      if (/^(?:\{|\}|\[|\]|\),?|\};?|,\s*)$/.test(trimmed)) return false
+      if (/^["']?(?:type|blocks|data|script|original|analysis|titles|tags|douyin|xiaohongshu|shipinhao)["']?\s*:/.test(trimmed)) return false
+      if (/^(?:```|\/\/|\/\*|\*\/)/.test(trimmed)) return false
+      return true
+    })
+    .join('\n')
+}
+
 export function cleanScriptText(raw: string) {
   let text = stripMarkdownFence(raw)
 
@@ -207,20 +255,10 @@ export function cleanScriptText(raw: string) {
       text = parsed.data.script
     }
   } catch {
-    const scriptMatch =
-      text.match(/["']script["']\s*:\s*"((?:\\.|[^"\\])*)"/) ||
-      text.match(/["']script["']\s*:\s*'((?:\\.|[^'\\])*)'/) ||
-      text.match(/["']script["']\s*:\s*`([\s\S]*?)`/)
-    if (scriptMatch) {
-      try {
-        text = JSON.parse(`"${scriptMatch[1]}"`)
-      } catch {
-        text = scriptMatch[1]
-      }
-    }
+    text = extractScriptLikeContent(text)
   }
 
-  return stripMarkdownFence(text)
+  return stripCodeArtifactLines(stripMarkdownFence(text))
     .replace(/^\s*(?:最终文案|文案正文|口播文案)\s*[:：]\s*/i, '')
     .replace(/^\s*json\s*/i, '')
     .replace(/^\s*(?:const|let|var)\s+\w+\s*=\s*/i, '')
