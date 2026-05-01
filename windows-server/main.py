@@ -119,13 +119,13 @@ def extract_url(text: str) -> str:
     match = re.search(r'https?://[^\s，。！？、]+', text)
     return match.group(0) if match else text.strip()
 
-def download_video_playwright(url: str, tmpdir: str) -> str | None:
-    """用 Playwright 打开视频页，拦截 CDN 视频地址后下载"""
+def download_video_playwright(url: str, tmpdir: str) -> tuple | None:
+    """用 Playwright 打开视频页，拦截 CDN 视频+音频地址"""
     import re
-    import urllib.request
     from playwright.sync_api import sync_playwright
 
     video_url = None
+    audio_url = None
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -135,53 +135,79 @@ def download_video_playwright(url: str, tmpdir: str) -> str | None:
         page = context.new_page()
 
         def on_response(response):
-            nonlocal video_url
-            if video_url:
-                return
+            nonlocal video_url, audio_url
             resp_url = response.url
-            # 必须是视频文件，排除 css/js/图片等静态资源
-            if re.search(r'\.(css|js|png|jpg|jpeg|gif|svg|woff|ico)(\?|$)', resp_url, re.I):
+            if re.search(r'\.(css|js|png|jpg|jpeg|gif|svg|woff|ico|json|xml)(\?|$)', resp_url, re.I):
+                return
+            if response.status not in (200, 206):
                 return
             content_type = response.headers.get("content-type", "")
-            is_video_ct = "video" in content_type or "octet-stream" in content_type
-            is_video_url = re.search(r'(douyinvod|v\d+-[a-z]+\.douyinvod|bytecdn|snssdk.*video|aweme.*video|\.mp4)', resp_url, re.I)
-            if (is_video_ct or is_video_url) and (response.status == 200 or response.status == 206):
-                print(f"[playwright] captured: {resp_url[:100]} ct={content_type[:30]}")
+            content_length = int(response.headers.get("content-length", "0"))
+
+            is_audio = "audio" in content_type or re.search(r'\.(m4a|aac|mp3|opus)(\?|$)', resp_url, re.I)
+            is_video = ("video" in content_type or "octet-stream" in content_type or
+                        re.search(r'(douyinvod|bytecdn|\.mp4)([^a-z]|$)', resp_url, re.I))
+
+            if is_audio and not audio_url and content_length > 10000:
+                print(f"[playwright] audio: {resp_url[:120]}")
+                audio_url = resp_url
+            elif is_video and not video_url and content_length > 100000:
+                print(f"[playwright] video: {resp_url[:120]}")
                 video_url = resp_url
 
         page.on("response", on_response)
 
         try:
             page.goto(url, wait_until="networkidle", timeout=30000)
-            page.wait_for_timeout(5000)
         except Exception:
             pass
 
+        # 尝试点击视频触发播放
+        try:
+            page.click("video", timeout=3000)
+        except Exception:
+            pass
+
+        page.wait_for_timeout(8000)
         browser.close()
 
-    return video_url
+    if audio_url:
+        return (video_url, audio_url)
+    elif video_url:
+        return (video_url, None)
+    return None
 
 
-def transcribe_video(video_url: str, tmpdir: str) -> str:
-    """ffmpeg 直接从 CDN URL 提取音频 + Whisper 转录"""
+def transcribe_video(urls: tuple, tmpdir: str) -> str:
+    """ffmpeg 从 CDN URL 提取音频 + Whisper 转录"""
     import shutil
 
     ffmpeg_bin = shutil.which("ffmpeg")
     if not ffmpeg_bin:
         raise Exception("找不到 ffmpeg")
 
+    video_url, audio_url = urls
     audio_path = os.path.join(tmpdir, "audio.mp3")
-    result = subprocess.run([
-        ffmpeg_bin,
+    headers = [
         "-user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
         "-headers", "Referer: https://www.douyin.com/\r\n",
-        "-i", video_url,
-        "-vn", "-acodec", "mp3", audio_path, "-y"
-    ], capture_output=True, timeout=180)
+    ]
+
+    if audio_url:
+        # 有独立音频流，直接转录音频
+        print(f"[transcribe] using audio stream")
+        cmd = [ffmpeg_bin] + headers + ["-i", audio_url, "-acodec", "mp3", audio_path, "-y"]
+    else:
+        # 只有视频流，尝试提取音频
+        print(f"[transcribe] extracting from video stream")
+        cmd = [ffmpeg_bin] + headers + ["-i", video_url, "-vn", "-acodec", "mp3", audio_path, "-y"]
+
+    result = subprocess.run(cmd, capture_output=True, timeout=180)
     if result.returncode != 0:
         err = result.stderr.decode(errors='ignore')
-        print(f"[ffmpeg error] {err}")
-        raise Exception(f"ffmpeg 提取音频失败: {err[:200]}")
+        print(f"[ffmpeg error] {err[-500:]}")
+        raise Exception(f"ffmpeg 失败: {err[:200]}")
+
     import whisper
     model = whisper.load_model("base")
     transcript = model.transcribe(audio_path, language="zh")
@@ -206,7 +232,7 @@ def fetch_content(req: FetchRequest):
             with tempfile.TemporaryDirectory() as tmpdir:
                 print(f"[douyin] start playwright: {url}")
                 video_path = download_video_playwright(url, tmpdir)
-                print(f"[douyin] video_url={video_path}")
+                print(f"[douyin] urls={video_path}")
                 if not video_path:
                     raise HTTPException(422, "未能捕获视频地址，请稍后重试")
                 print(f"[douyin] start transcribe")
