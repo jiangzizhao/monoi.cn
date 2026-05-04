@@ -17,12 +17,32 @@ sys.path.insert(0, os.path.join(COSYVOICE_DIR, "third_party", "Matcha-TTS"))
 
 import torch
 import torchaudio
+import soundfile as sf
+import numpy as np
+import torchaudio.transforms as TAT
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from cosyvoice.cli.cosyvoice import CosyVoice2
-from cosyvoice.utils.file_utils import load_wav
+
+# Monkey-patch cosyvoice.utils.file_utils.load_wav 用 soundfile 直接读
+# 因为 PyTorch 2.10+ 的 torchaudio.load 改用 torchcodec，在 Windows 下装不上
+def _patched_load_wav(wav, target_sr):
+    speech, sample_rate = sf.read(wav, dtype="float32")
+    if speech.ndim > 1:
+        speech = speech.mean(axis=1)
+    speech_t = torch.from_numpy(speech).unsqueeze(0)
+    if sample_rate != target_sr:
+        resampler = TAT.Resample(orig_freq=sample_rate, new_freq=target_sr)
+        speech_t = resampler(speech_t)
+    return speech_t
+
+
+import cosyvoice.utils.file_utils as _file_utils  # noqa: E402
+_file_utils.load_wav = _patched_load_wav
+
+from cosyvoice.cli.cosyvoice import CosyVoice2  # noqa: E402
+from cosyvoice.utils.file_utils import load_wav  # noqa: E402
 
 app = FastAPI()
 
@@ -87,7 +107,8 @@ def synthesize(req: SynthesizeRequest):
 
     out_name = f"{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}.wav"
     out_path = os.path.join(OUTPUT_DIR, out_name)
-    torchaudio.save(out_path, audio, MODEL.sample_rate)
+    # 用 soundfile 保存（避免 torchaudio.save 走 torchcodec）
+    sf.write(out_path, audio.squeeze(0).cpu().numpy(), MODEL.sample_rate)
 
     return {"success": True, "file": out_name, "path": out_path, "duration_seconds": audio.shape[1] / MODEL.sample_rate}
 
