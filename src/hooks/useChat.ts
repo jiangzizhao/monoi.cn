@@ -170,7 +170,7 @@ export function useChat() {
           store.updateLastAssistantBlocks(convId, [{ type: 'error', message: '请先生成文案再做配音' }])
           return
         }
-        store.updateLastAssistantBlocks(convId, [{ type: 'loading', label: '正在合成音频...' }])
+        store.updateLastAssistantBlocks(convId, [{ type: 'loading', label: '正在提交合成任务...' }])
         const res = await fetch('/api/proxy?path=' + encodeURIComponent('/api/voice/synthesize'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -183,15 +183,49 @@ export function useChat() {
           signal: ctrl.signal,
         })
         const data = await res.json()
-        if (!res.ok || !data.audio_url) {
+        if (!res.ok) {
           store.updateLastAssistantBlocks(convId, [{ type: 'error', message: data.detail || data.error || '合成失败' }])
           return
         }
+
+        let finalAudioUrl = data.audio_url as string | undefined
+        let finalDuration = data.duration_seconds as number | undefined
+
+        // 阿里云长文本是异步任务，需要轮询
+        if (data.engine === 'aliyun' && data.task_id) {
+          store.updateLastAssistantBlocks(convId, [{ type: 'loading', label: '阿里云正在合成中...' }])
+          for (let i = 0; i < 60; i++) {  // 最多等 2 分钟
+            await new Promise(r => setTimeout(r, 2000))
+            if (ctrl.signal.aborted) return
+            const tr = await fetch('/api/proxy?path=' + encodeURIComponent('/api/voice/task/' + data.task_id))
+            const td = await tr.json()
+            if (td.status === 'ready' && td.audio_url) {
+              finalAudioUrl = td.audio_url
+              finalDuration = td.duration_seconds
+              break
+            }
+            if (td.status === 'error') {
+              store.updateLastAssistantBlocks(convId, [{ type: 'error', message: td.message || '阿里云合成失败' }])
+              return
+            }
+            store.updateLastAssistantBlocks(convId, [{ type: 'loading', label: `阿里云正在合成中...（${(i + 1) * 2}s）` }])
+          }
+          if (!finalAudioUrl) {
+            store.updateLastAssistantBlocks(convId, [{ type: 'error', message: '合成超时，请稍后重试' }])
+            return
+          }
+        }
+
+        if (!finalAudioUrl) {
+          store.updateLastAssistantBlocks(convId, [{ type: 'error', message: '合成失败：未返回 audio_url' }])
+          return
+        }
+
         store.updateLastAssistantBlocks(convId, [{
           type: 'audio_player',
           data: {
-            audio_url: data.audio_url,
-            duration_seconds: data.duration_seconds,
+            audio_url: finalAudioUrl,
+            duration_seconds: finalDuration,
             preset_key: payload.voice_id,
             voice_label: payload.voice_label,
             speed: payload.speed,
