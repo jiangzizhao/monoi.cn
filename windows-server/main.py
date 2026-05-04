@@ -27,18 +27,12 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_DAYS = 30
 VOICE_STORAGE_DIR = "voice-assets"
 VOICE_PRESETS = [
-    # ─── 普通话女声（多情感+极致音，最像真人）───
-    {"key": "zhitian_emo",   "name": "知甜（多情感）",  "engine": "aliyun", "category": "preset", "gender": "female", "locale": "zh-CN", "accent": "mandarin", "emotion": "expressive", "speed": "1.0x", "sample_text": "多情感女声，喜怒哀乐自然过渡，最接近真人。"},
-    {"key": "zhimiao_emo",   "name": "知妙（多情感）",  "engine": "aliyun", "category": "preset", "gender": "female", "locale": "zh-CN", "accent": "mandarin", "emotion": "expressive", "speed": "1.0x", "sample_text": "多情感女声，温暖治愈感。"},
-    {"key": "zhiyan_emo",    "name": "知燕（多情感）",  "engine": "aliyun", "category": "preset", "gender": "female", "locale": "zh-CN", "accent": "mandarin", "emotion": "expressive", "speed": "1.0x", "sample_text": "多情感女声，活力日常感。"},
-    {"key": "siqi",          "name": "思琪（极致音）",  "engine": "aliyun", "category": "preset", "gender": "female", "locale": "zh-CN", "accent": "mandarin", "emotion": "warm",       "speed": "1.0x", "sample_text": "极致音温柔女声，情感、生活方式。"},
-    {"key": "ruoxi",         "name": "若汐（极致音）",  "engine": "aliyun", "category": "preset", "gender": "female", "locale": "zh-CN", "accent": "mandarin", "emotion": "knowledgeable","speed": "1.0x", "sample_text": "极致音知性女声，知识、纪录。"},
-    {"key": "aishuo",        "name": "艾硕（精品音）",  "engine": "aliyun", "category": "preset", "gender": "female", "locale": "zh-CN", "accent": "mandarin", "emotion": "casual",     "speed": "1.0x", "sample_text": "精品女声，自然口播感。"},
-    # ─── 普通话男声 ───
-    {"key": "zhibei_emo",    "name": "知柏（多情感）",  "engine": "aliyun", "category": "preset", "gender": "male",   "locale": "zh-CN", "accent": "mandarin", "emotion": "expressive", "speed": "1.0x", "sample_text": "多情感男声，最接近真人男主播。"},
-    {"key": "zhixiang_emo",  "name": "知祥（多情感）",  "engine": "aliyun", "category": "preset", "gender": "male",   "locale": "zh-CN", "accent": "mandarin", "emotion": "expressive", "speed": "1.0x", "sample_text": "多情感男声，沉稳成熟。"},
-    {"key": "sicheng",       "name": "思诚（极致音）",  "engine": "aliyun", "category": "preset", "gender": "male",   "locale": "zh-CN", "accent": "mandarin", "emotion": "steady",     "speed": "0.95x","sample_text": "极致音男声，资讯、商业、知识。"},
-    {"key": "aijia",         "name": "艾佳（精品音）",  "engine": "aliyun", "category": "preset", "gender": "male",   "locale": "zh-CN", "accent": "mandarin", "emotion": "casual",     "speed": "1.0x", "sample_text": "精品男声，自然年轻感。"},
+    # ─── 普通话女声（极致音，最接近真人）───
+    {"key": "siqi",          "name": "思琪",          "engine": "aliyun", "category": "preset", "gender": "female", "locale": "zh-CN", "accent": "mandarin", "emotion": "warm",       "speed": "1.0x", "sample_text": "温柔女声，情感、生活方式。"},
+    {"key": "ruoxi",         "name": "若汐",          "engine": "aliyun", "category": "preset", "gender": "female", "locale": "zh-CN", "accent": "mandarin", "emotion": "knowledgeable","speed": "1.0x", "sample_text": "知性女声，知识、纪录。"},
+    {"key": "sijia",         "name": "思佳",          "engine": "aliyun", "category": "preset", "gender": "female", "locale": "zh-CN", "accent": "mandarin", "emotion": "natural",    "speed": "1.0x", "sample_text": "自然女声，日常口播。"},
+    # ─── 普通话男声（极致音）───
+    {"key": "sicheng",       "name": "思诚",          "engine": "aliyun", "category": "preset", "gender": "male",   "locale": "zh-CN", "accent": "mandarin", "emotion": "steady",     "speed": "0.95x","sample_text": "沉稳男声，资讯、商业、知识。"},
     # ─── 方言 ───
     {"key": "shanshan",      "name": "姗姗（粤语）",     "engine": "aliyun", "category": "dialect", "gender": "female", "locale": "zh-HK", "accent": "cantonese", "emotion": "natural", "speed": "1.0x", "sample_text": "粤语女声。"},
     {"key": "jiajia",        "name": "佳佳（粤语）",     "engine": "aliyun", "category": "dialect", "gender": "female", "locale": "zh-HK", "accent": "cantonese", "emotion": "natural", "speed": "1.0x", "sample_text": "粤语女声（年轻）。"},
