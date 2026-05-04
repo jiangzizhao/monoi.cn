@@ -20,6 +20,7 @@ export function ChatContainer() {
   const handleScriptFootage = (script: string) => send(`用上面这篇文案帮我找素材:\n${script}`)
   const handleScriptStoryboard = (script: string) => send(`用上面这篇文案帮我生成剪辑分镜:\n${script}`)
   const handleScriptRegenerate = () => send('重新生成，换一个不同的版本')
+  const handleScriptDialect = (script: string, dialect: string) => send(`__dialect__${dialect}__${script}`)
   const handleMultiPlatform = () => send('帮我生成各平台的发布文案')
   const handleFootageUpdate = (msgId: string, blockIdx: number, data: FootageSentenceItem[]) => {
     if (activeId) updateFootageGrid(activeId, msgId, blockIdx, data)
@@ -37,6 +38,7 @@ export function ChatContainer() {
             message={msg}
             onChoose={(msgId, blockIdx, opt) => chooseOption(msgId, blockIdx, opt)}
             onScriptRegenerate={handleScriptRegenerate}
+            onScriptDialect={handleScriptDialect}
             onScriptFootage={handleScriptFootage}
             onScriptStoryboard={handleScriptStoryboard}
             onStoryboardMultiPlatform={handleMultiPlatform}

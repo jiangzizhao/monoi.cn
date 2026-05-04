@@ -47,6 +47,41 @@ function buildRegenerateScriptPrompt(prompt: string) {
 仍然只输出最终文案正文，不要输出解释、JSON、代码或标题标签。`
 }
 
+const DIALECT_INSTRUCTIONS: Record<string, string> = {
+  cantonese: `把下面这段文案改写成地道粤语口播版本。
+- 用粤语词汇和语法（嘅、喺、嘢、咗、啱、咁、呢、嗰、唔、係、佢、我哋等）
+- 保留原文的核心信息和节奏
+- 字数尽量接近原文
+- 仍然是自媒体口播风格，每行短句，每行以中文逗号或句号结尾`,
+  sichuan: `把下面这段文案改写成地道川渝方言口播版本。
+- 用四川/重庆方言词汇（巴适、撒子、要得、嘞、嘛、整、莫、咋个、晓得、给老子、龟儿子等）和语气
+- 保留原文的核心信息和节奏
+- 字数尽量接近原文
+- 自媒体口播风格，每行短句，每行以中文逗号或句号结尾`,
+  minnan: `把下面这段文案改写成地道闽南语（台语）口播版本。
+- 用闽南语词汇（汝、伊、嘛、按呢、做啥、敢有、毋是、欲、咧等）和语气
+- 用汉字+台罗音风格写，让读者能联想到闽南发音
+- 保留原文的核心信息和节奏
+- 字数尽量接近原文
+- 自媒体口播风格，每行短句`,
+  northeast: `把下面这段文案改写成地道东北方言口播版本。
+- 用东北话词汇和语气（嗯呐、咋地、贼、嘎哈、唠嗑、整、得劲、寻思、家伙、可劲儿等）
+- 保留原文的核心信息和节奏
+- 字数尽量接近原文
+- 自媒体口播风格，每行短句，每行以中文逗号或句号结尾`,
+}
+
+function buildDialectPrompt(dialect: string, script: string) {
+  const instr = DIALECT_INSTRUCTIONS[dialect] || ''
+  return `${instr}
+
+【原文】
+${script}
+
+【输出要求】
+只输出改写后的文案正文，不要任何解释、JSON、代码、标题、标签、前后缀说明。`
+}
+
 export function useChat() {
   const store = useChatStore()
   const abortRef = useRef<AbortController | null>(null)
@@ -69,6 +104,12 @@ export function useChat() {
         displayText = `配音：${p.voice_label || p.voice_id}（${p.speed}）`
       } catch { /* keep raw */ }
     }
+    if (text.startsWith('__dialect__')) {
+      const m = text.match(/^__dialect__(\w+)__/)
+      const labelMap: Record<string, string> = { cantonese: '粤语', sichuan: '川渝', minnan: '闽南', northeast: '东北' }
+      const dialectLabel = m ? (labelMap[m[1]] || m[1]) : '方言'
+      displayText = `改写成${dialectLabel}版本`
+    }
 
     // Add user message
     const userMsg = makeUserMsg(displayText)
@@ -86,6 +127,23 @@ export function useChat() {
     let rawText = ''
     try {
       const messages = [...conv.messages, userMsg]
+
+      // 方言改写：基于上一篇文案，让 AI 改写成方言版本
+      if (text.startsWith('__dialect__')) {
+        const m = text.match(/^__dialect__(\w+)__([\s\S]+)$/)
+        if (!m) {
+          store.updateLastAssistantBlocks(convId, [{ type: 'error', message: '方言参数错误' }])
+          return
+        }
+        const dialect = m[1]
+        const script = m[2]
+        const promptForModel = buildDialectPrompt(dialect, script)
+        const newScript = await callScriptAI(promptForModel, () => {
+          store.updateLastAssistantBlocks(convId, [{ type: 'loading', label: 'AI 正在改写...' }])
+        }, ctrl.signal)
+        store.updateLastAssistantBlocks(convId, [makeScriptCard(newScript)])
+        return
+      }
 
       // 配音合成：从对话中找最新文案，调后端合成 TTS
       if (text.startsWith('__synth_voice__')) {

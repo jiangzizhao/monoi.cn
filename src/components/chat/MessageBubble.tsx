@@ -12,6 +12,7 @@ interface Props {
   message: ChatMessage
   onChoose: (msgId: string, blockIdx: number, opt: ChoiceOption) => void
   onScriptRegenerate?: (msgId: string) => void
+  onScriptDialect?: (script: string, dialect: string) => void
   onScriptFootage?: (script: string) => void
   onScriptStoryboard?: (script: string) => void
   onStoryboardMultiPlatform?: (msgId: string) => void
@@ -47,6 +48,7 @@ function Block({ block, msgId, blockIdx, props }: { block: MessageBlock; msgId: 
         <ScriptCard
           data={block.data}
           onRegenerate={() => props.onScriptRegenerate?.(msgId)}
+          onDialect={(d) => props.onScriptDialect?.(block.data.script, d)}
           onFootage={() => props.onScriptFootage?.(block.data.script)}
           onStoryboard={() => props.onScriptStoryboard?.(block.data.script)}
         />
