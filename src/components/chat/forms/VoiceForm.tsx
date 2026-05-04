@@ -41,7 +41,7 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
     let mounted = true
     setPresetLoading(true)
     setPresetError('')
-    fetch('/api/voice/presets')
+    fetch('/api/proxy?path=' + encodeURIComponent('/api/voice/presets'))
       .then(async (res) => {
         if (!res.ok) throw new Error(`API ${res.status}`)
         const data = await res.json()
@@ -75,10 +75,15 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
   }, [mode])
 
   const submitPreset = () => {
-    const msg =
-      `【配音-预设音色】音色：${selectedVoice?.label}，语速：${speed}，情绪：${emotion}` +
-      `${notes.trim() ? `，补充要求：${notes.trim()}` : ''}`
-    onSubmit(msg)
+    // 用 JSON 字符串编码合成参数，useChat 检测到这个前缀直接调合成接口（不走 AI）
+    const payload = {
+      voice_id: voice,
+      voice_label: selectedVoice?.label || voice,
+      speed,
+      emotion,
+      notes: notes.trim(),
+    }
+    onSubmit(`__synth_voice__${JSON.stringify(payload)}`)
   }
 
   const submitUpload = () => {

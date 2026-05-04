@@ -5,6 +5,7 @@ import { FootageGrid } from './FootageGrid'
 import { StoryboardTable } from './StoryboardTable'
 import { TeleprompterCard } from './TeleprompterCard'
 import { PlatformCopyCard } from './PlatformCopyCard'
+import { AudioPlayer } from './AudioPlayer'
 import type { ChatMessage, MessageBlock, ChoiceOption, FootageSentenceItem } from '../../types'
 
 interface Props {
@@ -74,6 +75,9 @@ function Block({ block, msgId, blockIdx, props }: { block: MessageBlock; msgId: 
 
     case 'platform_copy':
       return <PlatformCopyCard data={block.data}/>
+
+    case 'audio_player':
+      return <AudioPlayer data={block.data}/>
 
     case 'loading':
       return (

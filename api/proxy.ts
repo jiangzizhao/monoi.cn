@@ -14,6 +14,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       headers: { 'Content-Type': 'application/json' },
       body: req.method !== 'GET' ? JSON.stringify(req.body) : undefined,
     })
+
+    const ct = upstream.headers.get('content-type') || ''
+
+    // 二进制内容（音频/图片/视频等）直接流式转发
+    if (!ct.includes('json') && !ct.includes('text')) {
+      const buf = Buffer.from(await upstream.arrayBuffer())
+      res.setHeader('Content-Type', ct || 'application/octet-stream')
+      const cl = upstream.headers.get('content-length')
+      if (cl) res.setHeader('Content-Length', cl)
+      return res.status(upstream.status).send(buf)
+    }
+
     const text = await upstream.text()
     try {
       const data = JSON.parse(text)

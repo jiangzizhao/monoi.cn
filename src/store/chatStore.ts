@@ -67,6 +67,24 @@ function normalizeBlock(block: unknown): MessageBlock | null {
     case 'platform_copy':
       return isRecord(block.data) ? { type: 'platform_copy', data: block.data as any } : null
 
+    case 'audio_player': {
+      const data = isRecord(block.data) ? block.data : {}
+      const url = asString(data.audio_url)
+      if (!url) return null
+      return {
+        type: 'audio_player',
+        data: {
+          audio_url: url,
+          duration_seconds: typeof data.duration_seconds === 'number' ? data.duration_seconds : undefined,
+          preset_key: asString(data.preset_key) || undefined,
+          voice_label: asString(data.voice_label) || undefined,
+          text_preview: asString(data.text_preview) || undefined,
+          speed: asString(data.speed) || undefined,
+          engine: asString(data.engine) || undefined,
+        },
+      }
+    }
+
     case 'loading':
       return { type: 'loading', label: asString(block.label, '处理中...') }
 

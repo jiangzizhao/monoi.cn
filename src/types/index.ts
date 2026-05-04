@@ -52,6 +52,16 @@ export interface PlatformCopyResult {
   cover?:      { main_title: string; subtitle: string; color_suggestion: string }
 }
 
+export interface AudioResult {
+  audio_url: string
+  duration_seconds?: number
+  preset_key?: string
+  voice_label?: string
+  text_preview?: string
+  speed?: string
+  engine?: string
+}
+
 export type MessageBlock =
   | { type: 'text';           content: string; streaming?: boolean }
   | { type: 'choices';        question?: string; options: ChoiceOption[]; chosen?: string }
@@ -60,6 +70,7 @@ export type MessageBlock =
   | { type: 'storyboard';     data: StoryboardRowItem[] }
   | { type: 'teleprompter';   data: string }
   | { type: 'platform_copy';  data: PlatformCopyResult }
+  | { type: 'audio_player';   data: AudioResult }
   | { type: 'loading';             label: string }
   | { type: 'error';               message: string }
   | { type: 'footage_request';     data: { sentences: FootageSentenceItem[] } }
