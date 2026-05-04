@@ -141,17 +141,17 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
 
   return (
     <>
-      <div className="fixed inset-0 z-40" onClick={onClose}/>
-      <div className="fixed left-1/2 top-1/2 z-50 w-[min(680px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 bg-[var(--bg-card)] border border-[var(--border)] rounded-xl shadow-2xl overflow-hidden">
+      <div className="fixed inset-0 z-40 bg-black/30" onClick={onClose}/>
+      <div className="fixed left-1/2 top-1/2 z-50 w-[min(680px,calc(100vw-2rem))] max-h-[90vh] -translate-x-1/2 -translate-y-1/2 bg-[var(--bg-card)] border border-[var(--border)] rounded-xl shadow-2xl overflow-hidden flex flex-col">
         <div className="px-4 py-2.5 border-b border-[var(--border)]">
           <span className="text-xs text-[var(--text-3)]">{formTitle(mode)}</span>
         </div>
 
-        <div className="px-4 py-3 flex flex-col gap-3">
+        <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-3 min-h-0">
           {mode === 'preset' && (
             <>
               {/* 性别筛选 */}
-              <div className="flex gap-1.5">
+              <div className="flex gap-1.5 sticky top-0 bg-[var(--bg-card)] py-1 z-10">
                 {(['all', 'female', 'male'] as const).map(g => (
                   <button
                     key={g}
@@ -168,7 +168,7 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
               </div>
 
               {/* 按 category 分组展示 */}
-              <div className="max-h-[360px] overflow-y-auto flex flex-col gap-3 pr-1">
+              <div className="flex flex-col gap-3 pr-1">
                 {(['preset', 'dialect', 'language'] as const).map(cat => {
                   const items = groupedVoices[cat] || []
                   if (items.length === 0) return null
@@ -251,8 +251,10 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
             placeholder="补充要求（可选）"
             className="bg-[var(--bg-input)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-[var(--text)] placeholder:text-[var(--text-3)] focus:outline-none resize-none"
           />
+        </div>
 
-          <div className="flex justify-end gap-2 pt-1">
+        {/* Footer 固定底部 */}
+        <div className="px-4 py-2.5 border-t border-[var(--border)] flex justify-end gap-2 bg-[var(--bg-card)]">
             <button
               onClick={onClose}
               className="px-3 py-1.5 rounded-lg text-sm text-[var(--text-2)] hover:bg-[var(--bg-hover)] cursor-pointer"
@@ -269,7 +271,6 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
             >
               继续
             </button>
-          </div>
         </div>
       </div>
     </>
