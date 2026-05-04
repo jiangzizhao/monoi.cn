@@ -27,54 +27,27 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_DAYS = 30
 VOICE_STORAGE_DIR = "voice-assets"
 VOICE_PRESETS = [
-    {
-        "key": "cosy_cn_warm_female",
-        "name": "温柔女声",
-        "engine": "cosyvoice",
-        "category": "preset",
-        "gender": "female",
-        "locale": "zh-CN",
-        "accent": "mandarin",
-        "emotion": "natural,warm",
-        "speed": "1.0x",
-        "sample_text": "适合生活方式、情感口播和轻种草内容。",
-    },
-    {
-        "key": "cosy_cn_steady_male",
-        "name": "沉稳男声",
-        "engine": "cosyvoice",
-        "category": "preset",
-        "gender": "male",
-        "locale": "zh-CN",
-        "accent": "mandarin",
-        "emotion": "calm,steady",
-        "speed": "0.95x",
-        "sample_text": "适合知识分享、财经、商业表达。",
-    },
-    {
-        "key": "cosy_cn_sichuan_female",
-        "name": "川渝女声",
-        "engine": "cosyvoice",
-        "category": "dialect",
-        "gender": "female",
-        "locale": "zh-CN",
-        "accent": "sichuan",
-        "emotion": "bright,friendly",
-        "speed": "1.05x",
-        "sample_text": "适合带方言亲切感的探店和日常分享。",
-    },
-    {
-        "key": "cosy_cn_cantonese_male",
-        "name": "粤语男声",
-        "engine": "cosyvoice",
-        "category": "dialect",
-        "gender": "male",
-        "locale": "zh-HK",
-        "accent": "cantonese",
-        "emotion": "relaxed,confident",
-        "speed": "1.0x",
-        "sample_text": "适合地区化表达和更有识别度的人设内容。",
-    },
+    # 普通话标准
+    {"key": "xiaoyun",  "name": "小云", "engine": "aliyun", "category": "preset", "gender": "female", "locale": "zh-CN", "accent": "mandarin",  "emotion": "natural", "speed": "1.0x", "sample_text": "标准女声，通用场景。"},
+    {"key": "xiaogang", "name": "小刚", "engine": "aliyun", "category": "preset", "gender": "male",   "locale": "zh-CN", "accent": "mandarin",  "emotion": "natural", "speed": "1.0x", "sample_text": "标准男声，通用场景。"},
+    # 普通话精品
+    {"key": "siqi",     "name": "思琪", "engine": "aliyun", "category": "preset", "gender": "female", "locale": "zh-CN", "accent": "mandarin",  "emotion": "warm",     "speed": "1.0x", "sample_text": "温柔女声，适合情感、生活方式。"},
+    {"key": "ruoxi",    "name": "若汐", "engine": "aliyun", "category": "preset", "gender": "female", "locale": "zh-CN", "accent": "mandarin",  "emotion": "knowledgeable", "speed": "1.0x", "sample_text": "知性女声，适合知识、纪录类。"},
+    {"key": "sicheng",  "name": "思诚", "engine": "aliyun", "category": "preset", "gender": "male",   "locale": "zh-CN", "accent": "mandarin",  "emotion": "steady",   "speed": "0.95x","sample_text": "沉稳男声，适合资讯、商业、知识。"},
+    {"key": "aiqi",     "name": "艾琪", "engine": "aliyun", "category": "preset", "gender": "female", "locale": "zh-CN", "accent": "mandarin",  "emotion": "soft",     "speed": "1.0x", "sample_text": "甜美女声，适合短视频带货。"},
+    # 多情感
+    {"key": "zhitian_emo", "name": "知甜（多情感）", "engine": "aliyun", "category": "preset", "gender": "female", "locale": "zh-CN", "accent": "mandarin", "emotion": "expressive", "speed": "1.0x", "sample_text": "多情感女声，可表达喜怒哀乐。"},
+    {"key": "zhibei_emo",  "name": "知柏（多情感）", "engine": "aliyun", "category": "preset", "gender": "male",   "locale": "zh-CN", "accent": "mandarin", "emotion": "expressive", "speed": "1.0x", "sample_text": "多情感男声，可表达喜怒哀乐。"},
+    # 方言
+    {"key": "shanshan", "name": "姗姗（粤语）",   "engine": "aliyun", "category": "dialect", "gender": "female", "locale": "zh-HK", "accent": "cantonese", "emotion": "natural", "speed": "1.0x", "sample_text": "粤语女声。"},
+    {"key": "kelly",    "name": "Kelly（粤语）",  "engine": "aliyun", "category": "dialect", "gender": "female", "locale": "zh-HK", "accent": "cantonese", "emotion": "natural", "speed": "1.0x", "sample_text": "粤语女声（年轻）。"},
+    {"key": "xiaomei",  "name": "小美（粤语）",   "engine": "aliyun", "category": "dialect", "gender": "female", "locale": "zh-HK", "accent": "cantonese", "emotion": "natural", "speed": "1.0x", "sample_text": "粤语女声（甜美）。"},
+    # 外语
+    {"key": "tomoka",   "name": "Tomoka（日语女）", "engine": "aliyun", "category": "language", "gender": "female", "locale": "ja-JP", "accent": "japanese", "emotion": "natural", "speed": "1.0x", "sample_text": "日语女声。"},
+    {"key": "tomoya",   "name": "Tomoya（日语男）", "engine": "aliyun", "category": "language", "gender": "male",   "locale": "ja-JP", "accent": "japanese", "emotion": "natural", "speed": "1.0x", "sample_text": "日语男声。"},
+    {"key": "stella",   "name": "Stella（英语女）", "engine": "aliyun", "category": "language", "gender": "female", "locale": "en-US", "accent": "english",  "emotion": "natural", "speed": "1.0x", "sample_text": "美式英语女声。"},
+    {"key": "bella",    "name": "Bella（英语女）",  "engine": "aliyun", "category": "language", "gender": "female", "locale": "en-US", "accent": "english",  "emotion": "warm",    "speed": "1.0x", "sample_text": "英语温柔女声。"},
+    {"key": "harry",    "name": "Harry（英语男）",  "engine": "aliyun", "category": "language", "gender": "male",   "locale": "en-US", "accent": "english",  "emotion": "natural", "speed": "1.0x", "sample_text": "美式英语男声。"},
 ]
 
 # 用 Python 内置 hashlib，无需 bcrypt/passlib
@@ -152,9 +125,11 @@ def init_db():
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    # 清掉旧 cosy_* 预设（迁移到 aliyun 引擎）
+    conn.execute("DELETE FROM voice_presets WHERE key LIKE 'cosy_%'")
     for preset in VOICE_PRESETS:
         conn.execute("""
-            INSERT OR IGNORE INTO voice_presets
+            INSERT OR REPLACE INTO voice_presets
             (key, name, engine, category, gender, locale, accent, emotion, speed, sample_text)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
@@ -665,6 +640,99 @@ def list_voice_clones(user_id: Optional[int] = None):
 
 VOICE_SERVER_URL = "http://127.0.0.1:9001"
 
+# 阿里云语音合成配置（从环境变量读取）
+ALIYUN_AK_ID = os.environ.get("ALIYUN_AK_ID", "")
+ALIYUN_AK_SECRET = os.environ.get("ALIYUN_AK_SECRET", "")
+ALIYUN_APP_KEY = os.environ.get("ALIYUN_APP_KEY", "")
+ALIYUN_NLS_HOST = "nls-gateway-cn-shanghai.aliyuncs.com"
+ALIYUN_TOKEN_HOST = "nls-meta.cn-shanghai.aliyuncs.com"
+
+import threading as _th
+_aliyun_token_cache = {"token": None, "expires_at": 0}
+_aliyun_token_lock = _th.Lock()
+
+def aliyun_get_token():
+    """获取阿里云 NLS Token，内存缓存避免每次请求都拿新的"""
+    import time as _t
+    import json as _j
+    with _aliyun_token_lock:
+        now = _t.time()
+        if _aliyun_token_cache["token"] and now < _aliyun_token_cache["expires_at"]:
+            return _aliyun_token_cache["token"]
+        if not ALIYUN_AK_ID or not ALIYUN_AK_SECRET:
+            raise HTTPException(500, "阿里云 AccessKey 未配置")
+        try:
+            from aliyunsdkcore.client import AcsClient
+            from aliyunsdkcore.request import CommonRequest
+        except ImportError:
+            raise HTTPException(500, "未安装 aliyun-python-sdk-core，请先 pip install aliyun-python-sdk-core")
+        client = AcsClient(ALIYUN_AK_ID, ALIYUN_AK_SECRET, "cn-shanghai")
+        req = CommonRequest()
+        req.set_method("POST")
+        req.set_domain(ALIYUN_TOKEN_HOST)
+        req.set_version("2019-02-28")
+        req.set_action_name("CreateToken")
+        try:
+            resp = client.do_action_with_exception(req)
+            data = _j.loads(resp)
+            token_info = data.get("Token", {})
+            token = token_info.get("Id")
+            expire = int(token_info.get("ExpireTime", 0))
+            _aliyun_token_cache["token"] = token
+            _aliyun_token_cache["expires_at"] = expire - 600  # 提前 10 分钟续
+            return token
+        except Exception as e:
+            raise HTTPException(500, f"阿里云 Token 获取失败: {e}")
+
+
+def aliyun_submit_long_tts(text: str, voice: str, speech_rate: int = 0, volume: int = 50, sample_rate: int = 16000):
+    """提交长文本合成任务，返回 task_id"""
+    import requests as _req
+    token = aliyun_get_token()
+    if not ALIYUN_APP_KEY:
+        raise HTTPException(500, "阿里云 AppKey 未配置")
+    url = f"https://{ALIYUN_NLS_HOST}/rest/v1/tts/async"
+    payload = {
+        "payload": {
+            "tts_request": {
+                "voice": voice,
+                "sample_rate": sample_rate,
+                "format": "wav",
+                "text": text,
+                "speech_rate": speech_rate,
+                "volume": volume,
+                "enable_subtitle": False,
+            },
+            "enable_notify": False,
+        },
+        "context": {"device_id": "monoi-server"},
+        "header": {"appkey": ALIYUN_APP_KEY, "token": token},
+    }
+    try:
+        resp = _req.post(url, json=payload, timeout=15)
+    except Exception as e:
+        raise HTTPException(503, f"阿里云提交失败: {e}")
+    if resp.status_code != 200:
+        raise HTTPException(502, f"阿里云返回 {resp.status_code}: {resp.text[:200]}")
+    data = resp.json()
+    if data.get("status") != 200:
+        raise HTTPException(502, f"阿里云错误: {data.get('error_message', resp.text[:200])}")
+    return data["data"]["task_id"]
+
+
+def aliyun_get_task(task_id: str):
+    """查询长文本任务状态"""
+    import requests as _req
+    token = aliyun_get_token()
+    url = f"https://{ALIYUN_NLS_HOST}/rest/v1/tts/async"
+    params = {"appkey": ALIYUN_APP_KEY, "token": token, "task_id": task_id}
+    try:
+        resp = _req.get(url, params=params, timeout=15)
+    except Exception as e:
+        raise HTTPException(503, f"阿里云查询失败: {e}")
+    return resp.json()
+
+
 def parse_speed(speed_str):
     if not speed_str:
         return 1.0
@@ -672,6 +740,26 @@ def parse_speed(speed_str):
         return float(str(speed_str).rstrip("x"))
     except ValueError:
         return 1.0
+
+
+def speed_to_aliyun_rate(speed_str):
+    """前端 1.0x 风格转阿里云 speech_rate（-500 到 500，0 是正常语速）"""
+    s = parse_speed(speed_str)
+    # 1.0x → 0, 0.5x → -500, 1.5x → +500
+    return int(round((s - 1.0) * 1000))
+
+def _lookup_preset_engine(preset_key: str):
+    """从 voice_presets 表里查这个 preset 的 engine"""
+    if not preset_key:
+        return None
+    conn = get_db()
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute("SELECT engine FROM voice_presets WHERE key = ?", (preset_key,)).fetchone()
+        return row["engine"] if row else None
+    finally:
+        conn.close()
+
 
 @app.post("/api/voice/synthesize")
 def synthesize_voice(req: VoiceSynthesizeRequest):
@@ -682,8 +770,28 @@ def synthesize_voice(req: VoiceSynthesizeRequest):
     if not req.preset_key and not req.clone_id:
         raise HTTPException(400, "preset_key 和 clone_id 至少要传一个")
 
-    engine = "cosyvoice" if req.preset_key else "fish-speech"
+    # 按 preset 的 engine 字段决定走哪条路
+    engine = _lookup_preset_engine(req.preset_key) or ("cosyvoice" if req.preset_key else "fish-speech")
 
+    # ─── 阿里云长文本 TTS ───
+    if engine == "aliyun":
+        task_id = aliyun_submit_long_tts(
+            text=req.text.strip(),
+            voice=req.preset_key,
+            speech_rate=speed_to_aliyun_rate(req.speed),
+            volume=50,
+            sample_rate=16000,
+        )
+        return {
+            "success": True,
+            "status": "queued",
+            "engine": "aliyun",
+            "task_id": task_id,
+            "preset_key": req.preset_key,
+            "speed": req.speed or "1.0x",
+        }
+
+    # ─── CosyVoice2 同步合成（克隆和老 preset） ───
     if engine == "cosyvoice":
         try:
             resp = _req.post(
@@ -722,6 +830,21 @@ def synthesize_voice(req: VoiceSynthesizeRequest):
         "clone_id": req.clone_id,
         "next_action": "Fish Speech 克隆推理待接入。",
     }
+
+
+@app.get("/api/voice/task/{task_id}")
+def get_voice_task(task_id: str):
+    """查询阿里云长文本任务状态"""
+    data = aliyun_get_task(task_id)
+    status_code = data.get("status_code") or data.get("status")
+    error_msg = data.get("error_message") or data.get("message")
+    body = data.get("data") or {}
+    audio_url = body.get("audio_address")
+    if status_code == 20000000 and audio_url:
+        return {"status": "ready", "audio_url": audio_url, "duration_seconds": body.get("duration", 0)}
+    if status_code in (41040201, 41040202) or not audio_url:
+        return {"status": "processing", "raw_status_code": status_code}
+    return {"status": "error", "message": error_msg or f"未知错误({status_code})"}
 
 
 @app.get("/api/voice/audio/{name}")
