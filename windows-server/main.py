@@ -27,27 +27,33 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_DAYS = 30
 VOICE_STORAGE_DIR = "voice-assets"
 VOICE_PRESETS = [
-    # 普通话标准
+    # ─── 普通话女声 ───
     {"key": "xiaoyun",  "name": "小云", "engine": "aliyun", "category": "preset", "gender": "female", "locale": "zh-CN", "accent": "mandarin",  "emotion": "natural", "speed": "1.0x", "sample_text": "标准女声，通用场景。"},
-    {"key": "xiaogang", "name": "小刚", "engine": "aliyun", "category": "preset", "gender": "male",   "locale": "zh-CN", "accent": "mandarin",  "emotion": "natural", "speed": "1.0x", "sample_text": "标准男声，通用场景。"},
-    # 普通话精品
-    {"key": "siqi",     "name": "思琪", "engine": "aliyun", "category": "preset", "gender": "female", "locale": "zh-CN", "accent": "mandarin",  "emotion": "warm",     "speed": "1.0x", "sample_text": "温柔女声，适合情感、生活方式。"},
-    {"key": "ruoxi",    "name": "若汐", "engine": "aliyun", "category": "preset", "gender": "female", "locale": "zh-CN", "accent": "mandarin",  "emotion": "knowledgeable", "speed": "1.0x", "sample_text": "知性女声，适合知识、纪录类。"},
-    {"key": "sicheng",  "name": "思诚", "engine": "aliyun", "category": "preset", "gender": "male",   "locale": "zh-CN", "accent": "mandarin",  "emotion": "steady",   "speed": "0.95x","sample_text": "沉稳男声，适合资讯、商业、知识。"},
-    {"key": "aiqi",     "name": "艾琪", "engine": "aliyun", "category": "preset", "gender": "female", "locale": "zh-CN", "accent": "mandarin",  "emotion": "soft",     "speed": "1.0x", "sample_text": "甜美女声，适合短视频带货。"},
-    # 多情感
+    {"key": "siqi",     "name": "思琪", "engine": "aliyun", "category": "preset", "gender": "female", "locale": "zh-CN", "accent": "mandarin",  "emotion": "warm",     "speed": "1.0x", "sample_text": "温柔女声，情感、生活方式。"},
+    {"key": "ruoxi",    "name": "若汐", "engine": "aliyun", "category": "preset", "gender": "female", "locale": "zh-CN", "accent": "mandarin",  "emotion": "knowledgeable", "speed": "1.0x", "sample_text": "知性女声，适合知识、纪录。"},
+    {"key": "aiqi",     "name": "艾琪", "engine": "aliyun", "category": "preset", "gender": "female", "locale": "zh-CN", "accent": "mandarin",  "emotion": "soft",     "speed": "1.0x", "sample_text": "甜美女声，短视频带货。"},
+    {"key": "ninger",   "name": "宁儿", "engine": "aliyun", "category": "preset", "gender": "female", "locale": "zh-CN", "accent": "mandarin",  "emotion": "natural",  "speed": "1.0x", "sample_text": "标准女声，长篇阅读。"},
+    {"key": "ruilin",   "name": "瑞琳", "engine": "aliyun", "category": "preset", "gender": "female", "locale": "zh-CN", "accent": "mandarin",  "emotion": "natural",  "speed": "1.0x", "sample_text": "标准女声，资讯播报。"},
     {"key": "zhitian_emo", "name": "知甜（多情感）", "engine": "aliyun", "category": "preset", "gender": "female", "locale": "zh-CN", "accent": "mandarin", "emotion": "expressive", "speed": "1.0x", "sample_text": "多情感女声，可表达喜怒哀乐。"},
+    # ─── 普通话男声 ───
+    {"key": "xiaogang", "name": "小刚", "engine": "aliyun", "category": "preset", "gender": "male",   "locale": "zh-CN", "accent": "mandarin",  "emotion": "natural", "speed": "1.0x", "sample_text": "标准男声，通用场景。"},
+    {"key": "sicheng",  "name": "思诚", "engine": "aliyun", "category": "preset", "gender": "male",   "locale": "zh-CN", "accent": "mandarin",  "emotion": "steady",   "speed": "0.95x","sample_text": "沉稳男声，资讯、商业、知识。"},
+    {"key": "aida",     "name": "艾达", "engine": "aliyun", "category": "preset", "gender": "male",   "locale": "zh-CN", "accent": "mandarin",  "emotion": "natural",  "speed": "1.0x", "sample_text": "标准男声，客服、播报。"},
+    {"key": "yufei",    "name": "雨菲", "engine": "aliyun", "category": "preset", "gender": "male",   "locale": "zh-CN", "accent": "mandarin",  "emotion": "natural",  "speed": "1.0x", "sample_text": "磁性男声，故事讲述。"},
     {"key": "zhibei_emo",  "name": "知柏（多情感）", "engine": "aliyun", "category": "preset", "gender": "male",   "locale": "zh-CN", "accent": "mandarin", "emotion": "expressive", "speed": "1.0x", "sample_text": "多情感男声，可表达喜怒哀乐。"},
-    # 方言
-    {"key": "shanshan", "name": "姗姗（粤语）",   "engine": "aliyun", "category": "dialect", "gender": "female", "locale": "zh-HK", "accent": "cantonese", "emotion": "natural", "speed": "1.0x", "sample_text": "粤语女声。"},
-    {"key": "kelly",    "name": "Kelly（粤语）",  "engine": "aliyun", "category": "dialect", "gender": "female", "locale": "zh-HK", "accent": "cantonese", "emotion": "natural", "speed": "1.0x", "sample_text": "粤语女声（年轻）。"},
-    {"key": "xiaomei",  "name": "小美（粤语）",   "engine": "aliyun", "category": "dialect", "gender": "female", "locale": "zh-HK", "accent": "cantonese", "emotion": "natural", "speed": "1.0x", "sample_text": "粤语女声（甜美）。"},
-    # 外语
+    # ─── 方言 ───
+    {"key": "shanshan", "name": "姗姗（粤语）",     "engine": "aliyun", "category": "dialect", "gender": "female", "locale": "zh-HK", "accent": "cantonese", "emotion": "natural", "speed": "1.0x", "sample_text": "粤语女声。"},
+    {"key": "jiajia",   "name": "佳佳（粤语）",     "engine": "aliyun", "category": "dialect", "gender": "female", "locale": "zh-HK", "accent": "cantonese", "emotion": "natural", "speed": "1.0x", "sample_text": "粤语女声（年轻）。"},
+    {"key": "kelly",    "name": "Kelly（粤语）",   "engine": "aliyun", "category": "dialect", "gender": "female", "locale": "zh-HK", "accent": "cantonese", "emotion": "natural", "speed": "1.0x", "sample_text": "粤语女声（甜美）。"},
+    {"key": "jielong",  "name": "杰龙（粤语）",     "engine": "aliyun", "category": "dialect", "gender": "male",   "locale": "zh-HK", "accent": "cantonese", "emotion": "natural", "speed": "1.0x", "sample_text": "粤语男声。"},
+    {"key": "siyue",    "name": "思悦（四川话）",   "engine": "aliyun", "category": "dialect", "gender": "female", "locale": "zh-CN", "accent": "sichuan",   "emotion": "natural", "speed": "1.0x", "sample_text": "四川话女声。"},
+    # ─── 外语 ───
     {"key": "tomoka",   "name": "Tomoka（日语女）", "engine": "aliyun", "category": "language", "gender": "female", "locale": "ja-JP", "accent": "japanese", "emotion": "natural", "speed": "1.0x", "sample_text": "日语女声。"},
     {"key": "tomoya",   "name": "Tomoya（日语男）", "engine": "aliyun", "category": "language", "gender": "male",   "locale": "ja-JP", "accent": "japanese", "emotion": "natural", "speed": "1.0x", "sample_text": "日语男声。"},
     {"key": "stella",   "name": "Stella（英语女）", "engine": "aliyun", "category": "language", "gender": "female", "locale": "en-US", "accent": "english",  "emotion": "natural", "speed": "1.0x", "sample_text": "美式英语女声。"},
     {"key": "bella",    "name": "Bella（英语女）",  "engine": "aliyun", "category": "language", "gender": "female", "locale": "en-US", "accent": "english",  "emotion": "warm",    "speed": "1.0x", "sample_text": "英语温柔女声。"},
     {"key": "harry",    "name": "Harry（英语男）",  "engine": "aliyun", "category": "language", "gender": "male",   "locale": "en-US", "accent": "english",  "emotion": "natural", "speed": "1.0x", "sample_text": "美式英语男声。"},
+    {"key": "kenny",    "name": "Kenny（英语男）",  "engine": "aliyun", "category": "language", "gender": "male",   "locale": "en-US", "accent": "english",  "emotion": "deep",    "speed": "1.0x", "sample_text": "英语低音男声。"},
 ]
 
 # 用 Python 内置 hashlib，无需 bcrypt/passlib
@@ -125,11 +131,11 @@ def init_db():
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
-    # 清掉旧 cosy_* 预设（迁移到 aliyun 引擎）
-    conn.execute("DELETE FROM voice_presets WHERE key LIKE 'cosy_%'")
+    # 完全重置 voice_presets，每次启动都同步成 VOICE_PRESETS 里的最新列表
+    conn.execute("DELETE FROM voice_presets")
     for preset in VOICE_PRESETS:
         conn.execute("""
-            INSERT OR REPLACE INTO voice_presets
+            INSERT INTO voice_presets
             (key, name, engine, category, gender, locale, accent, emotion, speed, sample_text)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
