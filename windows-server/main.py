@@ -663,23 +663,77 @@ def list_voice_clones(user_id: Optional[int] = None):
     finally:
         conn.close()
 
+VOICE_SERVER_URL = "http://127.0.0.1:9001"
+
+def parse_speed(speed_str):
+    if not speed_str:
+        return 1.0
+    try:
+        return float(str(speed_str).rstrip("x"))
+    except ValueError:
+        return 1.0
+
 @app.post("/api/voice/synthesize")
 def synthesize_voice(req: VoiceSynthesizeRequest):
+    import requests as _req
+
     if not req.text.strip():
         raise HTTPException(400, "text 不能为空")
     if not req.preset_key and not req.clone_id:
         raise HTTPException(400, "preset_key 和 clone_id 至少要传一个")
 
     engine = "cosyvoice" if req.preset_key else "fish-speech"
+
+    if engine == "cosyvoice":
+        try:
+            resp = _req.post(
+                f"{VOICE_SERVER_URL}/synthesize",
+                json={
+                    "text": req.text.strip(),
+                    "voice_id": req.preset_key,
+                    "speed": parse_speed(req.speed),
+                },
+                timeout=120,
+            )
+            if resp.status_code != 200:
+                raise HTTPException(500, f"voice-server 错误: {resp.status_code} {resp.text[:200]}")
+            data = resp.json()
+            return {
+                "success": True,
+                "status": "ready",
+                "engine": "cosyvoice",
+                "audio_url": f"/api/voice/audio/{data['file']}",
+                "duration_seconds": data.get("duration_seconds"),
+                "preset_key": req.preset_key,
+                "speed": req.speed or "1.0x",
+            }
+        except _req.exceptions.ConnectionError:
+            raise HTTPException(503, "voice-server (9001) 未启动")
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(500, f"合成失败: {e}")
+
+    # Fish Speech 克隆暂未接入
     return {
         "success": True,
         "status": "queued",
-        "engine": engine,
-        "text_length": len(req.text.strip()),
-        "preset_key": req.preset_key,
+        "engine": "fish-speech",
         "clone_id": req.clone_id,
-        "speed": req.speed or "1.0x",
-        "emotion": req.emotion or "natural",
-        "output_name": req.output_name or "voice-output.wav",
-        "next_action": "当前接口已预留完成，下一步接入实际的 CosyVoice / Fish Speech 推理服务。",
+        "next_action": "Fish Speech 克隆推理待接入。",
     }
+
+
+@app.get("/api/voice/audio/{name}")
+def proxy_audio(name: str):
+    import requests as _req
+    from fastapi.responses import StreamingResponse
+
+    safe = os.path.basename(name)
+    try:
+        resp = _req.get(f"{VOICE_SERVER_URL}/audio/{safe}", stream=True, timeout=30)
+        if resp.status_code != 200:
+            raise HTTPException(resp.status_code, "音频未找到")
+        return StreamingResponse(resp.iter_content(8192), media_type="audio/wav")
+    except _req.exceptions.ConnectionError:
+        raise HTTPException(503, "voice-server (9001) 未启动")
