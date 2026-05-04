@@ -6,8 +6,6 @@ import type { ScriptResult } from '../../types'
 const DIALECT_GROUP = [
   { id: 'cantonese', label: '粤语' },
   { id: 'sichuan',   label: '川渝' },
-  { id: 'henan',     label: '河南' },
-  { id: 'northeast', label: '东北' },
 ]
 const LANGUAGE_GROUP = [
   { id: 'japanese',  label: '日语' },
