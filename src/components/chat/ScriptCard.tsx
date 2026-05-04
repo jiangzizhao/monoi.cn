@@ -1,4 +1,5 @@
-import { RefreshCw } from 'lucide-react'
+import { useState } from 'react'
+import { RefreshCw, ChevronDown } from 'lucide-react'
 import { CopyButton } from '../ui/CopyButton'
 import type { ScriptResult } from '../../types'
 
@@ -16,6 +17,7 @@ const LANGUAGE_GROUP = [
 
 export function ScriptCard({ data, onRegenerate, onDialect }:
   { data: ScriptResult; onRegenerate?: () => void; onDialect?: (dialect: string) => void; onFootage?: () => void; onStoryboard?: () => void }) {
+  const [expanded, setExpanded] = useState(false)
   return (
     <div className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg-card)] overflow-hidden">
       <div className="relative p-4">
@@ -26,36 +28,49 @@ export function ScriptCard({ data, onRegenerate, onDialect }:
         <div className="mt-2 text-xs text-[var(--text-3)]">{data.script.length} 字</div>
       </div>
 
-      <div className="border-t border-[var(--border)] px-3 py-2.5 flex flex-wrap items-center gap-1.5">
-        {onRegenerate && (
-          <button onClick={onRegenerate} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs text-[var(--text-2)] hover:text-[var(--text)] hover:bg-[var(--bg-hover)] transition-all cursor-pointer border border-[var(--border)]">
-            <RefreshCw size={12} strokeWidth={2}/> 重新生成
-          </button>
+      <div className="border-t border-[var(--border)] px-3 py-2.5 flex flex-col gap-2">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {onRegenerate && (
+            <button onClick={onRegenerate} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs text-[var(--text-2)] hover:text-[var(--text)] hover:bg-[var(--bg-hover)] transition-all cursor-pointer border border-[var(--border)]">
+              <RefreshCw size={12} strokeWidth={2}/> 重新生成
+            </button>
+          )}
+          {onDialect && (
+            <button
+              onClick={() => setExpanded(v => !v)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs text-[var(--text-2)] hover:text-[var(--text)] hover:bg-[var(--bg-hover)] transition-all cursor-pointer border border-[var(--border)]"
+            >
+              改写为其他语种
+              <ChevronDown size={12} className={`transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}/>
+            </button>
+          )}
+        </div>
+        {onDialect && expanded && (
+          <div className="flex flex-wrap items-center gap-1.5 pt-1">
+            <span className="text-xs text-[var(--text-3)]">方言文案</span>
+            {DIALECT_GROUP.map(d => (
+              <button
+                key={d.id}
+                onClick={() => onDialect(d.id)}
+                className="px-2.5 py-1.5 rounded-lg text-xs text-[var(--text-2)] hover:text-[var(--text)] hover:bg-[var(--bg-hover)] transition-all cursor-pointer border border-[var(--border)]"
+                title={`改写成${d.label}文案`}
+              >
+                {d.label}
+              </button>
+            ))}
+            <span className="text-xs text-[var(--text-3)] ml-2">语言文案</span>
+            {LANGUAGE_GROUP.map(d => (
+              <button
+                key={d.id}
+                onClick={() => onDialect(d.id)}
+                className="px-2.5 py-1.5 rounded-lg text-xs text-[var(--text-2)] hover:text-[var(--text)] hover:bg-[var(--bg-hover)] transition-all cursor-pointer border border-[var(--border)]"
+                title={`改写成${d.label}文案`}
+              >
+                {d.label}
+              </button>
+            ))}
+          </div>
         )}
-        {onDialect && <>
-          <span className="text-xs text-[var(--text-3)] ml-2">方言文案</span>
-          {DIALECT_GROUP.map(d => (
-            <button
-              key={d.id}
-              onClick={() => onDialect(d.id)}
-              className="px-2.5 py-1.5 rounded-lg text-xs text-[var(--text-2)] hover:text-[var(--text)] hover:bg-[var(--bg-hover)] transition-all cursor-pointer border border-[var(--border)]"
-              title={`改写成${d.label}文案`}
-            >
-              {d.label}
-            </button>
-          ))}
-          <span className="text-xs text-[var(--text-3)] ml-2">语言文案</span>
-          {LANGUAGE_GROUP.map(d => (
-            <button
-              key={d.id}
-              onClick={() => onDialect(d.id)}
-              className="px-2.5 py-1.5 rounded-lg text-xs text-[var(--text-2)] hover:text-[var(--text)] hover:bg-[var(--bg-hover)] transition-all cursor-pointer border border-[var(--border)]"
-              title={`改写成${d.label}文案`}
-            >
-              {d.label}
-            </button>
-          ))}
-        </>}
       </div>
     </div>
   )
