@@ -302,9 +302,9 @@ export function useChat() {
         let finalAudioUrl = data.audio_url as string | undefined
         let finalDuration = data.duration_seconds as number | undefined
 
-        // 阿里云长文本是异步任务，需要轮询
+        // 阿里云长文本是异步任务，需要轮询（前端对用户不暴露引擎名）
         if (data.engine === 'aliyun' && data.task_id) {
-          store.updateLastAssistantBlocks(convId, [{ type: 'loading', label: '阿里云正在合成中...' }])
+          store.updateLastAssistantBlocks(convId, [{ type: 'loading', label: '正在合成音频...' }])
           for (let i = 0; i < 60; i++) {  // 最多等 2 分钟
             await new Promise(r => setTimeout(r, 2000))
             if (ctrl.signal.aborted) return
@@ -316,10 +316,10 @@ export function useChat() {
               break
             }
             if (td.status === 'error') {
-              store.updateLastAssistantBlocks(convId, [{ type: 'error', message: td.message || '阿里云合成失败' }])
+              store.updateLastAssistantBlocks(convId, [{ type: 'error', message: td.message || '合成失败' }])
               return
             }
-            store.updateLastAssistantBlocks(convId, [{ type: 'loading', label: `阿里云正在合成中...（${(i + 1) * 2}s）` }])
+            store.updateLastAssistantBlocks(convId, [{ type: 'loading', label: `正在合成音频...（${(i + 1) * 2}s）` }])
           }
           if (!finalAudioUrl) {
             store.updateLastAssistantBlocks(convId, [{ type: 'error', message: '合成超时，请稍后重试' }])
