@@ -58,17 +58,31 @@ const DIALECT_INSTRUCTIONS: Record<string, string> = {
 - 保留原文的核心信息和节奏
 - 字数尽量接近原文
 - 自媒体口播风格，每行短句，每行以中文逗号或句号结尾`,
-  minnan: `把下面这段文案改写成地道闽南语（台语）口播版本。
-- 用闽南语词汇（汝、伊、嘛、按呢、做啥、敢有、毋是、欲、咧等）和语气
-- 用汉字+台罗音风格写，让读者能联想到闽南发音
+  henan: `把下面这段文案改写成地道河南方言口播版本。
+- 用河南话词汇和语气（中、咋、恁、得劲、不老儿、咋弄、弄啥嘞、可、贼、敢、爱兜兜里揣等）
 - 保留原文的核心信息和节奏
 - 字数尽量接近原文
-- 自媒体口播风格，每行短句`,
+- 自媒体口播风格，每行短句，每行以中文逗号或句号结尾`,
   northeast: `把下面这段文案改写成地道东北方言口播版本。
 - 用东北话词汇和语气（嗯呐、咋地、贼、嘎哈、唠嗑、整、得劲、寻思、家伙、可劲儿等）
 - 保留原文的核心信息和节奏
 - 字数尽量接近原文
 - 自媒体口播风格，每行短句，每行以中文逗号或句号结尾`,
+  japanese: `Translate the following script into natural, native-sounding Japanese suitable for short-video voiceover.
+- Use casual conversational Japanese (です/ます ok, but lean toward 自然な口語表現)
+- Keep the same hook, pacing and information density
+- Output Japanese only, no Chinese, no explanations
+- Each line should be a short clause ending with 、or 。 (Japanese punctuation)`,
+  english: `Translate the following script into natural, native-sounding English suitable for short-video voiceover.
+- Conversational, casual tone (not formal/academic)
+- Keep the same hook, pacing, and information density
+- Output English only, no Chinese, no explanations
+- Each line a short clause, comma or period at end`,
+  korean: `다음 스크립트를 자연스러운 한국어 숏폼 영상 보이스오버용으로 번역하세요.
+- 구어체 (반말 또는 친근한 존댓말) 사용
+- 원문의 훅, 리듬, 정보 밀도를 유지
+- 한국어만 출력, 중국어 및 설명 금지
+- 각 줄은 짧은 문장, 쉼표 또는 마침표로 끝내기`,
 }
 
 function buildDialectPrompt(dialect: string, script: string) {
@@ -106,7 +120,10 @@ export function useChat() {
     }
     if (text.startsWith('__dialect__')) {
       const m = text.match(/^__dialect__(\w+)__/)
-      const labelMap: Record<string, string> = { cantonese: '粤语', sichuan: '川渝', minnan: '闽南', northeast: '东北' }
+      const labelMap: Record<string, string> = {
+        cantonese: '粤语', sichuan: '川渝', henan: '河南', northeast: '东北',
+        japanese: '日语', english: '英语', korean: '韩语',
+      }
       const dialectLabel = m ? (labelMap[m[1]] || m[1]) : '方言'
       displayText = `改写成${dialectLabel}版本`
     }

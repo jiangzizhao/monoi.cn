@@ -5,8 +5,11 @@ import type { ScriptResult } from '../../types'
 const DIALECTS = [
   { id: 'cantonese', label: '粤语' },
   { id: 'sichuan',   label: '川渝' },
-  { id: 'minnan',    label: '闽南' },
+  { id: 'henan',     label: '河南' },
   { id: 'northeast', label: '东北' },
+  { id: 'japanese',  label: '日语' },
+  { id: 'english',   label: '英语' },
+  { id: 'korean',    label: '韩语' },
 ]
 
 export function ScriptCard({ data, onRegenerate, onDialect }:
