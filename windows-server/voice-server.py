@@ -4,6 +4,10 @@ CosyVoice2 独立推理服务
 启动: 在 cosyvoice venv 中跑 `python voice-server.py`
 """
 import os
+# 强制 CPU 模式 —— RTX 5060 Ti (sm_120) 当前 PyTorch 没编译对应 CUDA 内核
+# 等以后升级 PyTorch 到支持 sm_120 的版本（2.6+）后可以删掉这行
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
+
 import sys
 import time
 import uuid
