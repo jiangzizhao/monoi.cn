@@ -8,12 +8,29 @@ interface Props {
   onClose: () => void
 }
 
-const VOICES = [
-  { id: 'warm_female', label: '温柔女声', desc: '适合情感、生活方式' },
-  { id: 'steady_male', label: '沉稳男声', desc: '适合知识、商业表达' },
-  { id: 'young_female', label: '活力女声', desc: '适合种草、快节奏短视频' },
-  { id: 'narrator_male', label: '旁白男声', desc: '适合故事与纪录感内容' },
+interface VoiceOption {
+  id: string
+  label: string
+  desc: string
+  gender?: string   // male | female
+  category?: string // preset | dialect | language
+  accent?: string
+}
+
+const FALLBACK_VOICES: VoiceOption[] = [
+  { id: 'warm_female', label: '温柔女声', desc: '适合情感、生活方式', gender: 'female', category: 'preset' },
+  { id: 'steady_male', label: '沉稳男声', desc: '适合知识、商业表达', gender: 'male',   category: 'preset' },
 ]
+
+const CATEGORY_LABELS: Record<string, string> = {
+  preset: '普通话',
+  dialect: '方言',
+  language: '外语',
+}
+const GENDER_LABELS: Record<string, string> = {
+  female: '女声',
+  male: '男声',
+}
 
 const SPEEDS = ['0.9x', '1.0x', '1.1x', '1.2x']
 
@@ -24,17 +41,30 @@ function formTitle(mode: Mode) {
 }
 
 export function VoiceForm({ mode, onSubmit, onClose }: Props) {
-  const [voiceOptions, setVoiceOptions] = useState(VOICES)
+  const [voiceOptions, setVoiceOptions] = useState<VoiceOption[]>(FALLBACK_VOICES)
   const [presetLoading, setPresetLoading] = useState(false)
   const [presetError, setPresetError] = useState('')
-  const [voice, setVoice] = useState(VOICES[0].id)
+  const [voice, setVoice] = useState(FALLBACK_VOICES[0].id)
   const [speed, setSpeed] = useState('1.0x')
   const [emotion, setEmotion] = useState('自然')
   const [notes, setNotes] = useState('')
   const [fileName, setFileName] = useState('')
   const [sampleSec, setSampleSec] = useState('')
+  const [genderFilter, setGenderFilter] = useState<'all' | 'female' | 'male'>('all')
 
   const selectedVoice = useMemo(() => voiceOptions.find(v => v.id === voice), [voiceOptions, voice])
+
+  // 按 gender 过滤后再按 category 分组
+  const groupedVoices = useMemo(() => {
+    const filtered = voiceOptions.filter(v => genderFilter === 'all' || v.gender === genderFilter)
+    const groups: Record<string, VoiceOption[]> = { preset: [], dialect: [], language: [] }
+    for (const v of filtered) {
+      const cat = v.category || 'preset'
+      if (!groups[cat]) groups[cat] = []
+      groups[cat].push(v)
+    }
+    return groups
+  }, [voiceOptions, genderFilter])
 
   useEffect(() => {
     if (mode !== 'preset') return
@@ -49,10 +79,13 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
       })
       .then((items: any[]) => {
         if (!mounted) return
-        const mapped = items.map((it) => ({
+        const mapped: VoiceOption[] = items.map((it) => ({
           id: String(it.key || it.id),
           label: String(it.name || '未命名音色'),
-          desc: `${it.engine || ''}${it.accent ? ` · ${it.accent}` : ''}${it.emotion ? ` · ${it.emotion}` : ''}`.replace(/^ · /, '') || '通用音色',
+          desc: it.sample_text || `${it.engine || ''}${it.accent ? ` · ${it.accent}` : ''}`.replace(/^ · /, '') || '通用音色',
+          gender: it.gender,
+          category: it.category,
+          accent: it.accent,
         }))
         if (mapped.length > 0) {
           setVoiceOptions(mapped)
@@ -62,8 +95,8 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
       .catch(() => {
         if (!mounted) return
         setPresetError('预设音色加载失败，已使用本地默认列表')
-        setVoiceOptions(VOICES)
-        setVoice(VOICES[0].id)
+        setVoiceOptions(FALLBACK_VOICES)
+        setVoice(FALLBACK_VOICES[0].id)
       })
       .finally(() => {
         if (!mounted) return
@@ -117,22 +150,59 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
         <div className="px-4 py-3 flex flex-col gap-3">
           {mode === 'preset' && (
             <>
-              <div className="grid grid-cols-2 gap-2">
-                {voiceOptions.map(v => (
+              {/* 性别筛选 */}
+              <div className="flex gap-1.5">
+                {(['all', 'female', 'male'] as const).map(g => (
                   <button
-                    key={v.id}
-                    onClick={() => setVoice(v.id)}
-                    className={`text-left px-3 py-2 rounded-lg border transition-colors cursor-pointer ${
-                      voice === v.id
-                        ? 'border-[var(--text-2)] bg-[var(--bg-hover)]'
-                        : 'border-[var(--border)] hover:bg-[var(--bg-hover)]'
+                    key={g}
+                    onClick={() => setGenderFilter(g)}
+                    className={`px-3 py-1 rounded-full text-xs cursor-pointer border transition-colors ${
+                      genderFilter === g
+                        ? 'border-[var(--text-2)] bg-[var(--bg-hover)] text-[var(--text)]'
+                        : 'border-[var(--border)] text-[var(--text-3)] hover:text-[var(--text)]'
                     }`}
                   >
-                    <div className="text-sm text-[var(--text)]">{v.label}</div>
-                    <div className="text-xs text-[var(--text-3)] mt-0.5">{v.desc}</div>
+                    {g === 'all' ? '全部' : GENDER_LABELS[g]}
                   </button>
                 ))}
               </div>
+
+              {/* 按 category 分组展示 */}
+              <div className="max-h-[360px] overflow-y-auto flex flex-col gap-3 pr-1">
+                {(['preset', 'dialect', 'language'] as const).map(cat => {
+                  const items = groupedVoices[cat] || []
+                  if (items.length === 0) return null
+                  return (
+                    <div key={cat} className="flex flex-col gap-1.5">
+                      <div className="text-xs text-[var(--text-3)]">{CATEGORY_LABELS[cat]}</div>
+                      <div className="grid grid-cols-2 gap-2">
+                        {items.map(v => (
+                          <button
+                            key={v.id}
+                            onClick={() => setVoice(v.id)}
+                            className={`text-left px-3 py-2 rounded-lg border transition-colors cursor-pointer ${
+                              voice === v.id
+                                ? 'border-[var(--text-2)] bg-[var(--bg-hover)]'
+                                : 'border-[var(--border)] hover:bg-[var(--bg-hover)]'
+                            }`}
+                          >
+                            <div className="text-sm text-[var(--text)] flex items-center gap-1.5">
+                              {v.label}
+                              {v.gender && (
+                                <span className="text-[10px] text-[var(--text-3)] px-1 py-px rounded bg-[var(--bg-hover)]">
+                                  {GENDER_LABELS[v.gender] || v.gender}
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-xs text-[var(--text-3)] mt-0.5 line-clamp-1">{v.desc}</div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+
               {presetLoading && <div className="text-xs text-[var(--text-3)]">正在加载预设音色...</div>}
               {presetError && <div className="text-xs text-amber-400">{presetError}</div>}
               <div className="flex gap-2">
