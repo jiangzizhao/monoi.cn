@@ -48,41 +48,152 @@ function buildRegenerateScriptPrompt(prompt: string) {
 }
 
 const DIALECT_INSTRUCTIONS: Record<string, string> = {
-  cantonese: `把下面这段文案改写成地道粤语口播版本。
-- 用粤语词汇和语法（嘅、喺、嘢、咗、啱、咁、呢、嗰、唔、係、佢、我哋等）
-- 保留原文的核心信息和节奏
-- 字数尽量接近原文
-- 仍然是自媒体口播风格，每行短句，每行以中文逗号或句号结尾`,
-  sichuan: `把下面这段文案改写成地道川渝方言口播版本。
-- 用四川/重庆方言词汇（巴适、撒子、要得、嘞、嘛、整、莫、咋个、晓得、给老子、龟儿子等）和语气
-- 保留原文的核心信息和节奏
-- 字数尽量接近原文
-- 自媒体口播风格，每行短句，每行以中文逗号或句号结尾`,
-  henan: `把下面这段文案改写成地道河南方言口播版本。
-- 用河南话词汇和语气（中、咋、恁、得劲、不老儿、咋弄、弄啥嘞、可、贼、敢、爱兜兜里揣等）
-- 保留原文的核心信息和节奏
-- 字数尽量接近原文
-- 自媒体口播风格，每行短句，每行以中文逗号或句号结尾`,
-  northeast: `把下面这段文案改写成地道东北方言口播版本。
-- 用东北话词汇和语气（嗯呐、咋地、贼、嘎哈、唠嗑、整、得劲、寻思、家伙、可劲儿等）
-- 保留原文的核心信息和节奏
-- 字数尽量接近原文
-- 自媒体口播风格，每行短句，每行以中文逗号或句号结尾`,
-  japanese: `Translate the following script into natural, native-sounding Japanese suitable for short-video voiceover.
-- Use casual conversational Japanese (です/ます ok, but lean toward 自然な口語表現)
-- Keep the same hook, pacing and information density
-- Output Japanese only, no Chinese, no explanations
-- Each line should be a short clause ending with 、or 。 (Japanese punctuation)`,
-  english: `Translate the following script into natural, native-sounding English suitable for short-video voiceover.
-- Conversational, casual tone (not formal/academic)
-- Keep the same hook, pacing, and information density
-- Output English only, no Chinese, no explanations
-- Each line a short clause, comma or period at end`,
-  korean: `다음 스크립트를 자연스러운 한국어 숏폼 영상 보이스오버용으로 번역하세요.
-- 구어체 (반말 또는 친근한 존댓말) 사용
-- 원문의 훅, 리듬, 정보 밀도를 유지
-- 한국어만 출력, 중국어 및 설명 금지
-- 각 줄은 짧은 문장, 쉼표 또는 마침표로 끝내기`,
+  cantonese: `把下面这段普通话文案改写成**地道香港粤语**口播版本（不是粤普，不是直译）。
+
+【必用替换】
+- 不/没 → 唔；是 → 係；的 → 嘅；东西 → 嘢；这样 → 咁；那 → 嗰；哪里 → 邊度
+- 我们 → 我哋；他/她 → 佢；是的 → 係呀
+- 干嘛/做什么 → 做乜；什么 → 乜嘢/咩
+- 现在 → 而家；先 → 先；已经 → 已經
+- 来了 → 嚟咗；去了 → 去咗；吃了 → 食咗
+- 知道 → 知/識；告诉 → 話畀；给 → 畀
+
+【必用句末助词】啦、咯、嘛、㗎、喎、囉、咩、噃
+
+【对照示例】
+- 普通话"我等你呢"→ 粤语"我喺度等緊你"
+- 普通话"你怎么了"→ 粤语"你做乜啊"
+- 普通话"很好看"→ 粤语"好靚啊"
+- 普通话"不要这样"→ 粤语"唔好咁啦"
+
+【避免】
+- 写成"普通话词+粤语助词"的假粤语
+- 用"了"、"的"、"什么"、"哪里" 这种普通话词
+- 翻译腔、书面语
+
+每行短句，符合 TVB 主持人口语节奏。`,
+
+  sichuan: `把下面这段普通话文案改写成**地道川渝方言**口播版本（成都/重庆话风格）。
+
+【必用替换】
+- 不 → 不；什么 → 啥子/撒子；怎么 → 咋个；为什么 → 咋个；好/行 → 要得
+- 我 → 我；你 → 你；他 → 他；我们 → 我们/俺们
+- 干嘛 → 做啥子；干啥 → 爪子/搞啥子；知道 → 晓得
+- 别 → 莫；舒服 → 巴适；爽 → 安逸；累 → 拐了
+- 弄/做 → 整；很 → 嘿（重庆）/好（成都）
+- 厉害 → 凶；棒 → 巴适得板
+
+【必用句末助词】嘞、嘛、撒、哦、噢、嗨呀、咯
+
+【对照示例】
+- 普通话"今天好热啊"→ 川渝"今天嘿热嘞"
+- 普通话"你在干啥"→ 川渝"你爪子嘞"
+- 普通话"特别好吃"→ 川渝"巴适得板"
+- 普通话"有点意思"→ 川渝"有点儿意思嘛"
+
+【避免】
+- 把"普通话+嘞"当成川渝话
+- 漏掉"嘞/嘛/撒"等关键尾音
+- 写得太书面
+
+风格：泼辣、生活化、火锅味儿，像龙门阵摆给你听。`,
+
+  henan: `把下面这段普通话文案改写成**地道河南方言**口播版本（豫中/郑州话风格）。
+
+【必用替换】
+- 行/可以 → 中；不行 → 不中
+- 怎么 → 咋；什么 → 啥；为啥 → 咋；为什么 → 咋着
+- 你 → 你；那 → 恁；很 → 可（强调时） / 老
+- 喜欢 → 爱；干啥 → 弄啥嘞；舒服 → 得劲
+- 不少 → 不老儿；找 → 寻；想 → 寻思
+- 走 → 走；快 → 麻溜；棒 → 美得很
+
+【必用句末助词】哩、嘞、咧、啊
+
+【对照示例】
+- 普通话"行不行"→ 河南"中不中"
+- 普通话"怎么了"→ 河南"咋了哩"
+- 普通话"特别好吃"→ 河南"美得很咧"
+- 普通话"你在干啥"→ 河南"你弄啥嘞"
+
+【避免】
+- 把"普通话+哩"硬贴当河南话
+- 漏掉"中/咋/恁/嘞"这些核心词
+
+风格：朴实、亲切、带点幽默感，像老乡跟你拉家常。`,
+
+  northeast: `把下面这段普通话文案改写成**地道东北方言**口播版本（沈阳/铁岭/哈尔滨风格）。
+
+【必用替换】
+- 是的 → 嗯呐；很/特别 → 贼；干嘛 → 嘎哈
+- 怎么 → 咋地；聊天 → 唠嗑；想 → 寻思
+- 弄/做 → 整；喜欢 → 稀罕；舒服/爽 → 得劲
+- 厉害 → 杠杠的；漂亮 → 老带劲了；多 → 老多了
+- 不行 → 不中/不行；倒霉 → 玩完
+- 家伙、可劲儿、嗷嗷的、贼啦
+
+【必用句末助词】呗、呢、啊、嘞、哈、的呀
+
+【对照示例】
+- 普通话"你干啥呢"→ 东北"你嘎哈呢"
+- 普通话"特别好吃"→ 东北"贼好吃"
+- 普通话"很厉害"→ 东北"杠杠的"
+- 普通话"我去看看"→ 东北"我寻思去看看哈"
+
+【避免】
+- 只在末尾加"呗"就当东北话
+- 漏掉"贼/嘎哈/老/嗷嗷"等核心词
+
+风格：豪爽、幽默、带烧烤摊味儿，像跟兄弟唠嗑。`,
+
+  japanese: `Rewrite the following Mandarin Chinese script into natural, native Japanese for short-form video voiceover. Output Japanese only.
+
+Requirements:
+- Native-level Japanese — NOT machine translation, NOT direct word-for-word translation
+- Casual conversational tone for short video (TikTok/YouTube Shorts/Reels Japan)
+- Mix だ/だよ/ね/よ/んだ etc. for natural flow; avoid stiff です/ます unless tone demands it
+- Use 短い文 — 1 line = 1 short clause, ending with 、or 。
+- Keep the same hook (the first 3 seconds attention grabber) and emotional beats
+- Approximate the same length (in moras, not characters)
+- Use natural Japanese idioms instead of literal Chinese-style expressions
+- Output ONLY Japanese, no Chinese, no English, no explanations, no headers
+
+Example mapping:
+- "你练了三个月，体重没掉一斤" → "三ヶ月もトレーニングしたのに、体重一キロも落ちないの"
+- "其实这才是减脂最牛的信号" → "これ、実は脂肪が落ちてる最高のサインなんだよ"`,
+
+  english: `Rewrite the following Mandarin Chinese script into natural, native English for short-form video voiceover. Output English only.
+
+Requirements:
+- Native-level American English — NOT machine translation
+- Casual, conversational, short-video tone (TikTok/YouTube Shorts/Reels)
+- Use contractions (you're, don't, can't, it's), natural slang where it fits
+- Avoid academic/formal vocabulary
+- Each line = one short punchy clause ending with comma or period
+- Keep the same hook (first 3 seconds) and emotional beats
+- Approximate the same length and pacing
+- Output ONLY English, no Chinese, no explanations, no headers
+
+Example mapping:
+- "你练了三个月" → "You've been training for three months,"
+- "体重没掉一斤" → "and the scale hasn't moved at all,"
+- "其实这才是减脂最牛的信号" → "but here's the thing — that's actually the BEST sign you're losing fat."`,
+
+  korean: `다음 중국어 스크립트를 자연스러운 한국어 숏폼 영상 보이스오버로 다시 써주세요. 한국어만 출력합니다.
+
+요구사항:
+- 원어민 수준의 자연스러운 한국어 — 기계번역 금지, 직역 금지
+- 짧은 영상에 어울리는 친근한 구어체 (반말 또는 친근한 존댓말)
+- 한국어 숏폼/유튜브 쇼츠/릴스에서 실제로 쓰이는 표현
+- 한 줄 = 짧은 한 문장, 쉼표 또는 마침표로 끝맺음
+- 원본의 훅(첫 3초)과 감정 흐름 유지
+- 길이와 리듬 비슷하게
+- 한국어만 출력, 중국어/영어/설명 금지
+
+예시:
+- "你练了三个月" → "삼 개월 동안 운동했는데"
+- "体重没掉一斤" → "몸무게는 그대로야"
+- "其实这才是减脂最牛的信号" → "근데 이게 사실 진짜 살 빠지고 있다는 신호거든"`,
 }
 
 function buildDialectPrompt(dialect: string, script: string) {
@@ -157,7 +268,7 @@ export function useChat() {
         const promptForModel = buildDialectPrompt(dialect, script)
         const newScript = await callScriptAI(promptForModel, () => {
           store.updateLastAssistantBlocks(convId, [{ type: 'loading', label: 'AI 正在改写...' }])
-        }, ctrl.signal)
+        }, ctrl.signal, 'dialect')
         store.updateLastAssistantBlocks(convId, [makeScriptCard(newScript)])
         return
       }

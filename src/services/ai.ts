@@ -178,23 +178,36 @@ export async function callAI(
   return full
 }
 
-function buildScriptSystemPrompt(mode: 'original' | 'rewrite') {
+function buildScriptSystemPrompt(mode: 'original' | 'rewrite' | 'dialect') {
   const common = [
-    '你是 monoi 的中文短视频口播文案写手。',
     '你的回复必须只包含最终文案正文。',
     '禁止输出 JSON、代码、Markdown、代码块、字段名、解释、标题推荐、标签、分析、前后缀说明。',
     '不要出现 ```、{、}、"type"、"blocks"、"script_card"、const、function、return、JSON.stringify 等代码或结构化字段。',
-    '文案要口语化，适合直接给 AI 配音朗读。',
-    '每一行是一句独立语义，尽量使用中文逗号或句号形成自然停顿。',
+    '每一行是一句独立语义，形成自然停顿。',
   ]
   const rewrite = [
+    '你是 monoi 的中文短视频口播文案写手。',
+    '文案要口语化，适合直接给 AI 配音朗读。',
     '这是仿写任务：保留参考原文约 50% 的叙事结构，案例素材置换 80%，重复率控制在 30% 以下。',
     '不要复述任务要求，不要点评原文，只输出改写后的口播文案。',
   ]
   const original = [
+    '你是 monoi 的中文短视频口播文案写手。',
+    '文案要口语化，适合直接给 AI 配音朗读。',
     '这是原创任务：根据用户提供的平台、风格、字数、行业和目标用户，直接创作一篇口播文案。',
     '不要询问补充信息，只输出完整口播文案。',
   ]
+  const dialect = [
+    '你是一个精通中国各地方言以及日语、英语、韩语的本地化口播文案专家。',
+    '你的任务是把普通话短视频文案"本地化"成目标语种/方言版本。不是字面翻译，而是用目标语种/方言的母语者实际会说的话来重写。',
+    '严格要求：',
+    '1. 不要保留普通话的标准表达——必须替换成目标方言/语言的等价说法',
+    '2. 不要写"翻译腔"——避免生硬直译，要像母语者随口说出来的样子',
+    '3. 不要混用其他语种（除非任务明确要求双语）',
+    '4. 短视频口播节奏：每行短句，节奏紧凑，有钩子',
+    '5. 字数尽量贴近原文，保留情绪和卖点',
+  ]
+  if (mode === 'dialect') return [...common, ...dialect].join('\n')
   return [...common, ...(mode === 'rewrite' ? rewrite : original)].join('\n')
 }
 
@@ -333,9 +346,10 @@ export function cleanScriptText(raw: string) {
 export async function callScriptAI(
   prompt: string,
   onChunk: (text: string) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  modeOverride?: 'original' | 'rewrite' | 'dialect'
 ): Promise<string> {
-  const mode = prompt.startsWith('【仿写文案】') ? 'rewrite' : 'original'
+  const mode = modeOverride ?? (prompt.startsWith('【仿写文案】') ? 'rewrite' : 'original')
   const res = await fetchWithRetry('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
