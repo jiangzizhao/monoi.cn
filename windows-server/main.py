@@ -836,15 +836,25 @@ def synthesize_voice(req: VoiceSynthesizeRequest):
 def get_voice_task(task_id: str):
     """查询阿里云长文本任务状态"""
     data = aliyun_get_task(task_id)
-    status_code = data.get("status_code") or data.get("status")
-    error_msg = data.get("error_message") or data.get("message")
+    print(f"[ALIYUN TASK QUERY] raw response: {data}", flush=True)
+
+    # 阿里云返回结构：status / status_text 在顶层，data 在嵌套里
     body = data.get("data") or {}
-    audio_url = body.get("audio_address")
-    if status_code == 20000000 and audio_url:
-        return {"status": "ready", "audio_url": audio_url, "duration_seconds": body.get("duration", 0)}
-    if status_code in (41040201, 41040202) or not audio_url:
-        return {"status": "processing", "raw_status_code": status_code}
-    return {"status": "error", "message": error_msg or f"未知错误({status_code})"}
+    # 音频地址：先看嵌套 data，再看顶层
+    audio_url = body.get("audio_address") or data.get("audio_address")
+    duration = body.get("duration") or data.get("duration") or 0
+
+    # 状态文本：SUCCESS / RUNNING / QUEUEING
+    status_text = (body.get("task_status") or data.get("task_status") or data.get("status_text") or "").upper()
+
+    if audio_url:
+        return {"status": "ready", "audio_url": audio_url, "duration_seconds": duration}
+
+    if status_text in ("RUNNING", "QUEUEING") or status_text == "":
+        return {"status": "processing", "task_status": status_text or "UNKNOWN", "raw": str(data)[:400]}
+
+    error_msg = data.get("error_message") or data.get("message") or status_text
+    return {"status": "error", "message": error_msg, "raw": str(data)[:400]}
 
 
 @app.get("/api/voice/audio/{name}")
