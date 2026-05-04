@@ -17,11 +17,6 @@ interface VoiceOption {
   accent?: string
 }
 
-const FALLBACK_VOICES: VoiceOption[] = [
-  { id: 'warm_female', label: '温柔女声', desc: '适合情感、生活方式', gender: 'female', category: 'preset' },
-  { id: 'steady_male', label: '沉稳男声', desc: '适合知识、商业表达', gender: 'male',   category: 'preset' },
-]
-
 const CATEGORY_LABELS: Record<string, string> = {
   preset: '普通话',
   dialect: '方言',
@@ -41,10 +36,10 @@ function formTitle(mode: Mode) {
 }
 
 export function VoiceForm({ mode, onSubmit, onClose }: Props) {
-  const [voiceOptions, setVoiceOptions] = useState<VoiceOption[]>(FALLBACK_VOICES)
+  const [voiceOptions, setVoiceOptions] = useState<VoiceOption[]>([])
   const [presetLoading, setPresetLoading] = useState(false)
   const [presetError, setPresetError] = useState('')
-  const [voice, setVoice] = useState(FALLBACK_VOICES[0].id)
+  const [voice, setVoice] = useState('')
   const [speed, setSpeed] = useState('1.0x')
   const [emotion, setEmotion] = useState('自然')
   const [notes, setNotes] = useState('')
@@ -94,9 +89,7 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
       })
       .catch(() => {
         if (!mounted) return
-        setPresetError('预设音色加载失败，已使用本地默认列表')
-        setVoiceOptions(FALLBACK_VOICES)
-        setVoice(FALLBACK_VOICES[0].id)
+        setPresetError('预设音色加载失败，请检查后端服务')
       })
       .finally(() => {
         if (!mounted) return
