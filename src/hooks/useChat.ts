@@ -179,6 +179,71 @@ Example mapping:
 - "体重没掉一斤" → "and the scale hasn't moved at all,"
 - "其实这才是减脂最牛的信号" → "but here's the thing — that's actually the BEST sign you're losing fat."`,
 
+  tianjin: `把下面这段普通话文案改写成**地道天津方言**口播版本。
+- 用天津话词汇语气（嘛、介、倍儿、哏儿、贫嘴、闹爷们儿、哏儿都、瞎掰、胡掰、嘛玩意儿、得劲）
+- 句末助词：哎、呀、嘞、咧、哏儿
+- 风格：贫、爽利、带点幽默感，像茶馆相声
+- 字数贴近原文，每行短句`,
+  taiwanese: `把下面这段普通话文案改写成**地道台湾国语**口播版本（不是闽南语，是台式国语）。
+- 用台湾国语词汇（蛮、超、有点、哦、欸、好啦、酱、酱子、啦、啰、嘛）
+- 句末助词：啦、嘛、欸、捏、耶
+- 避免大陆词（"特别、肯定、视频"→"超、绝对、影片"）
+- 风格：温和、亲切、有点撒娇感，台北/台中年轻人风`,
+  hunan: `把下面这段普通话文案改写成**地道湖南方言**口播版本（长沙话/湖南话风格）。
+- 用湖南话词汇（恰、霸蛮、要得、嫑（不要）、咯、耍、蛮、几、蛮恰惯、堂客（老婆）、巴适等）
+- 句末助词：咧、咯、嗯、哒、哦
+- 风格：辣、爽快、自带搞笑包袱，长沙人语调
+- 字数贴近原文，每行短句`,
+  french: `Réécris le script chinois suivant en français natif et naturel pour voiceover de vidéo courte.
+- Niveau natif, style conversationnel et casual
+- Garde le hook (3 premières secondes) et le rythme original
+- Une ligne = une courte phrase, terminée par , ou .
+- Sors UNIQUEMENT le français, pas de chinois ni d'explication`,
+  german: `Schreibe das folgende chinesische Skript in natürliches, muttersprachliches Deutsch für Kurzvideo-Voiceover um.
+- Konversationston, casual, kein steifes Hochdeutsch
+- Behalte den Hook und Rhythmus
+- Eine Zeile = ein kurzer Satz mit , oder .
+- NUR Deutsch ausgeben, kein Chinesisch, keine Erklärungen`,
+  spanish: `Reescribe el siguiente guion chino en español natural y nativo para voiceover de video corto.
+- Tono conversacional, casual
+- Mantén el hook y el ritmo original
+- Una línea = una frase corta, terminando con , o .
+- SOLO español, nada de chino ni explicaciones`,
+  italian: `Riscrivi il seguente script cinese in italiano naturale e madrelingua per voiceover di video breve.
+- Tono colloquiale, casual
+- Mantieni il hook e il ritmo
+- Una riga = una frase breve con , o .
+- SOLO italiano, niente cinese né spiegazioni`,
+  russian: `Перепиши следующий китайский сценарий на естественный, родной русский для короткого видео-войсовера.
+- Разговорный, неформальный тон
+- Сохраняй хук и ритм оригинала
+- Одна строка = одна короткая фраза с , или .
+- Только русский, без китайского и объяснений`,
+  thai: `เขียนสคริปต์จีนต่อไปนี้ใหม่เป็นภาษาไทยธรรมชาติแบบเจ้าของภาษาสำหรับวิดีโอสั้น
+- ใช้ภาษาพูด สบาย ๆ
+- รักษาฮุค (3 วินาทีแรก) และจังหวะ
+- หนึ่งบรรทัด = ประโยคสั้น ๆ จบด้วย , หรือ .
+- ส่งออกเฉพาะภาษาไทย ไม่มีภาษาจีนหรือคำอธิบาย`,
+  vietnamese: `Viết lại kịch bản tiếng Trung dưới đây thành tiếng Việt tự nhiên, bản ngữ cho voiceover video ngắn.
+- Giọng văn hội thoại, thân mật
+- Giữ hook (3 giây đầu) và nhịp điệu
+- Mỗi dòng = một câu ngắn, kết thúc bằng , hoặc .
+- Chỉ xuất tiếng Việt, không tiếng Trung không giải thích`,
+  indonesian: `Tulis ulang skrip Mandarin berikut menjadi Bahasa Indonesia yang natural untuk voiceover video pendek.
+- Nada percakapan, casual
+- Pertahankan hook dan ritme
+- Satu baris = satu kalimat pendek diakhiri , atau .
+- HANYA Bahasa Indonesia, tanpa Mandarin atau penjelasan`,
+  malay: `Tulis semula skrip Mandarin berikut dalam Bahasa Melayu semula jadi untuk voiceover video pendek.
+- Nada perbualan, santai
+- Kekalkan hook dan ritma
+- Satu baris = satu ayat pendek diakhiri , atau .
+- HANYA Bahasa Melayu, tiada Mandarin atau penjelasan`,
+  filipino: `Isulat muli ang sumusunod na script sa Mandarin sa natural at native na Filipino para sa short video voiceover.
+- Conversational, casual na tono
+- Panatilihin ang hook at ritmo
+- Isang linya = isang maikling pangungusap na nagtatapos sa , o .
+- Filipino lang, walang Mandarin o paliwanag`,
   korean: `다음 중국어 스크립트를 자연스러운 한국어 숏폼 영상 보이스오버로 다시 써주세요. 한국어만 출력합니다.
 
 요구사항:
@@ -232,8 +297,12 @@ export function useChat() {
     if (text.startsWith('__dialect__')) {
       const m = text.match(/^__dialect__(\w+)__/)
       const labelMap: Record<string, string> = {
-        cantonese: '粤语', sichuan: '川渝', henan: '河南', northeast: '东北',
+        cantonese: '粤语', sichuan: '川渝', northeast: '东北', tianjin: '天津',
+        taiwanese: '台湾', hunan: '湖南', henan: '河南',
         japanese: '日语', english: '英语', korean: '韩语',
+        french: '法语', german: '德语', spanish: '西语', italian: '意语',
+        russian: '俄语', thai: '泰语', vietnamese: '越南语',
+        indonesian: '印尼语', malay: '马来语', filipino: '菲语',
       }
       const dialectLabel = m ? (labelMap[m[1]] || m[1]) : '方言'
       displayText = `改写成${dialectLabel}版本`

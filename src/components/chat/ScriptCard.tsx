@@ -6,11 +6,25 @@ import type { ScriptResult } from '../../types'
 const DIALECT_GROUP = [
   { id: 'cantonese', label: '粤语' },
   { id: 'sichuan',   label: '川渝' },
+  { id: 'northeast', label: '东北' },
+  { id: 'tianjin',   label: '天津' },
+  { id: 'taiwanese', label: '台湾' },
+  { id: 'hunan',     label: '湖南' },
 ]
 const LANGUAGE_GROUP = [
   { id: 'japanese',  label: '日语' },
   { id: 'english',   label: '英语' },
   { id: 'korean',    label: '韩语' },
+  { id: 'french',    label: '法语' },
+  { id: 'german',    label: '德语' },
+  { id: 'spanish',   label: '西语' },
+  { id: 'italian',   label: '意语' },
+  { id: 'russian',   label: '俄语' },
+  { id: 'thai',      label: '泰语' },
+  { id: 'vietnamese',label: '越南语' },
+  { id: 'indonesian',label: '印尼语' },
+  { id: 'malay',     label: '马来语' },
+  { id: 'filipino',  label: '菲语' },
 ]
 
 function DropdownButton({ label, options, onPick }:

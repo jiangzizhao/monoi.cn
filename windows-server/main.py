@@ -27,23 +27,39 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_DAYS = 30
 VOICE_STORAGE_DIR = "voice-assets"
 VOICE_PRESETS = [
-    # ─── 普通话女声（极致音，最接近真人）───
-    {"key": "siqi",          "name": "思琪",          "engine": "aliyun", "category": "preset", "gender": "female", "locale": "zh-CN", "accent": "mandarin", "emotion": "warm",       "speed": "1.0x", "sample_text": "温柔女声，情感、生活方式。"},
-    {"key": "ruoxi",         "name": "若汐",          "engine": "aliyun", "category": "preset", "gender": "female", "locale": "zh-CN", "accent": "mandarin", "emotion": "knowledgeable","speed": "1.0x", "sample_text": "知性女声，知识、纪录。"},
-    {"key": "sijia",         "name": "思佳",          "engine": "aliyun", "category": "preset", "gender": "female", "locale": "zh-CN", "accent": "mandarin", "emotion": "natural",    "speed": "1.0x", "sample_text": "自然女声，日常口播。"},
+    # ─── 普通话女声（极致音）───
+    {"key": "siqi",     "name": "思琪",   "engine": "aliyun", "category": "preset", "gender": "female", "locale": "zh-CN", "accent": "mandarin", "emotion": "warm",          "speed": "1.0x", "sample_text": "温柔女声，情感、生活方式。"},
+    {"key": "ruoxi",    "name": "若汐",   "engine": "aliyun", "category": "preset", "gender": "female", "locale": "zh-CN", "accent": "mandarin", "emotion": "knowledgeable", "speed": "1.0x", "sample_text": "知性女声，知识、纪录。"},
+    {"key": "sijia",    "name": "思佳",   "engine": "aliyun", "category": "preset", "gender": "female", "locale": "zh-CN", "accent": "mandarin", "emotion": "natural",       "speed": "1.0x", "sample_text": "自然女声，日常口播。"},
     # ─── 普通话男声（极致音）───
-    {"key": "sicheng",       "name": "思诚",          "engine": "aliyun", "category": "preset", "gender": "male",   "locale": "zh-CN", "accent": "mandarin", "emotion": "steady",     "speed": "0.95x","sample_text": "沉稳男声，资讯、商业、知识。"},
+    {"key": "sicheng",  "name": "思诚",   "engine": "aliyun", "category": "preset", "gender": "male",   "locale": "zh-CN", "accent": "mandarin", "emotion": "steady",        "speed": "0.95x","sample_text": "沉稳男声，资讯、商业、知识。"},
     # ─── 方言 ───
-    {"key": "shanshan",      "name": "姗姗（粤语）",     "engine": "aliyun", "category": "dialect", "gender": "female", "locale": "zh-HK", "accent": "cantonese", "emotion": "natural", "speed": "1.0x", "sample_text": "粤语女声。"},
-    {"key": "jiajia",        "name": "佳佳（粤语）",     "engine": "aliyun", "category": "dialect", "gender": "female", "locale": "zh-HK", "accent": "cantonese", "emotion": "natural", "speed": "1.0x", "sample_text": "粤语女声（年轻）。"},
-    {"key": "kelly",         "name": "Kelly（粤语）",    "engine": "aliyun", "category": "dialect", "gender": "female", "locale": "zh-HK", "accent": "cantonese", "emotion": "natural", "speed": "1.0x", "sample_text": "粤语女声（甜美）。"},
-    {"key": "jielong",       "name": "杰龙（粤语）",     "engine": "aliyun", "category": "dialect", "gender": "male",   "locale": "zh-HK", "accent": "cantonese", "emotion": "natural", "speed": "1.0x", "sample_text": "粤语男声。"},
-    {"key": "siyue",         "name": "思悦（四川话）",   "engine": "aliyun", "category": "dialect", "gender": "female", "locale": "zh-CN", "accent": "sichuan",   "emotion": "natural", "speed": "1.0x", "sample_text": "四川话女声。"},
+    {"key": "shanshan", "name": "姗姗",   "engine": "aliyun", "category": "dialect", "gender": "female", "locale": "zh-HK", "accent": "cantonese", "emotion": "natural", "speed": "1.0x", "sample_text": "粤语女声。"},
+    {"key": "jiajia",   "name": "佳佳",   "engine": "aliyun", "category": "dialect", "gender": "female", "locale": "zh-HK", "accent": "cantonese", "emotion": "natural", "speed": "1.0x", "sample_text": "粤语女声（年轻）。"},
+    {"key": "kelly",    "name": "Kelly",  "engine": "aliyun", "category": "dialect", "gender": "female", "locale": "zh-HK", "accent": "cantonese", "emotion": "natural", "speed": "1.0x", "sample_text": "香港粤语女声。"},
+    {"key": "taozi",    "name": "桃子",   "engine": "aliyun", "category": "dialect", "gender": "female", "locale": "zh-HK", "accent": "cantonese", "emotion": "natural", "speed": "1.0x", "sample_text": "粤语女声（甜美）。"},
+    {"key": "dahu",     "name": "大虎",   "engine": "aliyun", "category": "dialect", "gender": "male",   "locale": "zh-CN", "accent": "northeast", "emotion": "natural", "speed": "1.0x", "sample_text": "东北话男声。"},
+    {"key": "cuijie",   "name": "翠姐",   "engine": "aliyun", "category": "dialect", "gender": "female", "locale": "zh-CN", "accent": "northeast", "emotion": "natural", "speed": "1.0x", "sample_text": "东北话女声。"},
+    {"key": "aikan",    "name": "艾侃",   "engine": "aliyun", "category": "dialect", "gender": "male",   "locale": "zh-CN", "accent": "tianjin",   "emotion": "natural", "speed": "1.0x", "sample_text": "天津话男声。"},
+    {"key": "qingqing", "name": "青青",   "engine": "aliyun", "category": "dialect", "gender": "female", "locale": "zh-TW", "accent": "taiwanese", "emotion": "natural", "speed": "1.0x", "sample_text": "台湾话女声。"},
+    {"key": "xiaoze",   "name": "小泽",   "engine": "aliyun", "category": "dialect", "gender": "male",   "locale": "zh-CN", "accent": "hunan",     "emotion": "natural", "speed": "1.0x", "sample_text": "湖南重口音男声。"},
+    {"key": "xiaoyue",  "name": "小玥",   "engine": "aliyun", "category": "dialect", "gender": "female", "locale": "zh-CN", "accent": "sichuan",   "emotion": "natural", "speed": "1.0x", "sample_text": "四川话女声。"},
     # ─── 外语 ───
-    {"key": "tomoka",        "name": "Tomoka（日语女）", "engine": "aliyun", "category": "language", "gender": "female", "locale": "ja-JP", "accent": "japanese", "emotion": "natural", "speed": "1.0x", "sample_text": "日语女声。"},
-    {"key": "tomoya",        "name": "Tomoya（日语男）", "engine": "aliyun", "category": "language", "gender": "male",   "locale": "ja-JP", "accent": "japanese", "emotion": "natural", "speed": "1.0x", "sample_text": "日语男声。"},
-    {"key": "stella",        "name": "Stella（英语女）", "engine": "aliyun", "category": "language", "gender": "female", "locale": "en-US", "accent": "english",  "emotion": "natural", "speed": "1.0x", "sample_text": "美式英语女声。"},
-    {"key": "harry",         "name": "Harry（英语男）",  "engine": "aliyun", "category": "language", "gender": "male",   "locale": "en-US", "accent": "english",  "emotion": "natural", "speed": "1.0x", "sample_text": "美式英语男声。"},
+    {"key": "zhixiang", "name": "智香",    "engine": "aliyun", "category": "language", "gender": "female", "locale": "ja-JP", "accent": "japanese", "emotion": "natural", "speed": "1.0x", "sample_text": "日语女声。"},
+    {"key": "zhiye",    "name": "智也",    "engine": "aliyun", "category": "language", "gender": "male",   "locale": "ja-JP", "accent": "japanese", "emotion": "natural", "speed": "1.0x", "sample_text": "日语男声。"},
+    {"key": "kyong",    "name": "Kyong",  "engine": "aliyun", "category": "language", "gender": "female", "locale": "ko-KR", "accent": "korean",   "emotion": "natural", "speed": "1.0x", "sample_text": "韩语女声。"},
+    {"key": "stella",   "name": "Stella", "engine": "aliyun", "category": "language", "gender": "female", "locale": "en-US", "accent": "english",  "emotion": "natural", "speed": "1.0x", "sample_text": "英语女声。"},
+    {"key": "harry",    "name": "Harry",  "engine": "aliyun", "category": "language", "gender": "male",   "locale": "en-US", "accent": "english",  "emotion": "natural", "speed": "1.0x", "sample_text": "英语男声。"},
+    {"key": "clara",    "name": "Clara",  "engine": "aliyun", "category": "language", "gender": "female", "locale": "fr-FR", "accent": "french",   "emotion": "natural", "speed": "1.0x", "sample_text": "法语女声。"},
+    {"key": "hanna",    "name": "Hanna",  "engine": "aliyun", "category": "language", "gender": "female", "locale": "de-DE", "accent": "german",   "emotion": "natural", "speed": "1.0x", "sample_text": "德语女声。"},
+    {"key": "camila",   "name": "Camila", "engine": "aliyun", "category": "language", "gender": "female", "locale": "es-ES", "accent": "spanish",  "emotion": "natural", "speed": "1.0x", "sample_text": "西班牙语女声。"},
+    {"key": "perla",    "name": "Perla",  "engine": "aliyun", "category": "language", "gender": "female", "locale": "it-IT", "accent": "italian",  "emotion": "natural", "speed": "1.0x", "sample_text": "意大利语女声。"},
+    {"key": "masha",    "name": "masha",  "engine": "aliyun", "category": "language", "gender": "female", "locale": "ru-RU", "accent": "russian",  "emotion": "natural", "speed": "1.0x", "sample_text": "俄语女声。"},
+    {"key": "waan",     "name": "Waan",   "engine": "aliyun", "category": "language", "gender": "female", "locale": "th-TH", "accent": "thai",     "emotion": "natural", "speed": "1.0x", "sample_text": "泰语女声。"},
+    {"key": "tien",     "name": "Tien",   "engine": "aliyun", "category": "language", "gender": "female", "locale": "vi-VN", "accent": "vietnamese","emotion": "natural", "speed": "1.0x", "sample_text": "越南语女声。"},
+    {"key": "indah",    "name": "Indah",  "engine": "aliyun", "category": "language", "gender": "female", "locale": "id-ID", "accent": "indonesian","emotion": "natural", "speed": "1.0x", "sample_text": "印尼语女声。"},
+    {"key": "farah",    "name": "Farah",  "engine": "aliyun", "category": "language", "gender": "female", "locale": "ms-MY", "accent": "malay",    "emotion": "natural", "speed": "1.0x", "sample_text": "马来语女声。"},
+    {"key": "tala",     "name": "Tala",   "engine": "aliyun", "category": "language", "gender": "female", "locale": "fil-PH","accent": "filipino", "emotion": "natural", "speed": "1.0x", "sample_text": "菲律宾语女声。"},
 ]
 
 # 用 Python 内置 hashlib，无需 bcrypt/passlib
