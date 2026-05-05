@@ -24,7 +24,7 @@ const MODULE_OPTIONS: Record<string, { id: string; label: string; desc: string }
   ],
   '配音': [
     { id: '__voice_preset__', label: '预设音色', desc: '从音色库中选择' },
-    { id: '__voice_upload__', label: '上传录音', desc: '已录好的音频直接用' },
+    { id: '__voice_upload__', label: '音频剪辑', desc: '上传录音自动去气口、去口误重复' },
     { id: '__voice_clone__', label: '克隆声音', desc: '上传样本复刻你的声音' },
   ],
   '口播': [

@@ -20,7 +20,7 @@ import torchaudio
 import soundfile as sf
 import numpy as np
 import torchaudio.transforms as TAT
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -111,6 +111,158 @@ def synthesize(req: SynthesizeRequest):
     sf.write(out_path, audio.squeeze(0).cpu().numpy(), MODEL.sample_rate)
 
     return {"success": True, "file": out_name, "path": out_path, "duration_seconds": audio.shape[1] / MODEL.sample_rate}
+
+
+# ============== 录音清洗（去气口 + 去重复） ==============
+
+NARRATION_OUTPUT_DIR = os.path.join(COSYVOICE_DIR, "narration_outputs")
+os.makedirs(NARRATION_OUTPUT_DIR, exist_ok=True)
+
+_WHISPER_MODEL = None
+
+def get_whisper():
+    """懒加载 faster-whisper"""
+    global _WHISPER_MODEL
+    if _WHISPER_MODEL is None:
+        from faster_whisper import WhisperModel
+        print("Loading Whisper small (GPU)...", flush=True)
+        _WHISPER_MODEL = WhisperModel("small", device="cuda", compute_type="float16")
+        print("Whisper loaded.", flush=True)
+    return _WHISPER_MODEL
+
+
+def _ffmpeg_silence_detect(audio_path, noise_db=-30, min_silence=0.6):
+    """用 ffmpeg silencedetect 找静音段，返回 [(start, end), ...]"""
+    import subprocess
+    import re
+    proc = subprocess.run(
+        ["ffmpeg", "-i", audio_path, "-af", f"silencedetect=noise={noise_db}dB:d={min_silence}", "-f", "null", "-"],
+        capture_output=True, text=True
+    )
+    output = proc.stderr
+    starts = [float(m) for m in re.findall(r"silence_start: ([\d.]+)", output)]
+    ends = [float(m) for m in re.findall(r"silence_end: ([\d.]+)", output)]
+    return list(zip(starts, ends))
+
+
+def _detect_repeats(segments, similarity_threshold=0.7, max_gap=5.0):
+    """检测口误重复段：相邻两段文本相似度高且时间近的，标记前一个为删除"""
+    from difflib import SequenceMatcher
+    to_remove = []
+    for i in range(len(segments) - 1):
+        a = segments[i]
+        b = segments[i + 1]
+        gap = b["start"] - a["end"]
+        if gap > max_gap:
+            continue
+        sim = SequenceMatcher(None, a["text"].strip(), b["text"].strip()).ratio()
+        if sim >= similarity_threshold and len(a["text"].strip()) >= 4:
+            to_remove.append((a["start"], a["end"]))
+    return to_remove
+
+
+def _ffmpeg_concat_keep(audio_path, removed_intervals, total_duration, out_path):
+    """根据要删除的区间，输出剩余拼接的 wav"""
+    import subprocess
+    # 算出"保留段" = 全长 - removed_intervals
+    removed_intervals = sorted(removed_intervals)
+    keep_segments = []
+    cursor = 0.0
+    for s, e in removed_intervals:
+        if s > cursor:
+            keep_segments.append((cursor, s))
+        cursor = max(cursor, e)
+    if cursor < total_duration:
+        keep_segments.append((cursor, total_duration))
+
+    if not keep_segments:
+        # 全删了？保底用原音频
+        keep_segments = [(0, total_duration)]
+
+    # 用 ffmpeg select filter
+    select_expr = "+".join(f"between(t,{s},{e})" for s, e in keep_segments)
+    proc = subprocess.run(
+        ["ffmpeg", "-y", "-i", audio_path, "-af",
+         f"aselect='{select_expr}',asetpts=N/SR/TB", out_path],
+        capture_output=True
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(f"ffmpeg concat failed: {proc.stderr.decode('utf-8', errors='ignore')[-300:]}")
+    return keep_segments
+
+
+@app.post("/clean-narration")
+async def clean_narration(file: UploadFile = File(...), reference_text: str = Form("")):
+    """上传录音 → 去气口 + 去口误重复 → 返回清洗后的 wav"""
+    import shutil
+    import subprocess
+    import tempfile
+
+    job_id = f"narr_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}"
+    raw_path = os.path.join(tempfile.gettempdir(), f"{job_id}_raw")
+    norm_path = os.path.join(NARRATION_OUTPUT_DIR, f"{job_id}_input.wav")
+    out_path = os.path.join(NARRATION_OUTPUT_DIR, f"{job_id}_cleaned.wav")
+
+    # 1. 保存上传文件
+    with open(raw_path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+
+    # 2. 转 16kHz 单声道 wav
+    proc = subprocess.run(
+        ["ffmpeg", "-y", "-i", raw_path, "-ar", "16000", "-ac", "1", "-f", "wav", norm_path],
+        capture_output=True, timeout=120
+    )
+    if proc.returncode != 0:
+        raise HTTPException(400, f"音频转换失败")
+    try: os.unlink(raw_path)
+    except: pass
+
+    # 3. 测原始时长
+    info = sf.info(norm_path)
+    orig_dur = info.duration
+
+    # 4. Whisper 转录得到分段
+    model = get_whisper()
+    segments_iter, info = model.transcribe(norm_path, language="zh", beam_size=5)
+    segments = []
+    for s in segments_iter:
+        segments.append({"start": s.start, "end": s.end, "text": s.text})
+
+    full_text = "".join(s["text"] for s in segments).strip()
+
+    # 5. 找静音段 + 重复段
+    silences = _ffmpeg_silence_detect(norm_path, noise_db=-30, min_silence=0.6)
+    repeats = _detect_repeats(segments)
+
+    removed = silences + repeats
+
+    # 6. 拼接保留段
+    keep = _ffmpeg_concat_keep(norm_path, removed, orig_dur, out_path)
+
+    # 7. 测清洗后时长
+    new_info = sf.info(out_path)
+    new_dur = new_info.duration
+
+    return {
+        "success": True,
+        "file": os.path.basename(out_path),
+        "audio_url_path": f"/narration/{os.path.basename(out_path)}",
+        "original_duration": orig_dur,
+        "cleaned_duration": new_dur,
+        "transcription": full_text,
+        "removed_silences": len(silences),
+        "removed_repeats": len(repeats),
+        "segments": segments,
+    }
+
+
+@app.get("/narration/{name}")
+def get_narration(name: str):
+    safe = os.path.basename(name)
+    path = os.path.join(NARRATION_OUTPUT_DIR, safe)
+    if not os.path.exists(path):
+        raise HTTPException(404, "audio not found")
+    return FileResponse(path, media_type="audio/wav", filename=safe)
 
 
 @app.get("/audio/{name}")

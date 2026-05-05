@@ -294,6 +294,12 @@ export function useChat() {
         displayText = `配音：${p.voice_label || p.voice_id}（${p.speed}）`
       } catch { /* keep raw */ }
     }
+    if (text.startsWith('__cleaned_audio__')) {
+      try {
+        const p = JSON.parse(text.slice('__cleaned_audio__'.length))
+        displayText = `音频剪辑：${p.original_duration?.toFixed(1)}s → ${p.duration?.toFixed(1)}s`
+      } catch { /* keep raw */ }
+    }
     if (text.startsWith('__dialect__')) {
       const m = text.match(/^__dialect__(\w+)__/)
       const labelMap: Record<string, string> = {
@@ -339,6 +345,22 @@ export function useChat() {
           store.updateLastAssistantBlocks(convId, [{ type: 'loading', label: 'AI 正在改写...' }])
         }, ctrl.signal, 'dialect')
         store.updateLastAssistantBlocks(convId, [makeScriptCard(newScript)])
+        return
+      }
+
+      // 音频剪辑：直接展示清洗后的音频
+      if (text.startsWith('__cleaned_audio__')) {
+        const p = JSON.parse(text.slice('__cleaned_audio__'.length))
+        store.updateLastAssistantBlocks(convId, [{
+          type: 'audio_player',
+          data: {
+            audio_url: p.audio_url,
+            duration_seconds: p.duration,
+            voice_label: '剪辑后录音',
+            engine: 'narration',
+            text_preview: p.transcription?.slice(0, 80),
+          },
+        }])
         return
       }
 

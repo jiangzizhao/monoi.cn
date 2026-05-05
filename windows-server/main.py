@@ -1170,6 +1170,42 @@ def proxy_audio(name: str):
         raise HTTPException(503, "voice-server (9001) 未启动")
 
 
+@app.post("/api/voice/clean-narration")
+async def clean_narration(file: UploadFile = File(...), reference_text: str = Form("")):
+    """转发到 voice-server 处理录音清洗"""
+    import requests as _req
+
+    try:
+        files = {"file": (file.filename, await file.read(), file.content_type or "audio/wav")}
+        data = {"reference_text": reference_text}
+        resp = _req.post(f"{VOICE_SERVER_URL}/clean-narration", files=files, data=data, timeout=300)
+        if resp.status_code != 200:
+            raise HTTPException(resp.status_code, f"voice-server 错误: {resp.text[:200]}")
+        result = resp.json()
+        # 把 voice-server 内部 path 改写成 main.py 可代理的路径
+        if result.get("file"):
+            result["audio_url"] = f"/api/voice/narration-audio/{result['file']}"
+        return result
+    except _req.exceptions.ConnectionError:
+        raise HTTPException(503, "voice-server (9001) 未启动")
+
+
+@app.get("/api/voice/narration-audio/{name}")
+def proxy_narration_audio(name: str):
+    """代理清洗后的录音文件"""
+    import requests as _req
+    from fastapi.responses import StreamingResponse
+
+    safe = os.path.basename(name)
+    try:
+        resp = _req.get(f"{VOICE_SERVER_URL}/narration/{safe}", stream=True, timeout=30)
+        if resp.status_code != 200:
+            raise HTTPException(resp.status_code, "音频未找到")
+        return StreamingResponse(resp.iter_content(8192), media_type="audio/wav")
+    except _req.exceptions.ConnectionError:
+        raise HTTPException(503, "voice-server (9001) 未启动")
+
+
 @app.get("/api/voice/audio-index/{name}")
 def proxy_audio_index(name: str):
     """IndexTTS 输出音频代理"""

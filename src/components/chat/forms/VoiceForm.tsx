@@ -33,7 +33,7 @@ const SPEEDS = ['0.9x', '1.0x', '1.1x', '1.2x']
 
 function formTitle(mode: Mode) {
   if (mode === 'preset') return '配音 · 预设音色'
-  if (mode === 'upload') return '配音 · 上传录音'
+  if (mode === 'upload') return '配音 · 音频剪辑'
   return '配音 · 克隆声音'
 }
 
@@ -91,6 +91,7 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
   const [myClones, setMyClones] = useState<VoiceOption[]>([])
   const [cloneMaxReached, setCloneMaxReached] = useState(false)
   const [showCloneUpload, setShowCloneUpload] = useState(false)
+  const [cleanResult, setCleanResult] = useState<any>(null)
   const [genderFilter, setGenderFilter] = useState<'all' | 'female' | 'male'>('all')
   const [previewPlaying, setPreviewPlaying] = useState<string>('')
   const [previewLoading, setPreviewLoading] = useState<string>('')
@@ -257,12 +258,43 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
     onSubmit(`__synth_voice__${JSON.stringify(payload)}`)
   }
 
-  const submitUpload = () => {
-    const msg =
-      `【配音-上传录音】文件：${fileName || '未命名音频'}，` +
-      `格式要求：MP3/WAV，补充要求：${notes.trim() || '无'}。` +
-      `请继续告诉我下一步如何对齐文案和节奏。`
-    onSubmit(msg)
+  const submitUpload = async () => {
+    if (!fileObj) {
+      setUploadError('请先选择音频文件')
+      return
+    }
+    setUploading(true)
+    setUploadError('')
+    setCleanResult(null)
+    try {
+      const fd = new FormData()
+      fd.append('file', fileObj)
+      fd.append('reference_text', notes.trim())
+      const res = await fetch('/api/proxy?path=' + encodeURIComponent('/api/voice/clean-narration'), {
+        method: 'POST',
+        body: fd,
+      })
+      const data = await res.json()
+      if (!res.ok || !data.success) {
+        setUploadError(data.detail || data.error || '处理失败')
+        return
+      }
+      setCleanResult(data)
+    } catch (e: any) {
+      setUploadError(e.message || '处理失败')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const useCleanedAudio = () => {
+    if (!cleanResult) return
+    onSubmit(`__cleaned_audio__${JSON.stringify({
+      audio_url: cleanResult.audio_url,
+      duration: cleanResult.cleaned_duration,
+      original_duration: cleanResult.original_duration,
+      transcription: cleanResult.transcription,
+    })}`)
   }
 
   const submitClone = async () => {
@@ -398,15 +430,54 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
             </>
           )}
 
-          {mode === 'upload' && (
+          {mode === 'upload' && !cleanResult && (
             <div className="flex flex-col gap-2">
               <input
                 type="file"
-                accept=".mp3,.wav,audio/mpeg,audio/wav"
+                accept=".mp3,.wav,.m4a,audio/*"
                 onChange={e => onFilePick(e.target.files?.[0] || null)}
                 className="text-sm text-[var(--text-2)] file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border file:border-[var(--border)] file:bg-[var(--bg-hover)] file:text-[var(--text)]"
               />
               {fileName && <div className="text-xs text-[var(--text-3)]">已选择：{fileName}</div>}
+              <div className="text-xs text-[var(--text-3)] leading-relaxed">
+                上传你录好的口播音频，系统自动去掉：<br/>
+                · 长时间停顿（&gt; 0.6 秒静音）<br/>
+                · 口误重复（说错重念的段落）<br/>
+                <br/>
+                可选：在下方"补充要求"贴入文案原稿，提升匹配精度。
+              </div>
+              {uploadError && <div className="text-xs text-red-400">{uploadError}</div>}
+            </div>
+          )}
+
+          {mode === 'upload' && cleanResult && (
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-[var(--bg-hover)]">
+                <div className="text-xs text-[var(--text-3)]">
+                  时长：{cleanResult.original_duration?.toFixed(1)}s →{' '}
+                  <span className="text-[var(--text)] font-medium">{cleanResult.cleaned_duration?.toFixed(1)}s</span>
+                </div>
+                <div className="text-xs text-[var(--text-3)]">
+                  去掉静音 {cleanResult.removed_silences} 段
+                </div>
+                <div className="text-xs text-[var(--text-3)]">
+                  去掉重复 {cleanResult.removed_repeats} 段
+                </div>
+              </div>
+              <audio controls src={'/api/proxy?path=' + encodeURIComponent(cleanResult.audio_url)} className="w-full"/>
+              {cleanResult.transcription && (
+                <div className="text-xs text-[var(--text-2)] leading-relaxed bg-[var(--bg-hover)] rounded-lg px-3 py-2 max-h-32 overflow-y-auto">
+                  <div className="text-[var(--text-3)] mb-1">转录文本：</div>
+                  {cleanResult.transcription}
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => { setCleanResult(null); setFileObj(null); setFileName('') }}
+                className="text-xs text-[var(--text-3)] hover:text-[var(--text)] cursor-pointer self-start"
+              >
+                ← 重新上传
+              </button>
             </div>
           )}
 
@@ -531,10 +602,17 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
               取消
             </button>
             <button
-              disabled={uploading || (mode === 'clone' && !showCloneUpload && !voice)}
+              disabled={
+                uploading ||
+                (mode === 'clone' && !showCloneUpload && !voice) ||
+                (mode === 'upload' && !cleanResult && !fileObj)
+              }
               onClick={() => {
                 if (mode === 'preset') submitPreset()
-                if (mode === 'upload') submitUpload()
+                if (mode === 'upload') {
+                  if (cleanResult) useCleanedAudio()
+                  else submitUpload()
+                }
                 if (mode === 'clone') {
                   if (showCloneUpload) submitClone()
                   else if (voice) submitWithClone(voice)
@@ -543,9 +621,11 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
               className="px-3 py-1.5 rounded-lg text-sm bg-[var(--text)] text-[var(--bg)] hover:opacity-80 cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
             >
               {uploading && <Loader2 size={12} className="animate-spin"/>}
+              {mode === 'upload' && !cleanResult && (uploading ? '处理中...' : '开始处理')}
+              {mode === 'upload' && cleanResult && '使用这段音频'}
               {mode === 'clone' && showCloneUpload && (uploading ? '上传中...' : '上传')}
               {mode === 'clone' && !showCloneUpload && '使用选中的克隆'}
-              {mode !== 'clone' && '继续'}
+              {mode === 'preset' && '继续'}
             </button>
         </div>
       </div>
