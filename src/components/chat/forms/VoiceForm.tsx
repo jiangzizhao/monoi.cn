@@ -263,13 +263,6 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
       setUploadError('请先选择音频文件')
       return
     }
-    // Vercel 代理限制 4.5MB
-    const MAX = 4 * 1024 * 1024
-    if (fileObj.size > MAX) {
-      const mb = (fileObj.size / 1024 / 1024).toFixed(1)
-      setUploadError(`文件太大（${mb}MB），上限 4MB。建议导出为 MP3 格式或缩短录音时长。`)
-      return
-    }
     setUploading(true)
     setUploadError('')
     setCleanResult(null)
@@ -277,7 +270,8 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
       const fd = new FormData()
       fd.append('file', fileObj)
       fd.append('reference_text', notes.trim())
-      const res = await fetch('/api/proxy?path=' + encodeURIComponent('/api/voice/clean-narration'), {
+      // 大文件直传 NATAPP，绕开 Vercel 4.5MB 限制
+      const res = await fetch('https://monoi.nat100.top/api/voice/clean-narration', {
         method: 'POST',
         body: fd,
       })
@@ -287,6 +281,10 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
       if (!res.ok || !data.success) {
         setUploadError(data.detail || data.error || `处理失败 (HTTP ${res.status})`)
         return
+      }
+      // 直传后 audio_url 是 main.py 的相对路径，需要补全为 NATAPP 域名
+      if (data.audio_url && data.audio_url.startsWith('/')) {
+        data.audio_url_full = 'https://monoi.nat100.top' + data.audio_url
       }
       setCleanResult(data)
     } catch (e: any) {
@@ -299,7 +297,7 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
   const useCleanedAudio = () => {
     if (!cleanResult) return
     onSubmit(`__cleaned_audio__${JSON.stringify({
-      audio_url: cleanResult.audio_url,
+      audio_url: cleanResult.audio_url_full || cleanResult.audio_url,
       duration: cleanResult.cleaned_duration,
       original_duration: cleanResult.original_duration,
       transcription: cleanResult.transcription,
@@ -473,7 +471,7 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
                   去掉重复 {cleanResult.removed_repeats} 段
                 </div>
               </div>
-              <audio controls src={'/api/proxy?path=' + encodeURIComponent(cleanResult.audio_url)} className="w-full"/>
+              <audio controls src={cleanResult.audio_url_full || ('/api/proxy?path=' + encodeURIComponent(cleanResult.audio_url))} className="w-full"/>
               {cleanResult.transcription && (
                 <div className="text-xs text-[var(--text-2)] leading-relaxed bg-[var(--bg-hover)] rounded-lg px-3 py-2 max-h-32 overflow-y-auto">
                   <div className="text-[var(--text-3)] mb-1">转录文本：</div>
