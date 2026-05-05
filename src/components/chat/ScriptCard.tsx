@@ -51,7 +51,7 @@ function DropdownButton({ label, options, onPick }:
         <ChevronDown size={12} className={`transition-transform duration-200 ${open ? 'rotate-180' : ''}`}/>
       </button>
       {open && (
-        <div className="absolute left-0 top-full mt-1 z-10 min-w-[120px] rounded-lg border border-[var(--border)] bg-[var(--bg-card)] shadow-lg py-1 flex flex-col">
+        <div className="absolute left-0 top-full mt-1 z-50 min-w-[120px] rounded-lg border border-[var(--border)] bg-[var(--bg-card)] shadow-lg py-1 flex flex-col max-h-[280px] overflow-y-auto">
           {options.map(o => (
             <button
               key={o.id}
