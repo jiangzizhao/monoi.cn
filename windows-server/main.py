@@ -784,7 +784,8 @@ def list_voice_clones(user_id: Optional[int] = None):
     finally:
         conn.close()
 
-VOICE_SERVER_URL = "http://127.0.0.1:9001"
+VOICE_SERVER_URL = "http://127.0.0.1:9001"   # CosyVoice2 (莫小本)
+INDEX_SERVER_URL = "http://127.0.0.1:9002"   # IndexTTS-2 (用户克隆)
 
 # 阿里云语音合成配置（从环境变量读取）
 ALIYUN_AK_ID = os.environ.get("ALIYUN_AK_ID", "")
@@ -895,14 +896,19 @@ def speed_to_aliyun_rate(speed_str):
     return int(round((s - 1.0) * 1000))
 
 def _lookup_preset_engine(preset_key: str):
-    """从 voice_presets 表里查这个 preset 的 engine"""
+    """从 voice_presets 表里查这个 preset 的 engine（克隆走 IndexTTS）"""
     if not preset_key:
         return None
     conn = get_db()
     conn.row_factory = sqlite3.Row
     try:
-        row = conn.execute("SELECT engine FROM voice_presets WHERE key = ?", (preset_key,)).fetchone()
-        return row["engine"] if row else None
+        row = conn.execute("SELECT engine, category FROM voice_presets WHERE key = ?", (preset_key,)).fetchone()
+        if not row:
+            return None
+        # 用户克隆 → IndexTTS（更自然的克隆）
+        if row["category"] == "clone":
+            return "indextts"
+        return row["engine"]
     finally:
         conn.close()
 
@@ -937,7 +943,34 @@ def synthesize_voice(req: VoiceSynthesizeRequest):
             "speed": req.speed or "1.0x",
         }
 
-    # ─── CosyVoice2 同步合成（克隆和老 preset） ───
+    # ─── IndexTTS-2（用户克隆，最自然） ───
+    if engine == "indextts":
+        try:
+            resp = _req.post(
+                f"{INDEX_SERVER_URL}/synthesize",
+                json={"text": req.text.strip(), "voice_id": req.preset_key, "speed": parse_speed(req.speed)},
+                timeout=120,
+            )
+            if resp.status_code != 200:
+                raise HTTPException(500, f"index-server 错误: {resp.status_code} {resp.text[:200]}")
+            data = resp.json()
+            return {
+                "success": True,
+                "status": "ready",
+                "engine": "indextts",
+                "audio_url": f"/api/voice/audio-index/{data['file']}",
+                "duration_seconds": data.get("duration_seconds"),
+                "preset_key": req.preset_key,
+                "speed": req.speed or "1.0x",
+            }
+        except _req.exceptions.ConnectionError:
+            raise HTTPException(503, "index-server (9002) 未启动")
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(500, f"克隆合成失败: {e}")
+
+    # ─── CosyVoice2 同步合成（莫小本等） ───
     if engine == "cosyvoice":
         try:
             resp = _req.post(
@@ -1040,27 +1073,26 @@ def _generate_preview_in_background(safe_key: str, demo_text: str, engine: str):
     import requests as _req
     cache_path = os.path.join(VOICE_PREVIEW_DIR, f"{safe_key}.wav")
     try:
-        if engine == "cosyvoice":
-            # 本地 CosyVoice2，调 voice-server
+        if engine in ("cosyvoice", "indextts"):
+            # 本地推理
+            server_url = INDEX_SERVER_URL if engine == "indextts" else VOICE_SERVER_URL
             resp = _req.post(
-                f"{VOICE_SERVER_URL}/synthesize",
+                f"{server_url}/synthesize",
                 json={"text": demo_text, "voice_id": safe_key, "speed": 1.0},
-                timeout=120,
+                timeout=180,
             )
             if resp.status_code != 200:
-                print(f"[preview] {safe_key} voice-server 错误 {resp.status_code}", flush=True)
+                print(f"[preview] {safe_key} {engine} server 错误 {resp.status_code}", flush=True)
                 return
             data = resp.json()
             file_name = data.get("file")
             if not file_name:
-                print(f"[preview] {safe_key} 没拿到 file", flush=True)
                 return
-            # 从 voice-server 拉音频文件
-            r = _req.get(f"{VOICE_SERVER_URL}/audio/{file_name}", timeout=30)
+            r = _req.get(f"{server_url}/audio/{file_name}", timeout=30)
             if r.status_code == 200:
                 with open(cache_path, "wb") as f:
                     f.write(r.content)
-                print(f"[preview] {safe_key} 缓存完成（cosyvoice）", flush=True)
+                print(f"[preview] {safe_key} 缓存完成（{engine}）", flush=True)
             return
 
         # 阿里云
@@ -1114,7 +1146,8 @@ def voice_preview(voice_key: str, background_tasks: BackgroundTasks):
             raise HTTPException(404, f"音色 {safe_key} 不存在")
         accent = row["accent"] or "mandarin"
         demo_text = PREVIEW_TEXTS.get(accent, PREVIEW_TEXTS["mandarin"])
-        engine = row["engine"] or "aliyun"
+        # 用户克隆走 IndexTTS
+        engine = "indextts" if row["category"] == "clone" else (row["engine"] or "aliyun")
         _PREVIEW_GENERATING.add(safe_key)
         background_tasks.add_task(_generate_preview_in_background, safe_key, demo_text, engine)
 
@@ -1135,3 +1168,19 @@ def proxy_audio(name: str):
         return StreamingResponse(resp.iter_content(8192), media_type="audio/wav")
     except _req.exceptions.ConnectionError:
         raise HTTPException(503, "voice-server (9001) 未启动")
+
+
+@app.get("/api/voice/audio-index/{name}")
+def proxy_audio_index(name: str):
+    """IndexTTS 输出音频代理"""
+    import requests as _req
+    from fastapi.responses import StreamingResponse
+
+    safe = os.path.basename(name)
+    try:
+        resp = _req.get(f"{INDEX_SERVER_URL}/audio/{safe}", stream=True, timeout=30)
+        if resp.status_code != 200:
+            raise HTTPException(resp.status_code, "音频未找到")
+        return StreamingResponse(resp.iter_content(8192), media_type="audio/wav")
+    except _req.exceptions.ConnectionError:
+        raise HTTPException(503, "index-server (9002) 未启动")
