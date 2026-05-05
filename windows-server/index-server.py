@@ -68,14 +68,42 @@ def synthesize(req: SynthesizeRequest):
     out_name = f"{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}.wav"
     out_path = os.path.join(OUTPUT_DIR, out_name)
 
+    import traceback as _tb
+    result = None
     try:
-        # IndexTTS API：infer(audio_prompt, text, output_path)
-        MODEL.infer(prompt_path, text, out_path)
+        # 尝试 keyword 参数（IndexTTS-2 标准调用）
+        try:
+            result = MODEL.infer(spk_audio_prompt=prompt_path, text=text, output_path=out_path)
+        except TypeError:
+            # 回退到位置参数
+            result = MODEL.infer(prompt_path, text, out_path)
     except Exception as e:
-        raise HTTPException(500, f"IndexTTS 合成失败: {e}")
+        _tb.print_exc()
+        raise HTTPException(500, f"IndexTTS 合成失败: {type(e).__name__}: {e}")
+
+    # 如果 infer 没有写入文件但返回了 audio 数据，自己保存
+    if not os.path.exists(out_path) and result is not None:
+        try:
+            if isinstance(result, np.ndarray):
+                sf.write(out_path, result, 22050)
+            elif isinstance(result, tuple) and len(result) == 2:
+                # (audio, sr) 或 (sr, audio) 都试试
+                a, b = result
+                if hasattr(a, "shape"):
+                    sf.write(out_path, a, b if isinstance(b, int) else 22050)
+                else:
+                    sf.write(out_path, b, a if isinstance(a, int) else 22050)
+            elif hasattr(result, "shape"):  # tensor
+                arr = result.cpu().numpy() if hasattr(result, "cpu") else result
+                if arr.ndim > 1:
+                    arr = arr.squeeze()
+                sf.write(out_path, arr, 22050)
+        except Exception as e:
+            _tb.print_exc()
+            raise HTTPException(500, f"保存音频失败: {e}, result type: {type(result)}")
 
     if not os.path.exists(out_path):
-        raise HTTPException(500, "合成完成但找不到输出文件")
+        raise HTTPException(500, f"合成完成但找不到输出文件，result type: {type(result)}")
 
     # 读取时长
     try:
