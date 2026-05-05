@@ -270,8 +270,10 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
       const fd = new FormData()
       fd.append('file', fileObj)
       fd.append('reference_text', notes.trim())
-      // 大文件直传 NATAPP，绕开 Vercel 4.5MB 限制
-      const res = await fetch('https://monoi.nat100.top/api/voice/clean-narration', {
+      // 大文件直传后端，绕开 Vercel 4.5MB 限制
+      // 生产部署时改 Vercel 环境变量 VITE_DIRECT_API_URL
+      const directBase = import.meta.env.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'
+      const res = await fetch(directBase + '/api/voice/clean-narration', {
         method: 'POST',
         body: fd,
       })
@@ -282,9 +284,9 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
         setUploadError(data.detail || data.error || `处理失败 (HTTP ${res.status})`)
         return
       }
-      // 直传后 audio_url 是 main.py 的相对路径，需要补全为 NATAPP 域名
+      // 直传后 audio_url 是后端的相对路径，需要补全成完整域名
       if (data.audio_url && data.audio_url.startsWith('/')) {
-        data.audio_url_full = 'https://monoi.nat100.top' + data.audio_url
+        data.audio_url_full = directBase + data.audio_url
       }
       setCleanResult(data)
     } catch (e: any) {
