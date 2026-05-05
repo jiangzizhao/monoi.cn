@@ -15,9 +15,36 @@ sys.path.insert(0, INDEX_DIR)
 import torch
 import soundfile as sf
 import numpy as np
+import torchaudio
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+
+
+# Monkey-patch torchaudio.save 用 soundfile，绕开新 PyTorch 的 torchcodec 依赖
+def _patched_save(uri, src, sample_rate, *args, **kwargs):
+    arr = src.detach().cpu().numpy() if hasattr(src, "detach") else (src.cpu().numpy() if hasattr(src, "cpu") else src)
+    if hasattr(arr, "ndim") and arr.ndim > 1:
+        if arr.shape[0] == 1:
+            arr = arr.squeeze(0)
+        elif arr.shape[0] == 2:
+            arr = arr.T  # (frames, 2)
+        else:
+            arr = arr.squeeze()
+    sf.write(str(uri), arr, sample_rate)
+
+
+def _patched_load(uri, *args, **kwargs):
+    audio, sr = sf.read(str(uri), dtype="float32")
+    if audio.ndim == 1:
+        audio = audio[np.newaxis, :]
+    else:
+        audio = audio.T
+    return torch.from_numpy(audio), sr
+
+
+torchaudio.save = _patched_save
+torchaudio.load = _patched_load
 
 # IndexTTS-2 推理类（按官方 README 调整）
 try:
