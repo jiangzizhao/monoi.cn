@@ -561,21 +561,42 @@ def health():
 
 @app.get("/api/voice/presets")
 def get_voice_presets():
+    """系统预设音色（不含用户克隆）"""
     conn = get_db()
     conn.row_factory = sqlite3.Row
     try:
         rows = conn.execute("""
             SELECT id, key, name, engine, category, gender, locale, accent, emotion, speed, sample_text
             FROM voice_presets
-            WHERE is_active = 1
+            WHERE is_active = 1 AND category != 'clone'
             ORDER BY category, id
         """).fetchall()
         return {
             "items": [row_to_dict(row) for row in rows],
-            "engines": {
-                "preset": "cosyvoice",
-                "clone": "fish-speech",
-            },
+            "engines": {"preset": "cosyvoice", "clone": "fish-speech"},
+        }
+    finally:
+        conn.close()
+
+
+MAX_CLONES_PER_USER = 5
+
+@app.get("/api/voice/my-clones")
+def get_my_clones():
+    """用户克隆音色列表（与系统预设独立）"""
+    conn = get_db()
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute("""
+            SELECT id, key, name, engine, category, gender, locale, accent, emotion, speed, sample_text, created_at
+            FROM voice_presets
+            WHERE category = 'clone'
+            ORDER BY id DESC
+        """).fetchall()
+        return {
+            "items": [row_to_dict(row) for row in rows],
+            "max_count": MAX_CLONES_PER_USER,
+            "current_count": len(rows),
         }
     finally:
         conn.close()
@@ -661,6 +682,15 @@ async def upload_clone(
     if not clone_name.strip():
         clone_name = "我的声音"
     os.makedirs(VOICE_PROMPTS_DIR, exist_ok=True)
+
+    # 检查克隆数量上限
+    conn0 = get_db()
+    try:
+        count = conn0.execute("SELECT COUNT(*) FROM voice_presets WHERE category = 'clone'").fetchone()[0]
+    finally:
+        conn0.close()
+    if count >= MAX_CLONES_PER_USER:
+        raise HTTPException(400, f"已达上限：最多保留 {MAX_CLONES_PER_USER} 个克隆音色，请先删除一个再上传")
 
     clone_key = f"clone_{int(_t.time())}_{_uuid.uuid4().hex[:6]}"
     raw_path = os.path.join(tempfile.gettempdir(), f"{clone_key}_raw")

@@ -88,6 +88,9 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
   const [cloneGender, setCloneGender] = useState<'female' | 'male'>('female')
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState('')
+  const [myClones, setMyClones] = useState<VoiceOption[]>([])
+  const [cloneMaxReached, setCloneMaxReached] = useState(false)
+  const [showCloneUpload, setShowCloneUpload] = useState(false)
   const [genderFilter, setGenderFilter] = useState<'all' | 'female' | 'male'>('all')
   const [previewPlaying, setPreviewPlaying] = useState<string>('')
   const [previewLoading, setPreviewLoading] = useState<string>('')
@@ -167,6 +170,41 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
     }
     return groups
   }, [voiceOptions, genderFilter])
+
+  // 加载用户克隆列表（克隆模式时）
+  const loadMyClones = async () => {
+    try {
+      const res = await fetch('/api/proxy?path=' + encodeURIComponent('/api/voice/my-clones'))
+      const data = await res.json()
+      const items = Array.isArray(data.items) ? data.items : []
+      setMyClones(items.map((it: any) => ({
+        id: String(it.key),
+        label: String(it.name),
+        desc: it.sample_text || '我的克隆',
+        gender: it.gender,
+        category: 'clone',
+      })))
+      setCloneMaxReached((data.current_count || 0) >= (data.max_count || 5))
+      // 第一次进来如果还没有克隆，直接展开上传
+      if (mode === 'clone' && items.length === 0) setShowCloneUpload(true)
+    } catch {
+      setMyClones([])
+    }
+  }
+
+  useEffect(() => {
+    if (mode === 'clone') {
+      loadMyClones()
+    }
+  }, [mode])
+
+  const deleteClone = async (key: string) => {
+    if (!confirm('确认删除这个克隆音色？')) return
+    try {
+      await fetch('/api/proxy?path=' + encodeURIComponent('/api/voice/clone/' + key), { method: 'DELETE' })
+      await loadMyClones()
+    } catch (e) { console.error(e) }
+  }
 
   useEffect(() => {
     if (mode !== 'preset') return
@@ -253,13 +291,31 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
         setUploadError(data.detail || data.error || '上传失败')
         return
       }
-      // 上传成功，关闭弹窗
-      onClose()
+      // 上传成功，刷新列表，回到列表视图
+      setShowCloneUpload(false)
+      setCloneName('')
+      setFileObj(null)
+      setFileName('')
+      setNotes('')
+      await loadMyClones()
     } catch (e: any) {
       setUploadError(e.message || '上传失败')
     } finally {
       setUploading(false)
     }
+  }
+
+  // 用克隆音色合成（与预设逻辑一致）
+  const submitWithClone = (cloneKey: string) => {
+    const c = myClones.find(x => x.id === cloneKey)
+    const payload = {
+      voice_id: cloneKey,
+      voice_label: c?.label || cloneKey,
+      speed,
+      emotion,
+      notes: notes.trim(),
+    }
+    onSubmit(`__synth_voice__${JSON.stringify(payload)}`)
   }
 
   const onFilePick = (file: File | null) => {
@@ -342,7 +398,7 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
             </>
           )}
 
-          {mode !== 'preset' && (
+          {mode === 'upload' && (
             <div className="flex flex-col gap-2">
               <input
                 type="file"
@@ -354,8 +410,82 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
             </div>
           )}
 
-          {mode === 'clone' && (
+          {mode === 'clone' && !showCloneUpload && (
             <>
+              {/* 已有克隆列表 */}
+              <div className="flex items-center justify-between">
+                <div className="text-xs text-[var(--text-3)]">我的克隆（{myClones.length}/5）</div>
+                {!cloneMaxReached && (
+                  <button
+                    type="button"
+                    onClick={() => { setShowCloneUpload(true); setUploadError('') }}
+                    className="text-xs px-2.5 py-1 rounded-lg border border-[var(--border)] text-[var(--text-2)] hover:text-[var(--text)] hover:bg-[var(--bg-hover)] cursor-pointer"
+                  >
+                    + 上传新声音
+                  </button>
+                )}
+              </div>
+              {myClones.length === 0 ? (
+                <div className="text-xs text-[var(--text-3)] py-4 text-center">还没有克隆声音，上传一段你的录音开始</div>
+              ) : (
+                <div className="grid grid-cols-1 gap-2">
+                  {myClones.map(c => (
+                    <div
+                      key={c.id}
+                      className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors cursor-pointer ${
+                        voice === c.id
+                          ? 'border-[var(--text-2)] bg-[var(--bg-hover)]'
+                          : 'border-[var(--border)] hover:bg-[var(--bg-hover)]'
+                      }`}
+                      onClick={() => setVoice(c.id)}
+                    >
+                      <button
+                        onClick={(e) => { e.stopPropagation(); togglePreview(c.id) }}
+                        className="w-7 h-7 rounded-full bg-[var(--bg-input)] hover:bg-[var(--text)] hover:text-[var(--bg)] text-[var(--text-2)] flex items-center justify-center flex-shrink-0 transition-colors"
+                        title="试听"
+                      >
+                        {previewLoading === c.id ? <Loader2 size={12} className="animate-spin"/> : previewPlaying === c.id ? <Pause size={12} fill="currentColor"/> : <Play size={12} fill="currentColor" className="ml-0.5"/>}
+                      </button>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm text-[var(--text)] flex items-center gap-1.5">
+                          {c.label}
+                          {c.gender && <span className="text-[10px] text-[var(--text-3)] px-1 py-px rounded bg-[var(--bg-hover)]">{GENDER_LABELS[c.gender] || c.gender}</span>}
+                        </div>
+                        <div className="text-xs text-[var(--text-3)] mt-0.5 line-clamp-1">{c.desc}</div>
+                      </div>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); deleteClone(c.id) }}
+                        className="text-xs px-2 py-1 rounded text-[var(--text-3)] hover:text-red-400 hover:bg-red-950/20 cursor-pointer"
+                        title="删除"
+                      >
+                        删除
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+
+          {mode === 'clone' && showCloneUpload && (
+            <>
+              <div className="flex items-center justify-between">
+                <div className="text-xs text-[var(--text-3)]">上传新克隆</div>
+                <button
+                  type="button"
+                  onClick={() => setShowCloneUpload(false)}
+                  className="text-xs px-2 py-1 rounded text-[var(--text-3)] hover:text-[var(--text)]"
+                >
+                  ← 返回列表
+                </button>
+              </div>
+              <input
+                type="file"
+                accept=".mp3,.wav,audio/mpeg,audio/wav"
+                onChange={e => onFilePick(e.target.files?.[0] || null)}
+                className="text-sm text-[var(--text-2)] file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border file:border-[var(--border)] file:bg-[var(--bg-hover)] file:text-[var(--text)]"
+              />
+              {fileName && <div className="text-xs text-[var(--text-3)]">已选择：{fileName}</div>}
               <input
                 value={cloneName}
                 onChange={e => setCloneName(e.target.value)}
@@ -369,9 +499,7 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
                     type="button"
                     onClick={() => setCloneGender(g)}
                     className={`px-3 py-1 rounded-full text-xs cursor-pointer border transition-colors ${
-                      cloneGender === g
-                        ? 'border-[var(--text-2)] bg-[var(--bg-hover)] text-[var(--text)]'
-                        : 'border-[var(--border)] text-[var(--text-3)] hover:text-[var(--text)]'
+                      cloneGender === g ? 'border-[var(--text-2)] bg-[var(--bg-hover)] text-[var(--text)]' : 'border-[var(--border)] text-[var(--text-3)] hover:text-[var(--text)]'
                     }`}
                   >
                     {GENDER_LABELS[g]}
@@ -379,7 +507,7 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
                 ))}
               </div>
               <div className="text-xs text-[var(--text-3)]">
-                录音建议：5-10 秒，安静环境，自然语速。文件转写填到下方"补充要求"，能提升克隆相似度。
+                录音建议：5-10 秒，安静环境，自然语速。文件中念的内容填到下方"补充要求"能提升相似度。
               </div>
               {uploadError && <div className="text-xs text-red-400">{uploadError}</div>}
             </>
@@ -403,16 +531,21 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
               取消
             </button>
             <button
-              disabled={uploading}
+              disabled={uploading || (mode === 'clone' && !showCloneUpload && !voice)}
               onClick={() => {
                 if (mode === 'preset') submitPreset()
                 if (mode === 'upload') submitUpload()
-                if (mode === 'clone') submitClone()
+                if (mode === 'clone') {
+                  if (showCloneUpload) submitClone()
+                  else if (voice) submitWithClone(voice)
+                }
               }}
               className="px-3 py-1.5 rounded-lg text-sm bg-[var(--text)] text-[var(--bg)] hover:opacity-80 cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
             >
               {uploading && <Loader2 size={12} className="animate-spin"/>}
-              {mode === 'clone' ? (uploading ? '上传中...' : '上传并保存') : '继续'}
+              {mode === 'clone' && showCloneUpload && (uploading ? '上传中...' : '上传')}
+              {mode === 'clone' && !showCloneUpload && '使用选中的克隆'}
+              {mode !== 'clone' && '继续'}
             </button>
         </div>
       </div>
