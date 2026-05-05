@@ -2,19 +2,19 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 
 const API_URL = process.env.API_URL || ''
 
+// 关闭默认 body 解析，自己处理 raw 流（multipart 必需）
 export const config = {
-  api: {
-    // 关闭默认的 body 解析，自己处理 multipart 流
-    bodyParser: false,
-  },
+  api: { bodyParser: false },
+  maxDuration: 60,
 }
 
-async function readRawBody(req: VercelRequest): Promise<Buffer> {
-  const chunks: Buffer[] = []
-  for await (const chunk of req as any) {
-    chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk)
-  }
-  return Buffer.concat(chunks)
+function readRawBody(req: VercelRequest): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = []
+    req.on('data', (c: any) => chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c)))
+    req.on('end', () => resolve(Buffer.concat(chunks)))
+    req.on('error', reject)
+  })
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -22,37 +22,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const path = (req.query.path as string) || ''
   const url = `${API_URL}${path}`
-  const upstreamCT = (req.headers['content-type'] as string) || ''
+  const reqCT = (req.headers['content-type'] as string) || ''
 
   try {
     let body: BodyInit | undefined
     const headers: Record<string, string> = {}
 
     if (req.method && req.method !== 'GET') {
-      if (upstreamCT.includes('multipart/form-data')) {
-        // 文件上传，原样转发
-        body = await readRawBody(req)
-        headers['Content-Type'] = upstreamCT
-      } else {
-        // JSON
-        const raw = await readRawBody(req)
-        body = raw.length ? raw : undefined
-        headers['Content-Type'] = upstreamCT || 'application/json'
+      const raw = await readRawBody(req)
+      if (raw.length > 0) {
+        body = raw
+        headers['Content-Type'] = reqCT || 'application/json'
+        if (reqCT.includes('multipart/form-data')) {
+          headers['Content-Length'] = String(raw.length)
+        }
       }
     }
 
-    const upstream = await fetch(url, {
-      method: req.method,
-      headers,
-      body,
-    })
+    const upstream = await fetch(url, { method: req.method, headers, body })
+    const upCT = upstream.headers.get('content-type') || ''
 
-    const ct = upstream.headers.get('content-type') || ''
-
-    // 二进制内容直接流式转发
-    if (!ct.includes('json') && !ct.includes('text')) {
+    // 二进制（音频/视频）流式转发
+    if (!upCT.includes('json') && !upCT.includes('text')) {
       const buf = Buffer.from(await upstream.arrayBuffer())
-      res.setHeader('Content-Type', ct || 'application/octet-stream')
+      res.setHeader('Content-Type', upCT || 'application/octet-stream')
       const cl = upstream.headers.get('content-length')
       if (cl) res.setHeader('Content-Length', cl)
       return res.status(upstream.status).send(buf)
