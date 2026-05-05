@@ -873,6 +873,95 @@ def get_voice_task(task_id: str):
     return {"status": "error", "message": error_msg, "raw": str(data)[:400]}
 
 
+VOICE_PREVIEW_DIR = "voice-previews"
+os.makedirs(VOICE_PREVIEW_DIR, exist_ok=True)
+
+# 每种 accent/locale 用对应语言的 demo 文本
+PREVIEW_TEXTS = {
+    "mandarin":  "你好，我是 monoi 的配音助手，欢迎来到我们的产品",
+    "cantonese": "你好，我係 monoi 嘅配音助手，歡迎嚟到我哋嘅產品",
+    "sichuan":   "你好嘞，我是 monoi 的配音助手，欢迎来到咱们的产品",
+    "northeast": "嗨呀，俺是 monoi 的配音助手，欢迎来到咱们的产品",
+    "tianjin":   "哎，介就是 monoi 配音助手，欢迎您嘞",
+    "taiwanese": "你好啦，我是 monoi 配音助手，欢迎来到我们的产品哦",
+    "hunan":     "你好咯，咱是 monoi 配音助手，欢迎来到咱们的产品",
+    "japanese":  "こんにちは、monoi の音声アシスタントです。よろしくお願いします",
+    "english":   "Hello, I am the monoi voice assistant, welcome to our product",
+    "korean":    "안녕하세요, monoi 음성 도우미입니다. 환영합니다",
+    "french":    "Bonjour, je suis l'assistant vocal monoi, bienvenue",
+    "german":    "Hallo, ich bin der monoi-Sprachassistent, willkommen",
+    "spanish":   "Hola, soy el asistente de voz monoi, bienvenido",
+    "italian":   "Ciao, sono l'assistente vocale monoi, benvenuto",
+    "russian":   "Привет, я голосовой помощник monoi, добро пожаловать",
+    "thai":      "สวัสดี ฉันคือผู้ช่วยเสียง monoi ยินดีต้อนรับ",
+    "vietnamese":"Xin chào, tôi là trợ lý giọng nói monoi, chào mừng",
+    "indonesian":"Halo, saya asisten suara monoi, selamat datang",
+    "malay":     "Halo, saya pembantu suara monoi, selamat datang",
+    "filipino":  "Kumusta, ako ang voice assistant ng monoi, maligayang pagdating",
+}
+
+
+@app.get("/api/voice/preview/{voice_key}")
+def voice_preview(voice_key: str):
+    """每个音色的试听 demo（带磁盘缓存）"""
+    import re as _re
+    import time as _t
+    import requests as _req
+    from fastapi.responses import FileResponse, StreamingResponse
+
+    safe_key = _re.sub(r"[^a-zA-Z0-9_]", "", voice_key)
+    cache_path = os.path.join(VOICE_PREVIEW_DIR, f"{safe_key}.wav")
+
+    # 已经缓存过 → 直接返回
+    if os.path.exists(cache_path) and os.path.getsize(cache_path) > 1024:
+        return FileResponse(cache_path, media_type="audio/wav")
+
+    # 查 voice 配置
+    conn = get_db()
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute("SELECT * FROM voice_presets WHERE key = ?", (safe_key,)).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        raise HTTPException(404, f"音色 {safe_key} 不存在")
+
+    accent = row["accent"] or "mandarin"
+    demo_text = PREVIEW_TEXTS.get(accent, PREVIEW_TEXTS["mandarin"])
+    engine = row["engine"]
+
+    if engine != "aliyun":
+        raise HTTPException(400, f"试听暂不支持 {engine} 引擎")
+
+    # 提交合成
+    task_id = aliyun_submit_long_tts(demo_text, voice=safe_key, speech_rate=0)
+
+    # 轮询（最多 60 秒）
+    audio_url = None
+    for _ in range(30):
+        _t.sleep(2)
+        data = aliyun_get_task(task_id)
+        body = data.get("data") or {}
+        audio_url = body.get("audio_address")
+        if audio_url:
+            break
+
+    if not audio_url:
+        raise HTTPException(504, "试听合成超时")
+
+    # 下载到本地缓存
+    try:
+        r = _req.get(audio_url, timeout=30)
+        if r.status_code != 200:
+            raise HTTPException(502, f"下载试听音频失败: {r.status_code}")
+        with open(cache_path, "wb") as f:
+            f.write(r.content)
+    except Exception as e:
+        raise HTTPException(500, f"缓存试听失败: {e}")
+
+    return FileResponse(cache_path, media_type="audio/wav")
+
+
 @app.get("/api/voice/audio/{name}")
 def proxy_audio(name: str):
     import requests as _req

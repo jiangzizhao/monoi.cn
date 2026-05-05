@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useRef } from 'react'
+import { Play, Pause, Loader2 } from 'lucide-react'
 
 type Mode = 'preset' | 'upload' | 'clone'
 
@@ -35,6 +36,43 @@ function formTitle(mode: Mode) {
   return '配音 · 克隆声音'
 }
 
+function VoiceCard({ voice, selected, playing, loading, onSelect, onPreview }: {
+  voice: VoiceOption
+  selected: boolean
+  playing: boolean
+  loading: boolean
+  onSelect: () => void
+  onPreview: () => void
+}) {
+  return (
+    <div
+      onClick={onSelect}
+      className={`text-left px-3 py-2 rounded-lg border transition-colors cursor-pointer flex items-start gap-2 ${
+        selected ? 'border-[var(--text-2)] bg-[var(--bg-hover)]' : 'border-[var(--border)] hover:bg-[var(--bg-hover)]'
+      }`}
+    >
+      <button
+        onClick={(e) => { e.stopPropagation(); onPreview() }}
+        className="w-7 h-7 rounded-full bg-[var(--bg-input)] hover:bg-[var(--text)] hover:text-[var(--bg)] text-[var(--text-2)] flex items-center justify-center flex-shrink-0 mt-0.5 transition-colors"
+        title="试听"
+      >
+        {loading ? <Loader2 size={12} className="animate-spin"/> : playing ? <Pause size={12} fill="currentColor"/> : <Play size={12} fill="currentColor" className="ml-0.5"/>}
+      </button>
+      <div className="flex-1 min-w-0">
+        <div className="text-sm text-[var(--text)] flex items-center gap-1.5">
+          {voice.label}
+          {voice.gender && (
+            <span className="text-[10px] text-[var(--text-3)] px-1 py-px rounded bg-[var(--bg-hover)]">
+              {GENDER_LABELS[voice.gender] || voice.gender}
+            </span>
+          )}
+        </div>
+        <div className="text-xs text-[var(--text-3)] mt-0.5 line-clamp-1">{voice.desc}</div>
+      </div>
+    </div>
+  )
+}
+
 export function VoiceForm({ mode, onSubmit, onClose }: Props) {
   const [voiceOptions, setVoiceOptions] = useState<VoiceOption[]>([])
   const [presetLoading, setPresetLoading] = useState(false)
@@ -46,6 +84,43 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
   const [fileName, setFileName] = useState('')
   const [sampleSec, setSampleSec] = useState('')
   const [genderFilter, setGenderFilter] = useState<'all' | 'female' | 'male'>('all')
+  const [previewPlaying, setPreviewPlaying] = useState<string>('')
+  const [previewLoading, setPreviewLoading] = useState<string>('')
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+
+  const togglePreview = (voiceId: string) => {
+    // 当前播放就暂停
+    if (previewPlaying === voiceId) {
+      audioRef.current?.pause()
+      setPreviewPlaying('')
+      return
+    }
+    // 切换音色，先停旧的
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current = null
+    }
+    setPreviewLoading(voiceId)
+    setPreviewPlaying('')
+    const url = '/api/proxy?path=' + encodeURIComponent('/api/voice/preview/' + voiceId)
+    const audio = new Audio(url)
+    audioRef.current = audio
+    audio.onloadeddata = () => {
+      setPreviewLoading('')
+      setPreviewPlaying(voiceId)
+      audio.play().catch(() => setPreviewPlaying(''))
+    }
+    audio.onended = () => setPreviewPlaying('')
+    audio.onerror = () => { setPreviewLoading(''); setPreviewPlaying('') }
+    // 部分浏览器需要先 play 才能触发加载
+    audio.load()
+  }
+
+  // 卸载时停掉
+  useEffect(() => () => {
+    audioRef.current?.pause()
+    audioRef.current = null
+  }, [])
 
   const selectedVoice = useMemo(() => voiceOptions.find(v => v.id === voice), [voiceOptions, voice])
 
@@ -170,25 +245,15 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
                       <div className="text-xs text-[var(--text-3)]">{CATEGORY_LABELS[cat]}</div>
                       <div className="grid grid-cols-2 gap-2">
                         {items.map(v => (
-                          <button
+                          <VoiceCard
                             key={v.id}
-                            onClick={() => setVoice(v.id)}
-                            className={`text-left px-3 py-2 rounded-lg border transition-colors cursor-pointer ${
-                              voice === v.id
-                                ? 'border-[var(--text-2)] bg-[var(--bg-hover)]'
-                                : 'border-[var(--border)] hover:bg-[var(--bg-hover)]'
-                            }`}
-                          >
-                            <div className="text-sm text-[var(--text)] flex items-center gap-1.5">
-                              {v.label}
-                              {v.gender && (
-                                <span className="text-[10px] text-[var(--text-3)] px-1 py-px rounded bg-[var(--bg-hover)]">
-                                  {GENDER_LABELS[v.gender] || v.gender}
-                                </span>
-                              )}
-                            </div>
-                            <div className="text-xs text-[var(--text-3)] mt-0.5 line-clamp-1">{v.desc}</div>
-                          </button>
+                            voice={v}
+                            selected={voice === v.id}
+                            playing={previewPlaying === v.id}
+                            loading={previewLoading === v.id}
+                            onSelect={() => setVoice(v.id)}
+                            onPreview={() => togglePreview(v.id)}
+                          />
                         ))}
                       </div>
                     </div>
