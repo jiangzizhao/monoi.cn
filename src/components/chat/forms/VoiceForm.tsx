@@ -263,6 +263,13 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
       setUploadError('请先选择音频文件')
       return
     }
+    // Vercel 代理限制 4.5MB
+    const MAX = 4 * 1024 * 1024
+    if (fileObj.size > MAX) {
+      const mb = (fileObj.size / 1024 / 1024).toFixed(1)
+      setUploadError(`文件太大（${mb}MB），上限 4MB。建议导出为 MP3 格式或缩短录音时长。`)
+      return
+    }
     setUploading(true)
     setUploadError('')
     setCleanResult(null)
@@ -274,9 +281,11 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
         method: 'POST',
         body: fd,
       })
-      const data = await res.json()
+      const text = await res.text()
+      let data: any
+      try { data = JSON.parse(text) } catch { data = { error: text.slice(0, 200) } }
       if (!res.ok || !data.success) {
-        setUploadError(data.detail || data.error || '处理失败')
+        setUploadError(data.detail || data.error || `处理失败 (HTTP ${res.status})`)
         return
       }
       setCleanResult(data)
