@@ -27,6 +27,8 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_DAYS = 30
 VOICE_STORAGE_DIR = "voice-assets"
 VOICE_PRESETS = [
+    # ─── 本地 CosyVoice2 （免费，质量优）───
+    {"key": "cosy_default", "name": "莫小本", "engine": "cosyvoice", "category": "preset", "gender": "female", "locale": "zh-CN", "accent": "mandarin", "emotion": "natural", "speed": "1.0x", "sample_text": "本地 CosyVoice2，零成本，质量与阿里云大模型同源。"},
     # ─── 普通话女声（极致音+多情感，长文本商用版可用）───
     {"key": "siqi",        "name": "莫小婉", "engine": "aliyun", "category": "preset", "gender": "female", "locale": "zh-CN", "accent": "mandarin", "emotion": "warm",       "speed": "1.0x", "sample_text": "温柔女声，情感、生活方式。"},
     {"key": "ruoxi",       "name": "莫小华", "engine": "aliyun", "category": "preset", "gender": "female", "locale": "zh-CN", "accent": "mandarin", "emotion": "knowledgeable","speed": "1.0x", "sample_text": "知性女声，知识、纪录。"},
@@ -904,12 +906,36 @@ PREVIEW_TEXTS = {
 _PREVIEW_GENERATING = set()  # 当前正在后台生成的 voice keys
 
 
-def _generate_preview_in_background(safe_key: str, demo_text: str):
+def _generate_preview_in_background(safe_key: str, demo_text: str, engine: str):
     """后台任务：合成并保存试听音频"""
     import time as _t
     import requests as _req
     cache_path = os.path.join(VOICE_PREVIEW_DIR, f"{safe_key}.wav")
     try:
+        if engine == "cosyvoice":
+            # 本地 CosyVoice2，调 voice-server
+            resp = _req.post(
+                f"{VOICE_SERVER_URL}/synthesize",
+                json={"text": demo_text, "voice_id": safe_key, "speed": 1.0},
+                timeout=120,
+            )
+            if resp.status_code != 200:
+                print(f"[preview] {safe_key} voice-server 错误 {resp.status_code}", flush=True)
+                return
+            data = resp.json()
+            file_name = data.get("file")
+            if not file_name:
+                print(f"[preview] {safe_key} 没拿到 file", flush=True)
+                return
+            # 从 voice-server 拉音频文件
+            r = _req.get(f"{VOICE_SERVER_URL}/audio/{file_name}", timeout=30)
+            if r.status_code == 200:
+                with open(cache_path, "wb") as f:
+                    f.write(r.content)
+                print(f"[preview] {safe_key} 缓存完成（cosyvoice）", flush=True)
+            return
+
+        # 阿里云
         task_id = aliyun_submit_long_tts(demo_text, voice=safe_key, speech_rate=0)
         audio_url = None
         for _ in range(40):  # 最多 80 秒
@@ -926,7 +952,7 @@ def _generate_preview_in_background(safe_key: str, demo_text: str):
         if r.status_code == 200:
             with open(cache_path, "wb") as f:
                 f.write(r.content)
-            print(f"[preview] {safe_key} 缓存完成", flush=True)
+            print(f"[preview] {safe_key} 缓存完成（aliyun）", flush=True)
         else:
             print(f"[preview] {safe_key} 下载失败 {r.status_code}", flush=True)
     except Exception as e:
@@ -958,12 +984,11 @@ def voice_preview(voice_key: str, background_tasks: BackgroundTasks):
             conn.close()
         if not row:
             raise HTTPException(404, f"音色 {safe_key} 不存在")
-        if row["engine"] != "aliyun":
-            raise HTTPException(400, f"试听暂不支持 {row['engine']} 引擎")
         accent = row["accent"] or "mandarin"
         demo_text = PREVIEW_TEXTS.get(accent, PREVIEW_TEXTS["mandarin"])
+        engine = row["engine"] or "aliyun"
         _PREVIEW_GENERATING.add(safe_key)
-        background_tasks.add_task(_generate_preview_in_background, safe_key, demo_text)
+        background_tasks.add_task(_generate_preview_in_background, safe_key, demo_text, engine)
 
     # 立刻返回 202，前端轮询
     return JSONResponse({"status": "generating"}, status_code=202)
