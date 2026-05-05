@@ -28,7 +28,7 @@ ACCESS_TOKEN_EXPIRE_DAYS = 30
 VOICE_STORAGE_DIR = "voice-assets"
 VOICE_PRESETS = [
     # ─── 本地 CosyVoice2 （免费，质量优）───
-    {"key": "cosy_default", "name": "莫小本", "engine": "cosyvoice", "category": "preset", "gender": "female", "locale": "zh-CN", "accent": "mandarin", "emotion": "natural", "speed": "1.0x", "sample_text": "本地 CosyVoice2，零成本，质量与阿里云大模型同源。"},
+    {"key": "cosy_default", "name": "莫小本", "engine": "cosyvoice", "category": "preset", "gender": "female", "locale": "zh-CN", "accent": "mandarin", "emotion": "natural", "speed": "1.0x", "sample_text": "自然女声，日常分享、生活vlog。"},
     # ─── 普通话女声（极致音+多情感，长文本商用版可用）───
     {"key": "siqi",        "name": "莫小婉", "engine": "aliyun", "category": "preset", "gender": "female", "locale": "zh-CN", "accent": "mandarin", "emotion": "warm",       "speed": "1.0x", "sample_text": "温柔女声，情感、生活方式。"},
     {"key": "ruoxi",       "name": "莫小华", "engine": "aliyun", "category": "preset", "gender": "female", "locale": "zh-CN", "accent": "mandarin", "emotion": "knowledgeable","speed": "1.0x", "sample_text": "知性女声，知识、纪录。"},
