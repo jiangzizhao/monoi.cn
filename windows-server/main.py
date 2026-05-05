@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Optional
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from jose import jwt, JWTError
@@ -901,65 +901,72 @@ PREVIEW_TEXTS = {
 }
 
 
-@app.get("/api/voice/preview/{voice_key}")
-def voice_preview(voice_key: str):
-    """每个音色的试听 demo（带磁盘缓存）"""
-    import re as _re
+_PREVIEW_GENERATING = set()  # 当前正在后台生成的 voice keys
+
+
+def _generate_preview_in_background(safe_key: str, demo_text: str):
+    """后台任务：合成并保存试听音频"""
     import time as _t
     import requests as _req
-    from fastapi.responses import FileResponse, StreamingResponse
+    cache_path = os.path.join(VOICE_PREVIEW_DIR, f"{safe_key}.wav")
+    try:
+        task_id = aliyun_submit_long_tts(demo_text, voice=safe_key, speech_rate=0)
+        audio_url = None
+        for _ in range(40):  # 最多 80 秒
+            _t.sleep(2)
+            data = aliyun_get_task(task_id)
+            body = data.get("data") or {}
+            audio_url = body.get("audio_address")
+            if audio_url:
+                break
+        if not audio_url:
+            print(f"[preview] {safe_key} 合成超时", flush=True)
+            return
+        r = _req.get(audio_url, timeout=30)
+        if r.status_code == 200:
+            with open(cache_path, "wb") as f:
+                f.write(r.content)
+            print(f"[preview] {safe_key} 缓存完成", flush=True)
+        else:
+            print(f"[preview] {safe_key} 下载失败 {r.status_code}", flush=True)
+    except Exception as e:
+        print(f"[preview] {safe_key} 错误: {e}", flush=True)
+    finally:
+        _PREVIEW_GENERATING.discard(safe_key)
+
+
+@app.get("/api/voice/preview/{voice_key}")
+def voice_preview(voice_key: str, background_tasks: BackgroundTasks):
+    """每个音色的试听 demo（异步生成 + 磁盘缓存）"""
+    import re as _re
+    from fastapi.responses import FileResponse, JSONResponse
 
     safe_key = _re.sub(r"[^a-zA-Z0-9_]", "", voice_key)
     cache_path = os.path.join(VOICE_PREVIEW_DIR, f"{safe_key}.wav")
 
-    # 已经缓存过 → 直接返回
+    # 已缓存 → 直接返回音频
     if os.path.exists(cache_path) and os.path.getsize(cache_path) > 1024:
         return FileResponse(cache_path, media_type="audio/wav")
 
-    # 查 voice 配置
-    conn = get_db()
-    conn.row_factory = sqlite3.Row
-    try:
-        row = conn.execute("SELECT * FROM voice_presets WHERE key = ?", (safe_key,)).fetchone()
-    finally:
-        conn.close()
-    if not row:
-        raise HTTPException(404, f"音色 {safe_key} 不存在")
+    # 没缓存 → 触发后台生成（如果还没在生成中）
+    if safe_key not in _PREVIEW_GENERATING:
+        conn = get_db()
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute("SELECT * FROM voice_presets WHERE key = ?", (safe_key,)).fetchone()
+        finally:
+            conn.close()
+        if not row:
+            raise HTTPException(404, f"音色 {safe_key} 不存在")
+        if row["engine"] != "aliyun":
+            raise HTTPException(400, f"试听暂不支持 {row['engine']} 引擎")
+        accent = row["accent"] or "mandarin"
+        demo_text = PREVIEW_TEXTS.get(accent, PREVIEW_TEXTS["mandarin"])
+        _PREVIEW_GENERATING.add(safe_key)
+        background_tasks.add_task(_generate_preview_in_background, safe_key, demo_text)
 
-    accent = row["accent"] or "mandarin"
-    demo_text = PREVIEW_TEXTS.get(accent, PREVIEW_TEXTS["mandarin"])
-    engine = row["engine"]
-
-    if engine != "aliyun":
-        raise HTTPException(400, f"试听暂不支持 {engine} 引擎")
-
-    # 提交合成
-    task_id = aliyun_submit_long_tts(demo_text, voice=safe_key, speech_rate=0)
-
-    # 轮询（最多 60 秒）
-    audio_url = None
-    for _ in range(30):
-        _t.sleep(2)
-        data = aliyun_get_task(task_id)
-        body = data.get("data") or {}
-        audio_url = body.get("audio_address")
-        if audio_url:
-            break
-
-    if not audio_url:
-        raise HTTPException(504, "试听合成超时")
-
-    # 下载到本地缓存
-    try:
-        r = _req.get(audio_url, timeout=30)
-        if r.status_code != 200:
-            raise HTTPException(502, f"下载试听音频失败: {r.status_code}")
-        with open(cache_path, "wb") as f:
-            f.write(r.content)
-    except Exception as e:
-        raise HTTPException(500, f"缓存试听失败: {e}")
-
-    return FileResponse(cache_path, media_type="audio/wav")
+    # 立刻返回 202，前端轮询
+    return JSONResponse({"status": "generating"}, status_code=202)
 
 
 @app.get("/api/voice/audio/{name}")

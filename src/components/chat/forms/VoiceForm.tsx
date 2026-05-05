@@ -88,7 +88,9 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
   const [previewLoading, setPreviewLoading] = useState<string>('')
   const audioRef = useRef<HTMLAudioElement | null>(null)
 
-  const togglePreview = (voiceId: string) => {
+  const previewTargetRef = useRef<string>('')
+
+  const togglePreview = async (voiceId: string) => {
     // 当前播放就暂停
     if (previewPlaying === voiceId) {
       audioRef.current?.pause()
@@ -100,20 +102,45 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
       audioRef.current.pause()
       audioRef.current = null
     }
+    previewTargetRef.current = voiceId
     setPreviewLoading(voiceId)
     setPreviewPlaying('')
+
     const url = '/api/proxy?path=' + encodeURIComponent('/api/voice/preview/' + voiceId)
-    const audio = new Audio(url)
-    audioRef.current = audio
-    audio.onloadeddata = () => {
-      setPreviewLoading('')
-      setPreviewPlaying(voiceId)
-      audio.play().catch(() => setPreviewPlaying(''))
+
+    // 先用 fetch 试探：如果是 audio/wav，直接 Audio 播；如果是 202 JSON，轮询
+    for (let i = 0; i < 45; i++) {
+      if (previewTargetRef.current !== voiceId) return  // 用户切换了
+      try {
+        const res = await fetch(url, { cache: 'no-store' })
+        const ct = res.headers.get('content-type') || ''
+        if (res.ok && ct.includes('audio')) {
+          const blob = await res.blob()
+          const blobUrl = URL.createObjectURL(blob)
+          const audio = new Audio(blobUrl)
+          audioRef.current = audio
+          setPreviewLoading('')
+          setPreviewPlaying(voiceId)
+          audio.onended = () => { setPreviewPlaying(''); URL.revokeObjectURL(blobUrl) }
+          await audio.play().catch(() => setPreviewPlaying(''))
+          return
+        }
+        if (res.status === 202) {
+          // 后台生成中，等 2 秒再试
+          await new Promise(r => setTimeout(r, 2000))
+          continue
+        }
+        // 其他错误
+        console.error('preview error', res.status, await res.text())
+        setPreviewLoading('')
+        return
+      } catch (e) {
+        console.error('preview fetch error', e)
+        setPreviewLoading('')
+        return
+      }
     }
-    audio.onended = () => setPreviewPlaying('')
-    audio.onerror = () => { setPreviewLoading(''); setPreviewPlaying('') }
-    // 部分浏览器需要先 play 才能触发加载
-    audio.load()
+    setPreviewLoading('')
   }
 
   // 卸载时停掉
