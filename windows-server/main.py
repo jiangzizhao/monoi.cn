@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Optional
-from fastapi import FastAPI, HTTPException, Query, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from jose import jwt, JWTError
@@ -143,8 +143,8 @@ def init_db():
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
-    # 完全重置 voice_presets，每次启动都同步成 VOICE_PRESETS 里的最新列表
-    conn.execute("DELETE FROM voice_presets")
+    # 只清掉系统预设，保留用户克隆 (category='clone')
+    conn.execute("DELETE FROM voice_presets WHERE category != 'clone'")
     for preset in VOICE_PRESETS:
         conn.execute("""
             INSERT INTO voice_presets
@@ -642,6 +642,104 @@ def create_voice_clone(req: VoiceCloneCreateRequest):
         }
     finally:
         conn.close()
+
+VOICE_PROMPTS_DIR = r"D:\monoi-server\models\cosyvoice\voice_prompts"
+
+@app.post("/api/voice/upload-clone")
+async def upload_clone(
+    file: UploadFile = File(...),
+    clone_name: str = Form("我的声音"),
+    transcript: str = Form(""),
+    gender: str = Form("female"),
+    user_id: Optional[int] = Form(None),
+):
+    """用户上传录音作为 CosyVoice2 克隆的 prompt 音频"""
+    import shutil
+    import uuid as _uuid
+    import time as _t
+
+    if not clone_name.strip():
+        clone_name = "我的声音"
+    os.makedirs(VOICE_PROMPTS_DIR, exist_ok=True)
+
+    clone_key = f"clone_{int(_t.time())}_{_uuid.uuid4().hex[:6]}"
+    raw_path = os.path.join(tempfile.gettempdir(), f"{clone_key}_raw")
+    wav_path = os.path.join(VOICE_PROMPTS_DIR, f"{clone_key}.wav")
+    txt_path = os.path.join(VOICE_PROMPTS_DIR, f"{clone_key}.txt")
+
+    # 保存上传文件
+    try:
+        with open(raw_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+    except Exception as e:
+        raise HTTPException(500, f"保存上传文件失败: {e}")
+
+    # 用 ffmpeg 转成 16kHz 单声道 wav（CosyVoice2 prompt 标准格式）
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-y", "-i", raw_path, "-ar", "16000", "-ac", "1", "-f", "wav", wav_path],
+            capture_output=True, timeout=60,
+        )
+        if result.returncode != 0:
+            err_msg = result.stderr.decode("utf-8", errors="ignore")[-500:]
+            raise HTTPException(400, f"音频转换失败: {err_msg}")
+    except FileNotFoundError:
+        raise HTTPException(500, "服务器未安装 ffmpeg")
+    except subprocess.TimeoutExpired:
+        raise HTTPException(408, "音频转换超时")
+    finally:
+        if os.path.exists(raw_path):
+            try: os.unlink(raw_path)
+            except: pass
+
+    # 保存对应的文案
+    if transcript.strip():
+        try:
+            with open(txt_path, "w", encoding="utf-8") as f:
+                f.write(transcript.strip())
+        except Exception:
+            pass
+
+    # 写数据库（voice_clones + voice_presets）
+    conn = get_db()
+    try:
+        conn.execute(
+            "INSERT INTO voice_clones (user_id, clone_name, engine, accent, status, sample_text) VALUES (?, ?, ?, ?, ?, ?)",
+            (user_id, clone_name, "cosyvoice", "mandarin", "ready", transcript[:200] if transcript else ""),
+        )
+        conn.execute(
+            "INSERT INTO voice_presets (key, name, engine, category, gender, locale, accent, emotion, speed, sample_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (clone_key, clone_name, "cosyvoice", "clone", gender, "zh-CN", "mandarin", "natural", "1.0x", "我的克隆声音。"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    return {"success": True, "clone_key": clone_key, "name": clone_name}
+
+
+@app.delete("/api/voice/clone/{clone_key}")
+def delete_clone(clone_key: str):
+    """删除一个克隆音色"""
+    import re as _re
+    safe_key = _re.sub(r"[^a-zA-Z0-9_]", "", clone_key)
+    if not safe_key.startswith("clone_"):
+        raise HTTPException(400, "只能删除克隆音色")
+    wav_path = os.path.join(VOICE_PROMPTS_DIR, f"{safe_key}.wav")
+    txt_path = os.path.join(VOICE_PROMPTS_DIR, f"{safe_key}.txt")
+    preview_path = os.path.join(VOICE_PREVIEW_DIR, f"{safe_key}.wav")
+    for p in (wav_path, txt_path, preview_path):
+        if os.path.exists(p):
+            try: os.unlink(p)
+            except: pass
+    conn = get_db()
+    try:
+        conn.execute("DELETE FROM voice_presets WHERE key = ?", (safe_key,))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"success": True}
+
 
 @app.get("/api/voice/clones")
 def list_voice_clones(user_id: Optional[int] = None):
