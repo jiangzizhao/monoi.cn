@@ -1183,8 +1183,8 @@ async def clean_narration(file: UploadFile = File(...), reference_text: str = Fo
             raise HTTPException(resp.status_code, f"voice-server 错误: {resp.text[:200]}")
         result = resp.json()
         # 把 voice-server 内部 path 改写成 main.py 可代理的路径
-        if result.get("file"):
-            result["audio_url"] = f"/api/voice/narration-audio/{result['file']}"
+        if result.get("source_file"):
+            result["audio_url_path"] = f"/api/voice/narration-audio/{result['source_file']}"
         return result
     except _req.exceptions.ConnectionError:
         raise HTTPException(503, "voice-server (9001) 未启动")
@@ -1209,7 +1209,7 @@ def finalize_narration_proxy(req: FinalizeNarrationRequest):
             raise HTTPException(resp.status_code, f"voice-server 错误: {resp.text[:200]}")
         result = resp.json()
         if result.get("file"):
-            result["audio_url"] = f"/api/voice/narration-audio/{result['file']}"
+            result["audio_url_path"] = f"/api/voice/narration-audio/{result['file']}"
         return result
     except _req.exceptions.ConnectionError:
         raise HTTPException(503, "voice-server (9001) 未启动")
