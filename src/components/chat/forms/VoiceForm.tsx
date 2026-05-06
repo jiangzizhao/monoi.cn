@@ -368,9 +368,9 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
   }
 
   return createPortal(
-    <>
-      <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm" onClick={onClose}/>
-      <div className="fixed left-1/2 top-1/2 z-50 w-[min(680px,calc(100vw-2rem))] max-h-[85vh] -translate-x-1/2 -translate-y-1/2 bg-[var(--bg-card)] border border-[var(--border)] rounded-[22px] shadow-ios-lg overflow-hidden flex flex-col sheet-enter">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose}/>
+      <div className="relative w-[min(680px,100%)] max-h-[85vh] bg-[var(--bg-card)] border border-[var(--border)] rounded-[22px] shadow-ios-lg overflow-hidden flex flex-col sheet-enter">
         <div className="px-4 py-3 border-b border-[var(--border)] flex items-center justify-between">
           <span className="text-base font-semibold text-[var(--text)]">{formTitle(mode)}</span>
           <button
@@ -636,7 +636,7 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
         </div>
         )}
       </div>
-    </>,
+    </div>,
     document.body
   )
 }
