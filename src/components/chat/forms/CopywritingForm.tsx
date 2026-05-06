@@ -101,7 +101,7 @@ export function CopywritingForm({ mode, onSubmit, onClose }: Props) {
   return (
     <>
       <div className="fixed inset-0 z-10" onClick={onClose}/>
-      <div className="absolute bottom-full left-0 right-0 mb-2 z-20 bg-[var(--bg-card)] border border-[var(--border)] rounded-xl shadow-2xl overflow-hidden">
+      <div className="absolute bottom-full left-0 right-0 mb-2 z-20 bg-[var(--bg-card)] border border-[var(--border)] rounded-[18px] shadow-ios-lg overflow-hidden sheet-enter">
 
         {/* 进度条 */}
         <div className="px-4 py-2.5 border-b border-[var(--border)] flex items-center justify-between">

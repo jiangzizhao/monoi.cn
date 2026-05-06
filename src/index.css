@@ -1,43 +1,49 @@
 @import "tailwindcss";
 
 @layer base {
-  /* Light theme (default) */
+  /* Light theme — iOS / macOS 系统色 */
   :root {
-    --bg:            #f4f5f7;
+    --bg:            #f2f2f7;          /* iOS systemGroupedBackground */
     --bg-chat:       #ffffff;
     --bg-card:       #ffffff;
-    --bg-input:      #f0f1f5;
-    --bg-hover:      #e8eaf0;
-    --border:        #dde0e8;
-    --border-subtle: #e8eaf0;
-    --text:          #1a1b2e;
-    --text-2:        #5a5b7a;
-    --text-3:        #9a9bb8;
-    --indigo:        #6366f1;
-    --indigo-2:      #4f52d5;
-    --indigo-dim:    rgba(99,102,241,0.10);
-    --amber:         #d97706;
-    --amber-dim:     rgba(217,119,6,0.10);
+    --bg-input:      #ebebf0;
+    --bg-hover:      rgba(120,120,128,0.12);
+    --border:        rgba(60,60,67,0.18);
+    --border-subtle: rgba(60,60,67,0.10);
+    --text:          #000000;          /* iOS label */
+    --text-2:        #3c3c43;          /* iOS secondaryLabel 60% */
+    --text-3:        rgba(60,60,67,0.6);/* iOS tertiaryLabel */
+    --indigo:        #007aff;          /* iOS systemBlue */
+    --indigo-2:      #0a84ff;
+    --indigo-dim:    rgba(0,122,255,0.10);
+    --amber:         #ff9500;          /* iOS systemOrange */
+    --amber-dim:     rgba(255,149,0,0.10);
+    --red:           #ff3b30;
+    --green:         #34c759;
+    --blur-bg:       rgba(255,255,255,0.72);
   }
 
-  /* Dark theme (system preference) */
+  /* Dark theme — iOS Dark */
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg:            #0a0b10;
-      --bg-chat:       #111118;
-      --bg-card:       #1a1a26;
-      --bg-input:      #16161f;
-      --bg-hover:      #1f1f2e;
-      --border:        #2a2a3d;
-      --border-subtle: #1e1e2d;
-      --text:          #e8e9f2;
-      --text-2:        #9898b8;
-      --text-3:        #55557a;
-      --indigo:        #6366f1;
-      --indigo-2:      #818cf8;
-      --indigo-dim:    rgba(99,102,241,0.12);
-      --amber:         #fbbf24;
-      --amber-dim:     rgba(251,191,36,0.10);
+      --bg:            #000000;
+      --bg-chat:       #1c1c1e;        /* iOS systemBackground (dark) */
+      --bg-card:       #1c1c1e;
+      --bg-input:      #2c2c2e;        /* secondarySystemBackground */
+      --bg-hover:      rgba(120,120,128,0.24);
+      --border:        rgba(84,84,88,0.65);
+      --border-subtle: rgba(84,84,88,0.32);
+      --text:          #ffffff;
+      --text-2:        rgba(235,235,245,0.6);
+      --text-3:        rgba(235,235,245,0.3);
+      --indigo:        #0a84ff;
+      --indigo-2:      #409cff;
+      --indigo-dim:    rgba(10,132,255,0.18);
+      --amber:         #ff9f0a;
+      --amber-dim:     rgba(255,159,10,0.16);
+      --red:           #ff453a;
+      --green:         #30d158;
+      --blur-bg:       rgba(28,28,30,0.72);
     }
   }
 
@@ -47,23 +53,73 @@
     height: 100%;
     background: var(--bg);
     color: var(--text);
-    font-family: 'Inter', 'Noto Sans SC', system-ui, sans-serif;
+    /* SF Pro 优先，回退到系统字体 */
+    font-family:
+      -apple-system, BlinkMacSystemFont,
+      "SF Pro Text", "SF Pro Display",
+      "Helvetica Neue", "PingFang SC", "Microsoft YaHei",
+      system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    letter-spacing: -0.01em;
+  }
+
+  /* iOS 风格圆角默认值（被 Tailwind 覆盖时仍生效） */
+  button, input, textarea, select {
+    font-family: inherit;
+    letter-spacing: inherit;
   }
 
   ::selection { background: var(--indigo-dim); color: var(--indigo-2); }
 
-  ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb { background: rgba(120,120,128,0.32); border-radius: 3px; }
   ::-webkit-scrollbar-thumb:hover { background: var(--text-3); }
 }
 
+/* iOS 弹性曲线动画 */
 @keyframes fadeSlideUp {
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-.msg-enter { animation: fadeSlideUp 0.22s ease both; }
+.msg-enter { animation: fadeSlideUp 0.32s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+
+@keyframes sheetUp {
+  from { opacity: 0; transform: translate(-50%, calc(-50% + 24px)) scale(0.96); }
+  to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+.sheet-enter { animation: sheetUp 0.28s cubic-bezier(0.32, 0.72, 0.0, 1) both; }
 
 @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
 .cursor-blink { display: inline-block; width: 2px; height: 1em; background: var(--indigo-2); border-radius: 1px; margin-left: 2px; vertical-align: text-bottom; animation: blink 1s step-end infinite; }
+
+/* iOS 毛玻璃工具类 */
+.glass {
+  background: var(--blur-bg);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+}
+
+/* iOS 卡片阴影 */
+.shadow-ios {
+  box-shadow:
+    0 0 0 0.5px rgba(0,0,0,0.04),
+    0 8px 24px rgba(0,0,0,0.08),
+    0 2px 6px rgba(0,0,0,0.04);
+}
+.shadow-ios-lg {
+  box-shadow:
+    0 0 0 0.5px rgba(0,0,0,0.04),
+    0 16px 48px rgba(0,0,0,0.16),
+    0 4px 12px rgba(0,0,0,0.08);
+}
+
+/* 按钮通用过渡 */
+button {
+  transition: transform 0.12s ease, opacity 0.12s ease, background-color 0.16s ease;
+}
+button:active:not(:disabled) {
+  transform: scale(0.97);
+}
