@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { Play, Pause, Loader2 } from 'lucide-react'
 import { NarrationEditor } from '../NarrationEditor'
 
@@ -366,7 +367,7 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
     setUploadError('')
   }
 
-  return (
+  return createPortal(
     <>
       <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm" onClick={onClose}/>
       <div className="fixed left-1/2 top-1/2 z-50 w-[min(680px,calc(100vw-2rem))] max-h-[85vh] -translate-x-1/2 -translate-y-1/2 bg-[var(--bg-card)] border border-[var(--border)] rounded-[22px] shadow-ios-lg overflow-hidden flex flex-col sheet-enter">
@@ -635,6 +636,7 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
         </div>
         )}
       </div>
-    </>
+    </>,
+    document.body
   )
 }
