@@ -320,7 +320,7 @@ export function NarrationEditor({ data, apiBase, onCancel, onDone }: Props) {
               <span
                 key={key}
                 data-word-key={key}
-                onClick={(e) => {
+                onClick={() => {
                   // 如果有选区，不响应单击切换
                   const sel = window.getSelection()
                   if (sel && !sel.isCollapsed && sel.toString().length > 0) return
