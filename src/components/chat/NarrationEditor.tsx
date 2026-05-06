@@ -121,6 +121,10 @@ export function NarrationEditor({ data, apiBase, onCancel, onDone }: Props) {
     return keepRanges.reduce((sum, [s, e]) => sum + (e - s), 0)
   }, [keepRanges])
 
+  // 用 ref 持有最新的 keepRanges，给 timeupdate 回调读取
+  const keepRangesRef = useRef<[number, number][]>([])
+  useEffect(() => { keepRangesRef.current = keepRanges }, [keepRanges])
+
   // 初始化 wavesurfer
   useEffect(() => {
     if (!containerRef.current) return
@@ -139,7 +143,23 @@ export function NarrationEditor({ data, apiBase, onCancel, onDone }: Props) {
     wsRef.current = ws
     regionsRef.current = regions
     ws.on('ready', () => setReady(true))
-    ws.on('timeupdate', (t) => setCurrentTime(t))
+    ws.on('timeupdate', (t) => {
+      setCurrentTime(t)
+      // 跳过被删除的段：当前时间不在任何 keepRange 内 → 跳到下一个 keepRange 起点
+      if (!ws.isPlaying()) return
+      const ranges = keepRangesRef.current
+      if (ranges.length === 0) return
+      const inKeep = ranges.some(([s, e]) => t >= s - 0.01 && t <= e + 0.01)
+      if (!inKeep) {
+        const nextRange = ranges.find(([s]) => s > t)
+        if (nextRange) {
+          ws.setTime(nextRange[0])
+        } else {
+          // 已经过了所有保留段，停止
+          ws.pause()
+        }
+      }
+    })
     ws.on('play', () => setPlaying(true))
     ws.on('pause', () => setPlaying(false))
     ws.on('finish', () => setPlaying(false))
