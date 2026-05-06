@@ -221,38 +221,74 @@ async def clean_narration(file: UploadFile = File(...), reference_text: str = Fo
     info = sf.info(norm_path)
     orig_dur = info.duration
 
-    # 4. Whisper 转录得到分段
+    # 4. Whisper 转录（词级时间戳）
     model = get_whisper()
-    segments_iter, info = model.transcribe(norm_path, language="zh", beam_size=5)
+    segments_iter, info = model.transcribe(norm_path, language="zh", beam_size=5, word_timestamps=True)
     segments = []
     for s in segments_iter:
-        segments.append({"start": s.start, "end": s.end, "text": s.text})
+        words = []
+        if s.words:
+            for w in s.words:
+                words.append({"start": w.start, "end": w.end, "word": w.word})
+        segments.append({"start": s.start, "end": s.end, "text": s.text, "words": words})
 
     full_text = "".join(s["text"] for s in segments).strip()
 
-    # 5. 找静音段 + 重复段
+    # 5. 找静音段 + 重复段（作为"建议删除"提示给用户，不直接删）
     silences = _ffmpeg_silence_detect(norm_path, noise_db=-30, min_silence=0.6)
     repeats = _detect_repeats(segments)
 
-    removed = silences + repeats
-
-    # 6. 拼接保留段
-    keep = _ffmpeg_concat_keep(norm_path, removed, orig_dur, out_path)
-
-    # 7. 测清洗后时长
-    new_info = sf.info(out_path)
-    new_dur = new_info.duration
-
     return {
         "success": True,
-        "file": os.path.basename(out_path),
-        "audio_url_path": f"/narration/{os.path.basename(out_path)}",
-        "original_duration": orig_dur,
-        "cleaned_duration": new_dur,
+        "source_file": os.path.basename(norm_path),  # 原始处理后的 wav
+        "audio_url_path": f"/narration/{os.path.basename(norm_path)}",
+        "duration": orig_dur,
         "transcription": full_text,
-        "removed_silences": len(silences),
-        "removed_repeats": len(repeats),
-        "segments": segments,
+        "segments": segments,  # 含 words 数组（词级时间戳）
+        "suggested_removals": {
+            "silences": [{"start": s, "end": e} for s, e in silences],
+            "repeats": [{"start": s, "end": e} for s, e in repeats],
+        },
+    }
+
+
+class FinalizeRequest(BaseModel):
+    source_file: str  # /clean-narration 返回的 source_file
+    keep_ranges: list[list[float]]  # [[start, end], ...]
+
+
+@app.post("/finalize-narration")
+def finalize_narration(req: FinalizeRequest):
+    """根据用户选择的保留段，产出最终 wav"""
+    import subprocess
+
+    safe = os.path.basename(req.source_file)
+    src_path = os.path.join(NARRATION_OUTPUT_DIR, safe)
+    if not os.path.exists(src_path):
+        raise HTTPException(404, "源文件不存在")
+    if not req.keep_ranges:
+        raise HTTPException(400, "keep_ranges 不能为空")
+
+    out_name = f"final_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}.wav"
+    out_path = os.path.join(NARRATION_OUTPUT_DIR, out_name)
+
+    # 用 ffmpeg aselect filter 拼接保留段
+    select_expr = "+".join(f"between(t,{s},{e})" for s, e in req.keep_ranges)
+    proc = subprocess.run(
+        ["ffmpeg", "-y", "-i", src_path, "-af",
+         f"aselect='{select_expr}',asetpts=N/SR/TB", out_path],
+        capture_output=True, timeout=120
+    )
+    if proc.returncode != 0:
+        err = proc.stderr.decode("utf-8", errors="ignore")[-300:]
+        raise HTTPException(500, f"ffmpeg failed: {err}")
+
+    new_dur = sf.info(out_path).duration
+    return {
+        "success": True,
+        "file": out_name,
+        "audio_url_path": f"/narration/{out_name}",
+        "duration": new_dur,
     }
 
 

@@ -1190,6 +1190,31 @@ async def clean_narration(file: UploadFile = File(...), reference_text: str = Fo
         raise HTTPException(503, "voice-server (9001) 未启动")
 
 
+class FinalizeNarrationRequest(BaseModel):
+    source_file: str
+    keep_ranges: list[list[float]]
+
+
+@app.post("/api/voice/finalize-narration")
+def finalize_narration_proxy(req: FinalizeNarrationRequest):
+    """转发到 voice-server"""
+    import requests as _req
+    try:
+        resp = _req.post(
+            f"{VOICE_SERVER_URL}/finalize-narration",
+            json={"source_file": req.source_file, "keep_ranges": req.keep_ranges},
+            timeout=180,
+        )
+        if resp.status_code != 200:
+            raise HTTPException(resp.status_code, f"voice-server 错误: {resp.text[:200]}")
+        result = resp.json()
+        if result.get("file"):
+            result["audio_url"] = f"/api/voice/narration-audio/{result['file']}"
+        return result
+    except _req.exceptions.ConnectionError:
+        raise HTTPException(503, "voice-server (9001) 未启动")
+
+
 @app.get("/api/voice/narration-audio/{name}")
 def proxy_narration_audio(name: str):
     """代理清洗后的录音文件"""

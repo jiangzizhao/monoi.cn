@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, useRef } from 'react'
 import { Play, Pause, Loader2 } from 'lucide-react'
+import { NarrationEditor } from '../NarrationEditor'
 
 type Mode = 'preset' | 'upload' | 'clone'
 
@@ -284,9 +285,9 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
         setUploadError(data.detail || data.error || `处理失败 (HTTP ${res.status})`)
         return
       }
-      // 直传后 audio_url 是后端的相对路径，需要补全成完整域名
-      if (data.audio_url && data.audio_url.startsWith('/')) {
-        data.audio_url_full = directBase + data.audio_url
+      // 直传后 audio_url_path 是后端的相对路径，需要补全成完整域名
+      if (data.audio_url_path && data.audio_url_path.startsWith('/')) {
+        data.audio_url_full = directBase + data.audio_url_path
       }
       setCleanResult(data)
     } catch (e: any) {
@@ -460,34 +461,19 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
           )}
 
           {mode === 'upload' && cleanResult && (
-            <div className="flex flex-col gap-3">
-              <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-[var(--bg-hover)]">
-                <div className="text-xs text-[var(--text-3)]">
-                  时长：{cleanResult.original_duration?.toFixed(1)}s →{' '}
-                  <span className="text-[var(--text)] font-medium">{cleanResult.cleaned_duration?.toFixed(1)}s</span>
-                </div>
-                <div className="text-xs text-[var(--text-3)]">
-                  去掉静音 {cleanResult.removed_silences} 段
-                </div>
-                <div className="text-xs text-[var(--text-3)]">
-                  去掉重复 {cleanResult.removed_repeats} 段
-                </div>
-              </div>
-              <audio controls src={cleanResult.audio_url_full || ('/api/proxy?path=' + encodeURIComponent(cleanResult.audio_url))} className="w-full"/>
-              {cleanResult.transcription && (
-                <div className="text-xs text-[var(--text-2)] leading-relaxed bg-[var(--bg-hover)] rounded-lg px-3 py-2 max-h-32 overflow-y-auto">
-                  <div className="text-[var(--text-3)] mb-1">转录文本：</div>
-                  {cleanResult.transcription}
-                </div>
-              )}
-              <button
-                type="button"
-                onClick={() => { setCleanResult(null); setFileObj(null); setFileName('') }}
-                className="text-xs text-[var(--text-3)] hover:text-[var(--text)] cursor-pointer self-start"
-              >
-                ← 重新上传
-              </button>
-            </div>
+            <NarrationEditor
+              data={cleanResult as any}
+              apiBase={import.meta.env.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'}
+              onCancel={() => { setCleanResult(null); setFileObj(null); setFileName('') }}
+              onDone={(audioUrl, duration, transcription) => {
+                onSubmit(`__cleaned_audio__${JSON.stringify({
+                  audio_url: audioUrl,
+                  duration,
+                  original_duration: (cleanResult as any).duration,
+                  transcription,
+                })}`)
+              }}
+            />
           )}
 
           {mode === 'clone' && !showCloneUpload && (
@@ -602,7 +588,8 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
           />
         </div>
 
-        {/* Footer 固定底部 */}
+        {/* Footer 固定底部（剪辑器有自己的按钮） */}
+        {!(mode === 'upload' && cleanResult) && (
         <div className="px-4 py-2.5 border-t border-[var(--border)] flex justify-end gap-2 bg-[var(--bg-card)]">
             <button
               onClick={onClose}
@@ -637,6 +624,7 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
               {mode === 'preset' && '继续'}
             </button>
         </div>
+        )}
       </div>
     </>
   )
