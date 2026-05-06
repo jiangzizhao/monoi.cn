@@ -579,13 +579,15 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
             </>
           )}
 
-          <textarea
-            rows={2}
-            value={notes}
-            onChange={e => setNotes(e.target.value)}
-            placeholder="补充要求（可选）"
-            className="bg-[var(--bg-input)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-[var(--text)] placeholder:text-[var(--text-3)] focus:outline-none resize-none"
-          />
+          {!(mode === 'upload' && cleanResult) && (
+            <textarea
+              rows={2}
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+              placeholder="补充要求（可选）"
+              className="bg-[var(--bg-input)] border border-[var(--border)] rounded-[12px] px-3 py-2 text-sm text-[var(--text)] placeholder:text-[var(--text-3)] focus:outline-none resize-none"
+            />
+          )}
         </div>
 
         {/* Footer 固定底部（剪辑器有自己的按钮） */}

@@ -359,7 +359,7 @@ export function NarrationEditor({ data, apiBase, onCancel, onDone }: Props) {
       </div>
 
       {/* 转录字幕 - 拖选 + 删除按钮 / 单击词切换 */}
-      <div ref={textContainerRef} tabIndex={0} className="text-sm leading-loose max-h-64 overflow-y-auto bg-[var(--bg-hover)] rounded-lg p-3 outline-none focus:ring-1 focus:ring-[var(--text-3)]">
+      <div ref={textContainerRef} tabIndex={0} className="text-sm leading-loose max-h-48 overflow-y-auto bg-[var(--bg-hover)] rounded-[12px] p-3 outline-none focus:ring-1 focus:ring-[var(--text-3)]">
         {allWords.length === 0 ? (
           <div className="text-[var(--text-3)]">没有转录到内容</div>
         ) : (
