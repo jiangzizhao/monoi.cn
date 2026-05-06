@@ -369,7 +369,7 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
   return (
     <>
       <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm" onClick={onClose}/>
-      <div className="fixed left-1/2 top-1/2 z-50 w-[min(680px,calc(100vw-2rem))] max-h-[90vh] -translate-x-1/2 -translate-y-1/2 bg-[var(--bg-card)] border border-[var(--border)] rounded-[22px] shadow-ios-lg overflow-hidden flex flex-col sheet-enter">
+      <div className="fixed left-1/2 top-4 z-50 w-[min(680px,calc(100vw-2rem))] max-h-[calc(100vh-2rem)] -translate-x-1/2 bg-[var(--bg-card)] border border-[var(--border)] rounded-[22px] shadow-ios-lg overflow-hidden flex flex-col sheet-enter">
         <div className="px-4 py-2.5 border-b border-[var(--border)]">
           <span className="text-xs text-[var(--text-3)]">{formTitle(mode)}</span>
         </div>
