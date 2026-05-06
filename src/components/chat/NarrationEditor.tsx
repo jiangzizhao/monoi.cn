@@ -201,6 +201,56 @@ export function NarrationEditor({ data, apiBase, onCancel, onDone }: Props) {
     ws.seekTo(t.start / data.duration)
   }
 
+  // 删除选中范围里的所有词
+  const deleteSelected = () => {
+    const sel = window.getSelection()
+    if (!sel || sel.isCollapsed) return false
+    const range = sel.getRangeAt(0)
+    const container = textContainerRef.current
+    if (!container || !container.contains(range.commonAncestorContainer)) return false
+
+    const spans = container.querySelectorAll<HTMLElement>('[data-word-key]')
+    const newDeleted = new Set(deletedKeys)
+    let anyDeleted = false
+    spans.forEach(span => {
+      const key = span.dataset.wordKey
+      if (!key) return
+      // 检查这个 span 是否和选区有交集
+      const spanRange = document.createRange()
+      spanRange.selectNodeContents(span)
+      const intersects = !(
+        range.compareBoundaryPoints(Range.END_TO_START, spanRange) >= 0 ||
+        range.compareBoundaryPoints(Range.START_TO_END, spanRange) <= 0
+      )
+      if (intersects) {
+        newDeleted.add(key)
+        anyDeleted = true
+      }
+    })
+    if (anyDeleted) {
+      setDeletedKeys(newDeleted)
+      sel.removeAllRanges()
+      return true
+    }
+    return false
+  }
+
+  const textContainerRef = useRef<HTMLDivElement>(null)
+
+  // 全局键盘监听
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        // 输入框聚焦时不拦截
+        const tag = (document.activeElement?.tagName || '').toLowerCase()
+        if (tag === 'input' || tag === 'textarea') return
+        if (deleteSelected()) e.preventDefault()
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  })
+
   const finalize = async () => {
     if (keepRanges.length === 0) {
       setError('全部都删了，至少保留一段')
@@ -257,8 +307,8 @@ export function NarrationEditor({ data, apiBase, onCancel, onDone }: Props) {
         <div ref={containerRef} className="flex-1 min-w-0"/>
       </div>
 
-      {/* 转录字幕 - 词级可点 */}
-      <div className="text-sm leading-loose max-h-64 overflow-y-auto bg-[var(--bg-hover)] rounded-lg p-3 select-none">
+      {/* 转录字幕 - 拖选 + Delete 键删除，或单击词切换 */}
+      <div ref={textContainerRef} tabIndex={0} className="text-sm leading-loose max-h-64 overflow-y-auto bg-[var(--bg-hover)] rounded-lg p-3 outline-none focus:ring-1 focus:ring-[var(--text-3)]">
         {allWords.length === 0 ? (
           <div className="text-[var(--text-3)]">没有转录到内容</div>
         ) : (
@@ -269,9 +319,15 @@ export function NarrationEditor({ data, apiBase, onCancel, onDone }: Props) {
             return (
               <span
                 key={key}
-                onClick={() => toggleWord(key)}
+                data-word-key={key}
+                onClick={(e) => {
+                  // 如果有选区，不响应单击切换
+                  const sel = window.getSelection()
+                  if (sel && !sel.isCollapsed && sel.toString().length > 0) return
+                  toggleWord(key)
+                }}
                 onDoubleClick={() => seekToWord(t)}
-                title={`${t.start.toFixed(2)}s - ${t.end.toFixed(2)}s（单击删/恢复，双击跳到此处）`}
+                title={`${t.start.toFixed(2)}s - ${t.end.toFixed(2)}s`}
                 className={`cursor-pointer px-0.5 rounded transition-colors ${
                   isDel
                     ? 'line-through text-[var(--text-3)] opacity-50'
@@ -290,7 +346,7 @@ export function NarrationEditor({ data, apiBase, onCancel, onDone }: Props) {
       {error && <div className="text-xs text-red-400">{error}</div>}
 
       <div className="text-xs text-[var(--text-3)]">
-        单击词删除/恢复 · 双击词跳到对应时间 · 红色波形区是被删除段
+        💡 拖选文字按 <kbd className="px-1 py-0.5 rounded border border-[var(--border)] text-[10px]">Delete</kbd> 键删除 · 单击词切换 · 双击跳到对应时间 · 红色波形区是被删段
       </div>
 
       <div className="flex justify-end gap-2 pt-1">
