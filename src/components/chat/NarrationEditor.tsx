@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Play, Pause, Loader2, Check, X } from 'lucide-react'
+import { Play, Pause, Loader2, Check, X, Scissors, Undo2 } from 'lucide-react'
 import WaveSurfer from 'wavesurfer.js'
 import RegionsPlugin from 'wavesurfer.js/dist/plugins/regions.js'
 
@@ -54,6 +54,7 @@ export function NarrationEditor({ data, apiBase, onCancel, onDone }: Props) {
   const [deletedKeys, setDeletedKeys] = useState<Set<string>>(new Set())
   const [finalizing, setFinalizing] = useState(false)
   const [error, setError] = useState('')
+  const [hasSelection, setHasSelection] = useState(false)
 
   // 把 segments 摊平成 word tokens
   const allWords: WordToken[] = useMemo(() => {
@@ -237,19 +238,26 @@ export function NarrationEditor({ data, apiBase, onCancel, onDone }: Props) {
 
   const textContainerRef = useRef<HTMLDivElement>(null)
 
-  // 全局键盘监听
+  // 监听选区变化以启用"删除选中"按钮
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Delete' || e.key === 'Backspace') {
-        // 输入框聚焦时不拦截
-        const tag = (document.activeElement?.tagName || '').toLowerCase()
-        if (tag === 'input' || tag === 'textarea') return
-        if (deleteSelected()) e.preventDefault()
+    const onSelChange = () => {
+      const sel = window.getSelection()
+      const container = textContainerRef.current
+      if (!sel || sel.isCollapsed || !container) {
+        setHasSelection(false)
+        return
       }
+      // 选区必须在转录容器内
+      const inside = container.contains(sel.anchorNode) && container.contains(sel.focusNode)
+      setHasSelection(inside && sel.toString().trim().length > 0)
     }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  })
+    document.addEventListener('selectionchange', onSelChange)
+    return () => document.removeEventListener('selectionchange', onSelChange)
+  }, [])
+
+  const restoreAll = () => {
+    setDeletedKeys(new Set())
+  }
 
   const finalize = async () => {
     if (keepRanges.length === 0) {
@@ -307,7 +315,30 @@ export function NarrationEditor({ data, apiBase, onCancel, onDone }: Props) {
         <div ref={containerRef} className="flex-1 min-w-0"/>
       </div>
 
-      {/* 转录字幕 - 拖选 + Delete 键删除，或单击词切换 */}
+      {/* 工具栏 */}
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => deleteSelected()}
+          disabled={!hasSelection}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border border-[var(--border)] bg-[var(--bg-card)] text-[var(--text)] hover:bg-red-950/30 hover:text-red-400 hover:border-red-500/40 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
+        >
+          <Scissors size={12}/> 删除选中
+        </button>
+        <button
+          type="button"
+          onClick={restoreAll}
+          disabled={deletedKeys.size === 0}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border border-[var(--border)] text-[var(--text-2)] hover:text-[var(--text)] hover:bg-[var(--bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+        >
+          <Undo2 size={12}/> 全部恢复
+        </button>
+        <div className="text-xs text-[var(--text-3)] ml-auto">
+          {deletedKeys.size} 词被删
+        </div>
+      </div>
+
+      {/* 转录字幕 - 拖选 + 删除按钮 / 单击词切换 */}
       <div ref={textContainerRef} tabIndex={0} className="text-sm leading-loose max-h-64 overflow-y-auto bg-[var(--bg-hover)] rounded-lg p-3 outline-none focus:ring-1 focus:ring-[var(--text-3)]">
         {allWords.length === 0 ? (
           <div className="text-[var(--text-3)]">没有转录到内容</div>
@@ -346,7 +377,7 @@ export function NarrationEditor({ data, apiBase, onCancel, onDone }: Props) {
       {error && <div className="text-xs text-red-400">{error}</div>}
 
       <div className="text-xs text-[var(--text-3)]">
-        💡 拖选文字按 <kbd className="px-1 py-0.5 rounded border border-[var(--border)] text-[10px]">Delete</kbd> 键删除 · 单击词切换 · 双击跳到对应时间 · 红色波形区是被删段
+        💡 拖选文字 → 点 <span className="text-[var(--text-2)]">删除选中</span> · 单击词切换删除 · 双击词跳到对应时间
       </div>
 
       <div className="flex justify-end gap-2 pt-1">
