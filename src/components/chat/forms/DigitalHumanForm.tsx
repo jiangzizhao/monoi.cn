@@ -59,6 +59,11 @@ function directBase() {
 }
 
 function resolveAudioFetchUrl(audioUrl: string) {
+  // http:// 强制升级到 https://, 否则 HTTPS 页面 fetch 会被 mixed-content block
+  // (阿里云 OSS 返回的临时 URL 是 http://)
+  if (audioUrl.startsWith('http://')) {
+    return 'https://' + audioUrl.slice('http://'.length)
+  }
   if (audioUrl.startsWith('http')) return audioUrl
   return directBase() + audioUrl
 }

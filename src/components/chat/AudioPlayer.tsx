@@ -8,9 +8,14 @@ export function AudioPlayer({ data }: { data: AudioResult }) {
   const [progress, setProgress] = useState(0)
   const [downloading, setDownloading] = useState(false)
 
-  const fullUrl = data.audio_url.startsWith('http')
-    ? data.audio_url
-    : `/api/proxy?path=${encodeURIComponent(data.audio_url)}`
+  // http:// 强制升级到 https://, 否则在 HTTPS 页面 fetch 会被 mixed-content block
+  // (阿里云 OSS 返回的临时 URL 是 http://)
+  const safeUrl = data.audio_url.startsWith('http://')
+    ? 'https://' + data.audio_url.slice('http://'.length)
+    : data.audio_url
+  const fullUrl = safeUrl.startsWith('http')
+    ? safeUrl
+    : `/api/proxy?path=${encodeURIComponent(safeUrl)}`
 
   const toggle = () => {
     const a = audioRef.current

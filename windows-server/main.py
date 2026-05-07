@@ -1041,6 +1041,9 @@ def get_voice_task(task_id: str):
     status_text = (body.get("task_status") or data.get("task_status") or data.get("status_text") or "").upper()
 
     if audio_url:
+        # 阿里云 OSS 返回 http://, 但前端在 HTTPS 页面 fetch 会被 mixed-content block
+        if isinstance(audio_url, str) and audio_url.startswith("http://"):
+            audio_url = "https://" + audio_url[len("http://"):]
         return {"status": "ready", "audio_url": audio_url, "duration_seconds": duration}
 
     if status_text in ("RUNNING", "QUEUEING") or status_text == "":
