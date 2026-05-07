@@ -5,6 +5,7 @@ import { useChatStore } from '../../store/chatStore'
 import { useChat } from '../../hooks/useChat'
 import { CopywritingForm } from './forms/CopywritingForm'
 import { VoiceForm } from './forms/VoiceForm'
+import { DigitalHumanForm } from './forms/DigitalHumanForm'
 
 const MODULES: { label: string; Icon: LucideIcon }[] = [
   { label: '文案',  Icon: FileText  },
@@ -29,7 +30,7 @@ const MODULE_OPTIONS: Record<string, { id: string; label: string; desc: string }
   ],
   '口播': [
     { id: '我想上传自己录制的口播视频', label: '自录上传', desc: '上传已录好的口播' },
-    { id: '我想用数字人做口播', label: '数字人', desc: '上传形象图驱动口播' },
+    { id: '__digital_human__', label: '数字人', desc: '上传形象视频+音频自动对口型' },
     { id: '我想用AI生成口播视频', label: 'AI生成', desc: '根据文案自动生成' },
   ],
   '素材': [
@@ -59,6 +60,7 @@ export function ChatInput({ moduleMenu, onModuleClick, onModuleMenuClose }: Prop
   const [text, setText] = useState('')
   const [copyForm, setCopyForm] = useState<'original' | 'rewrite' | null>(null)
   const [voiceForm, setVoiceForm] = useState<'preset' | 'upload' | 'clone' | null>(null)
+  const [digitalHumanForm, setDigitalHumanForm] = useState(false)
   const textRef = useRef<HTMLTextAreaElement>(null)
   const { isGenerating } = useChatStore()
   const { send, stop } = useChat()
@@ -91,6 +93,8 @@ export function ChatInput({ moduleMenu, onModuleClick, onModuleMenuClose }: Prop
       setVoiceForm('upload')
     } else if (optId === '__voice_clone__') {
       setVoiceForm('clone')
+    } else if (optId === '__digital_human__') {
+      setDigitalHumanForm(true)
     } else {
       send(optId)
     }
@@ -136,6 +140,12 @@ export function ChatInput({ moduleMenu, onModuleClick, onModuleMenuClose }: Prop
             mode={voiceForm}
             onSubmit={(msg) => { setVoiceForm(null); send(msg) }}
             onClose={() => setVoiceForm(null)}
+          />
+        )}
+        {digitalHumanForm && (
+          <DigitalHumanForm
+            onSubmit={(msg) => { setDigitalHumanForm(false); send(msg) }}
+            onClose={() => setDigitalHumanForm(false)}
           />
         )}
 

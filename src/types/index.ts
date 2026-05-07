@@ -62,6 +62,16 @@ export interface AudioResult {
   engine?: string
 }
 
+export interface VideoResult {
+  video_url: string         // 完整 URL 或形如 /api/digital-human/video/xxx
+  duration_ms?: number
+  width?: number
+  height?: number
+  audio_label?: string      // 用了什么音频(如"莫小本 1.0x")
+  source?: 'digital_human' | 'upload' | 'ai_generated'
+  text_preview?: string
+}
+
 export type MessageBlock =
   | { type: 'text';           content: string; streaming?: boolean }
   | { type: 'choices';        question?: string; options: ChoiceOption[]; chosen?: string }
@@ -71,6 +81,7 @@ export type MessageBlock =
   | { type: 'teleprompter';   data: string }
   | { type: 'platform_copy';  data: PlatformCopyResult }
   | { type: 'audio_player';   data: AudioResult }
+  | { type: 'video_player';   data: VideoResult }
   | { type: 'loading';             label: string }
   | { type: 'error';               message: string }
   | { type: 'footage_request';     data: { sentences: FootageSentenceItem[] } }

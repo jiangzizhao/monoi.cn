@@ -300,6 +300,13 @@ export function useChat() {
         displayText = `音频剪辑：${p.original_duration?.toFixed(1)}s → ${p.duration?.toFixed(1)}s`
       } catch { /* keep raw */ }
     }
+    if (text.startsWith('__digital_human_video__')) {
+      try {
+        const p = JSON.parse(text.slice('__digital_human_video__'.length))
+        const dur = p.duration_ms ? `${(p.duration_ms / 1000).toFixed(1)}s` : ''
+        displayText = `数字人视频${dur ? ` · ${dur}` : ''}`
+      } catch { /* keep raw */ }
+    }
     if (text.startsWith('__dialect__')) {
       const m = text.match(/^__dialect__(\w+)__/)
       const labelMap: Record<string, string> = {
@@ -345,6 +352,24 @@ export function useChat() {
           store.updateLastAssistantBlocks(convId, [{ type: 'loading', label: 'AI 正在改写...' }])
         }, ctrl.signal, 'dialect')
         store.updateLastAssistantBlocks(convId, [makeScriptCard(newScript)])
+        return
+      }
+
+      // 数字人视频生成完成: 直接展示视频
+      if (text.startsWith('__digital_human_video__')) {
+        const p = JSON.parse(text.slice('__digital_human_video__'.length))
+        store.updateLastAssistantBlocks(convId, [{
+          type: 'video_player',
+          data: {
+            video_url: p.video_url,
+            duration_ms: p.duration_ms,
+            width: p.width,
+            height: p.height,
+            audio_label: p.audio_label || '数字人',
+            source: 'digital_human',
+            text_preview: p.text_preview,
+          },
+        }])
         return
       }
 

@@ -6,6 +6,7 @@ import { StoryboardTable } from './StoryboardTable'
 import { TeleprompterCard } from './TeleprompterCard'
 import { PlatformCopyCard } from './PlatformCopyCard'
 import { AudioPlayer } from './AudioPlayer'
+import { VideoPlayer } from './VideoPlayer'
 import type { ChatMessage, MessageBlock, ChoiceOption, FootageSentenceItem } from '../../types'
 
 interface Props {
@@ -80,6 +81,9 @@ function Block({ block, msgId, blockIdx, props }: { block: MessageBlock; msgId: 
 
     case 'audio_player':
       return <AudioPlayer data={block.data}/>
+
+    case 'video_player':
+      return <VideoPlayer data={block.data}/>
 
     case 'loading':
       return (

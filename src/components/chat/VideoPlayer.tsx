@@ -1,0 +1,91 @@
+import { useRef, useState } from 'react'
+import { Play, Pause, Download } from 'lucide-react'
+import type { VideoResult } from '../../types'
+
+function resolveUrl(raw: string) {
+  if (!raw) return ''
+  if (raw.startsWith('http')) return raw
+  // 视频文件可能很大, 直传 NATAPP 绕开 Vercel 4.5MB 响应体限制
+  const directBase = import.meta.env.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'
+  return directBase + raw
+}
+
+export function VideoPlayer({ data }: { data: VideoResult }) {
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const [playing, setPlaying] = useState(false)
+  const [progress, setProgress] = useState(0)
+
+  const url = resolveUrl(data.video_url)
+  const durationSec = data.duration_ms ? data.duration_ms / 1000 : undefined
+
+  const toggle = () => {
+    const v = videoRef.current
+    if (!v) return
+    if (playing) { v.pause(); setPlaying(false) }
+    else { v.play(); setPlaying(true) }
+  }
+
+  const onTime = () => {
+    const v = videoRef.current
+    if (!v || !v.duration) return
+    setProgress((v.currentTime / v.duration) * 100)
+  }
+
+  return (
+    <div className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg-card)] p-3 flex flex-col gap-3">
+      {data.text_preview && (
+        <div className="text-xs text-[var(--text-3)] leading-relaxed whitespace-pre-wrap line-clamp-2">
+          {data.text_preview}
+        </div>
+      )}
+      <div className="relative w-full rounded-lg overflow-hidden bg-black">
+        <video
+          ref={videoRef}
+          src={url}
+          className="w-full max-h-[420px] object-contain"
+          onTimeUpdate={onTime}
+          onEnded={() => { setPlaying(false); setProgress(0) }}
+          onClick={toggle}
+          preload="metadata"
+          playsInline
+        />
+        {!playing && (
+          <button
+            onClick={toggle}
+            className="absolute inset-0 flex items-center justify-center cursor-pointer group"
+            aria-label="播放"
+          >
+            <span className="w-14 h-14 rounded-full bg-white/85 group-hover:bg-white text-black flex items-center justify-center shadow-xl transition-colors">
+              <Play size={22} fill="currentColor" className="ml-1"/>
+            </span>
+          </button>
+        )}
+      </div>
+      <div className="flex items-center gap-3">
+        <button
+          onClick={toggle}
+          className="w-9 h-9 rounded-full bg-[var(--text)] text-[var(--bg)] flex items-center justify-center cursor-pointer hover:opacity-80 transition-opacity flex-shrink-0"
+        >
+          {playing ? <Pause size={14} fill="currentColor"/> : <Play size={14} fill="currentColor" className="ml-0.5"/>}
+        </button>
+        <div className="flex-1 min-w-0">
+          <div className="h-1.5 rounded-full bg-[var(--bg-hover)] overflow-hidden">
+            <div className="h-full bg-[var(--text)] transition-all" style={{ width: `${progress}%` }}/>
+          </div>
+          <div className="flex items-center justify-between mt-1.5 text-xs text-[var(--text-3)]">
+            <span>{data.audio_label || '数字人'} {data.width && data.height ? `· ${data.width}×${data.height}` : ''}</span>
+            <span>{durationSec ? `${durationSec.toFixed(1)}s` : ''}</span>
+          </div>
+        </div>
+        <a
+          href={url}
+          download
+          className="w-9 h-9 rounded-lg flex items-center justify-center text-[var(--text-2)] hover:text-[var(--text)] hover:bg-[var(--bg-hover)] cursor-pointer flex-shrink-0"
+          title="下载"
+        >
+          <Download size={14}/>
+        </a>
+      </div>
+    </div>
+  )
+}
