@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { Play, Pause, Download } from 'lucide-react'
+import { Play, Pause, Download, Loader2 } from 'lucide-react'
 import type { VideoResult } from '../../types'
 
 function resolveUrl(raw: string) {
@@ -14,6 +14,7 @@ export function VideoPlayer({ data }: { data: VideoResult }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [playing, setPlaying] = useState(false)
   const [progress, setProgress] = useState(0)
+  const [downloading, setDownloading] = useState(false)
 
   const url = resolveUrl(data.video_url)
   const durationSec = data.duration_ms ? data.duration_ms / 1000 : undefined
@@ -29,6 +30,31 @@ export function VideoPlayer({ data }: { data: VideoResult }) {
     const v = videoRef.current
     if (!v || !v.duration) return
     setProgress((v.currentTime / v.duration) * 100)
+  }
+
+  // fetch + blob 触发下载, 绕开 <a download> 跨源失效
+  const handleDownload = async () => {
+    if (downloading) return
+    setDownloading(true)
+    try {
+      const res = await fetch(url)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const blob = await res.blob()
+      const blobUrl = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = blobUrl
+      const baseName = (data.audio_label || '数字人').replace(/[\\/:*?"<>|]/g, '_')
+      const ext = (data.video_url.match(/\.(\w{2,5})(?:\?|$)/)?.[1] || 'mp4').toLowerCase()
+      a.download = `${baseName}_${durationSec ? durationSec.toFixed(1) + 's' : 'video'}.${ext}`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(blobUrl)
+    } catch {
+      window.open(url, '_blank')
+    } finally {
+      setDownloading(false)
+    }
   }
 
   return (
@@ -77,14 +103,14 @@ export function VideoPlayer({ data }: { data: VideoResult }) {
             <span>{durationSec ? `${durationSec.toFixed(1)}s` : ''}</span>
           </div>
         </div>
-        <a
-          href={url}
-          download
-          className="w-9 h-9 rounded-lg flex items-center justify-center text-[var(--text-2)] hover:text-[var(--text)] hover:bg-[var(--bg-hover)] cursor-pointer flex-shrink-0"
+        <button
+          onClick={handleDownload}
+          disabled={downloading}
+          className="w-9 h-9 rounded-lg flex items-center justify-center text-[var(--text-2)] hover:text-[var(--text)] hover:bg-[var(--bg-hover)] cursor-pointer flex-shrink-0 disabled:opacity-50 disabled:cursor-wait"
           title="下载"
         >
-          <Download size={14}/>
-        </a>
+          {downloading ? <Loader2 size={14} className="animate-spin"/> : <Download size={14}/>}
+        </button>
       </div>
     </div>
   )
