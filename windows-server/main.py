@@ -960,10 +960,12 @@ def synthesize_voice(req: VoiceSynthesizeRequest):
     # ─── IndexTTS-2（用户克隆，最自然） ───
     if engine == "indextts":
         try:
+            # 克隆推理时间随 prompt 复杂度差异极大 (实测 71s-189s, RTF 3.5-9.0)
+            # 给 10 分钟兜底, 避免 main.py 先超时但 index-server 还在跑导致孤儿文件
             resp = _req.post(
                 f"{INDEX_SERVER_URL}/synthesize",
                 json={"text": req.text.strip(), "voice_id": req.preset_key, "speed": parse_speed(req.speed)},
-                timeout=120,
+                timeout=600,
             )
             if resp.status_code != 200:
                 raise HTTPException(500, f"index-server 错误: {resp.status_code} {resp.text[:200]}")
@@ -994,7 +996,7 @@ def synthesize_voice(req: VoiceSynthesizeRequest):
                     "voice_id": req.preset_key,
                     "speed": parse_speed(req.speed),
                 },
-                timeout=120,
+                timeout=600,
             )
             if resp.status_code != 200:
                 raise HTTPException(500, f"voice-server 错误: {resp.status_code} {resp.text[:200]}")
