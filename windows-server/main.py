@@ -1245,3 +1245,121 @@ def proxy_audio_index(name: str):
         return StreamingResponse(resp.iter_content(8192), media_type="audio/wav")
     except _req.exceptions.ConnectionError:
         raise HTTPException(503, "index-server (9002) 未启动")
+
+
+# ============== 数字人 (Duix-Avatar / HeyGem) ==============
+DUIX_API_BASE = "http://127.0.0.1:8383/easy"
+DUIX_DATA_DIR = r"D:\monoi-server\heygem-data\face2face\temp"
+os.makedirs(DUIX_DATA_DIR, exist_ok=True)
+
+
+def _duix_cleanup(*paths: str) -> None:
+    for p in paths:
+        if p and os.path.exists(p):
+            try:
+                os.remove(p)
+            except Exception:
+                pass
+
+
+@app.post("/api/digital-human/submit")
+def submit_digital_human(
+    audio: UploadFile = File(...),
+    video: UploadFile = File(...),
+):
+    """上传音频 + 形象视频, 提交数字人对口型任务. 返回 code, 前端轮询 /task/{code}"""
+    import requests as _req
+    import uuid as _uuid
+
+    code = _uuid.uuid4().hex[:16]
+    audio_name = f"{code}_audio.wav"
+    video_name = f"{code}_video.mp4"
+    audio_path = os.path.join(DUIX_DATA_DIR, audio_name)
+    video_path = os.path.join(DUIX_DATA_DIR, video_name)
+
+    try:
+        with open(audio_path, "wb") as f:
+            f.write(audio.file.read())
+        with open(video_path, "wb") as f:
+            f.write(video.file.read())
+    except Exception as e:
+        _duix_cleanup(audio_path, video_path)
+        raise HTTPException(500, f"保存上传文件失败: {e}")
+
+    payload = {
+        "audio_url": audio_name,
+        "video_url": video_name,
+        "code": code,
+        "chaofen": 0,
+        "watermark_switch": 0,
+        "pn": 1,
+    }
+
+    try:
+        resp = _req.post(f"{DUIX_API_BASE}/submit", json=payload, timeout=30)
+        if resp.status_code != 200:
+            _duix_cleanup(audio_path, video_path)
+            raise HTTPException(resp.status_code, f"数字人服务错误: {resp.text[:200]}")
+        data = resp.json()
+        if not data.get("success"):
+            _duix_cleanup(audio_path, video_path)
+            raise HTTPException(500, data.get("msg") or "提交任务失败")
+        return {"success": True, "code": code, "submit_response": data}
+    except _req.exceptions.ConnectionError:
+        _duix_cleanup(audio_path, video_path)
+        raise HTTPException(503, "数字人服务 (8383) 未启动")
+
+
+@app.get("/api/digital-human/task/{code}")
+def query_digital_human(code: str):
+    """轮询数字人任务状态. status: processing/completed/failed"""
+    import requests as _req
+
+    try:
+        resp = _req.get(f"{DUIX_API_BASE}/query", params={"code": code}, timeout=10)
+        if resp.status_code != 200:
+            raise HTTPException(resp.status_code, f"查询失败: {resp.text[:200]}")
+        data = resp.json()
+    except _req.exceptions.ConnectionError:
+        raise HTTPException(503, "数字人服务 (8383) 未启动")
+
+    inner = data.get("data") or {}
+    status = inner.get("status")
+
+    if status == 2:
+        result = (inner.get("result") or "").lstrip("/").lstrip("\\")
+        return {
+            "success": True,
+            "status": "completed",
+            "progress": 100,
+            "video_url": f"/api/digital-human/video/{result}",
+            "duration_ms": inner.get("video_duration"),
+            "width": inner.get("width"),
+            "height": inner.get("height"),
+        }
+    if status == 1:
+        return {
+            "success": True,
+            "status": "processing",
+            "progress": inner.get("progress", 0),
+            "msg": inner.get("msg", ""),
+        }
+    if status == 3:
+        return {
+            "success": False,
+            "status": "failed",
+            "msg": inner.get("msg") or "任务失败",
+        }
+    return {"success": False, "status": "unknown", "raw": data}
+
+
+@app.get("/api/digital-human/video/{name}")
+def serve_digital_human_video(name: str):
+    """提供数字人输出视频文件"""
+    from fastapi.responses import FileResponse
+
+    safe = os.path.basename(name)  # 防路径穿越
+    file_path = os.path.join(DUIX_DATA_DIR, safe)
+    if not os.path.exists(file_path):
+        raise HTTPException(404, "视频未找到")
+    return FileResponse(file_path, media_type="video/mp4")
