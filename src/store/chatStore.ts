@@ -85,6 +85,26 @@ function normalizeBlock(block: unknown): MessageBlock | null {
       }
     }
 
+    case 'video_player': {
+      const data = isRecord(block.data) ? block.data : {}
+      const url = asString(data.video_url)
+      if (!url) return null
+      return {
+        type: 'video_player',
+        data: {
+          video_url: url,
+          duration_ms: typeof data.duration_ms === 'number' ? data.duration_ms : undefined,
+          width: typeof data.width === 'number' ? data.width : undefined,
+          height: typeof data.height === 'number' ? data.height : undefined,
+          audio_label: asString(data.audio_label) || undefined,
+          source: data.source === 'digital_human' || data.source === 'upload' || data.source === 'ai_generated'
+            ? data.source
+            : undefined,
+          text_preview: asString(data.text_preview) || undefined,
+        },
+      }
+    }
+
     case 'loading':
       return { type: 'loading', label: asString(block.label, '处理中...') }
 
