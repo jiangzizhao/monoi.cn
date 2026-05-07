@@ -398,7 +398,10 @@ export function useChat() {
           return
         }
         store.updateLastAssistantBlocks(convId, [{ type: 'loading', label: '正在提交合成任务...' }])
-        const res = await fetch('/api/proxy?path=' + encodeURIComponent('/api/voice/synthesize'), {
+        // 克隆 (IndexTTS-2) 和 CosyVoice 是同步合成,可能超过 Vercel proxy 60s 上限,
+        // 改走直传 NATAPP 绕开。阿里云走这里也一样秒回 task_id,不影响。
+        const synthBase = import.meta.env.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'
+        const res = await fetch(synthBase + '/api/voice/synthesize', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
