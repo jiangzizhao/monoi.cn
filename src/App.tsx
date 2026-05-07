@@ -11,17 +11,28 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return isLoggedIn() ? <>{children}</> : <Navigate to="/login" replace/>
 }
 
-class AppErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean }> {
-  state = { hasError: false }
+class AppErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean; errMsg: string; errStack: string }
+> {
+  state = { hasError: false, errMsg: '', errStack: '' }
 
-  static getDerivedStateFromError() {
-    return { hasError: true }
+  static getDerivedStateFromError(err: Error) {
+    return {
+      hasError: true,
+      errMsg: err?.message || String(err),
+      errStack: err?.stack || '',
+    }
+  }
+
+  componentDidCatch(err: Error, info: React.ErrorInfo) {
+    console.error('[AppErrorBoundary]', err, info)
   }
 
   reset = () => {
     localStorage.removeItem('vm-chat-store')
     localStorage.removeItem('vm-chat-store-safe-20260501')
-    this.setState({ hasError: false })
+    this.setState({ hasError: false, errMsg: '', errStack: '' })
     window.location.href = '/app'
   }
 
@@ -29,12 +40,27 @@ class AppErrorBoundary extends React.Component<{ children: React.ReactNode }, { 
     if (!this.state.hasError) return this.props.children
     return (
       <div className="min-h-screen flex items-center justify-center bg-[var(--bg)] px-4">
-        <div className="w-full max-w-sm rounded-xl border border-[var(--border)] bg-[var(--bg-card)] p-5 text-center">
-          <div className="text-sm font-medium text-[var(--text)]">工作台加载失败</div>
-          <div className="mt-2 text-xs leading-relaxed text-[var(--text-3)]">已检测到旧会话数据异常，可以一键恢复工作台。</div>
-          <button onClick={this.reset} className="mt-4 px-4 py-2 rounded-lg bg-[var(--text)] text-[var(--bg)] text-sm cursor-pointer">
-            恢复工作台
-          </button>
+        <div className="w-full max-w-2xl rounded-xl border border-[var(--border)] bg-[var(--bg-card)] p-5">
+          <div className="text-sm font-medium text-[var(--text)] text-center">工作台加载失败</div>
+          <div className="mt-2 text-xs leading-relaxed text-[var(--text-3)] text-center">已检测到旧会话数据异常，可以一键恢复工作台。</div>
+          {this.state.errMsg && (
+            <details className="mt-3 text-[11px] text-[var(--text-3)]">
+              <summary className="cursor-pointer hover:text-[var(--text-2)]">展开技术细节</summary>
+              <div className="mt-2 p-2 bg-[var(--bg-input)] rounded text-red-400 break-all">
+                <div className="font-medium">{this.state.errMsg}</div>
+                {this.state.errStack && (
+                  <pre className="mt-2 text-[10px] whitespace-pre-wrap leading-tight opacity-80">
+                    {this.state.errStack.split('\n').slice(0, 12).join('\n')}
+                  </pre>
+                )}
+              </div>
+            </details>
+          )}
+          <div className="mt-4 text-center">
+            <button onClick={this.reset} className="px-4 py-2 rounded-lg bg-[var(--text)] text-[var(--bg)] text-sm cursor-pointer">
+              恢复工作台
+            </button>
+          </div>
         </div>
       </div>
     )
