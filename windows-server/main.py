@@ -143,6 +143,20 @@ def init_db():
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS digital_human_avatars (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            avatar_key TEXT UNIQUE NOT NULL,
+            name TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            duration_seconds REAL,
+            width INTEGER,
+            height INTEGER,
+            file_size INTEGER,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
     # 只清掉系统预设，保留用户克隆 (category='clone')
     conn.execute("DELETE FROM voice_presets WHERE category != 'clone'")
     for preset in VOICE_PRESETS:
@@ -1250,7 +1264,10 @@ def proxy_audio_index(name: str):
 # ============== 数字人 (Duix-Avatar / HeyGem) ==============
 DUIX_API_BASE = "http://127.0.0.1:8383/easy"
 DUIX_DATA_DIR = r"D:\monoi-server\heygem-data\face2face\temp"
+DUIX_AVATAR_DIR = r"D:\monoi-server\heygem-data\avatars"
+MAX_AVATARS_PER_USER = 5
 os.makedirs(DUIX_DATA_DIR, exist_ok=True)
+os.makedirs(DUIX_AVATAR_DIR, exist_ok=True)
 
 
 def _duix_cleanup(*paths: str) -> None:
@@ -1262,14 +1279,200 @@ def _duix_cleanup(*paths: str) -> None:
                 pass
 
 
+def _probe_video_meta(path: str) -> dict:
+    """用 ffprobe 取分辨率 / 时长. 失败返回空字典."""
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error", "-select_streams", "v:0",
+                "-show_entries", "stream=width,height:format=duration",
+                "-of", "json", path,
+            ],
+            capture_output=True, timeout=20,
+        )
+        if result.returncode != 0:
+            return {}
+        import json as _json
+        info = _json.loads(result.stdout.decode("utf-8", errors="ignore"))
+        out: dict = {}
+        if info.get("streams"):
+            stream = info["streams"][0]
+            if stream.get("width"):
+                out["width"] = stream["width"]
+            if stream.get("height"):
+                out["height"] = stream["height"]
+        if info.get("format", {}).get("duration"):
+            try:
+                out["duration_seconds"] = float(info["format"]["duration"])
+            except (KeyError, ValueError):
+                pass
+        return out
+    except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
+        return {}
+
+
+@app.get("/api/digital-human/avatars")
+def list_avatars(user_id: Optional[int] = None):
+    """列出已保存的数字人形象 (最多 5 个)"""
+    conn = get_db()
+    conn.row_factory = sqlite3.Row
+    try:
+        if user_id is None:
+            rows = conn.execute(
+                "SELECT * FROM digital_human_avatars ORDER BY id DESC LIMIT 50"
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM digital_human_avatars WHERE user_id = ? ORDER BY id DESC LIMIT 50",
+                (user_id,),
+            ).fetchall()
+        items = []
+        for row in rows:
+            d = row_to_dict(row)
+            d["file_url"] = f"/api/digital-human/avatars/{d['avatar_key']}/file"
+            items.append(d)
+        return {
+            "items": items,
+            "count": len(items),
+            "max_count": MAX_AVATARS_PER_USER,
+        }
+    finally:
+        conn.close()
+
+
+@app.post("/api/digital-human/avatars")
+async def upload_avatar(
+    file: UploadFile = File(...),
+    name: str = Form("我的形象"),
+    user_id: Optional[int] = Form(None),
+):
+    """上传形象视频, 保存为可复用的 avatar"""
+    import shutil
+    import uuid as _uuid
+    import time as _t
+
+    name = name.strip() or "我的形象"
+
+    # 检查上限
+    conn0 = get_db()
+    try:
+        if user_id is None:
+            count = conn0.execute(
+                "SELECT COUNT(*) FROM digital_human_avatars"
+            ).fetchone()[0]
+        else:
+            count = conn0.execute(
+                "SELECT COUNT(*) FROM digital_human_avatars WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()[0]
+    finally:
+        conn0.close()
+    if count >= MAX_AVATARS_PER_USER:
+        raise HTTPException(
+            400,
+            f"已达上限: 最多保留 {MAX_AVATARS_PER_USER} 个数字人形象, 请先删除一个再上传",
+        )
+
+    avatar_key = f"avatar_{int(_t.time())}_{_uuid.uuid4().hex[:6]}"
+    file_path = os.path.join(DUIX_AVATAR_DIR, f"{avatar_key}.mp4")
+
+    try:
+        with open(file_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+    except Exception as e:
+        if os.path.exists(file_path):
+            try: os.remove(file_path)
+            except: pass
+        raise HTTPException(500, f"保存上传文件失败: {e}")
+
+    meta = _probe_video_meta(file_path)
+    file_size = os.path.getsize(file_path)
+
+    conn = get_db()
+    try:
+        conn.execute(
+            """INSERT INTO digital_human_avatars
+               (user_id, avatar_key, name, file_path, duration_seconds, width, height, file_size)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                user_id,
+                avatar_key,
+                name,
+                file_path,
+                meta.get("duration_seconds"),
+                meta.get("width"),
+                meta.get("height"),
+                file_size,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    return {
+        "success": True,
+        "avatar_key": avatar_key,
+        "name": name,
+        "duration_seconds": meta.get("duration_seconds"),
+        "width": meta.get("width"),
+        "height": meta.get("height"),
+        "file_size": file_size,
+        "file_url": f"/api/digital-human/avatars/{avatar_key}/file",
+    }
+
+
+@app.delete("/api/digital-human/avatars/{avatar_key}")
+def delete_avatar(avatar_key: str):
+    """删除一个数字人形象"""
+    import re as _re
+    safe_key = _re.sub(r"[^a-zA-Z0-9_]", "", avatar_key)
+    if not safe_key.startswith("avatar_"):
+        raise HTTPException(400, "avatar_key 格式错误")
+    file_path = os.path.join(DUIX_AVATAR_DIR, f"{safe_key}.mp4")
+    if os.path.exists(file_path):
+        try: os.remove(file_path)
+        except: pass
+    conn = get_db()
+    try:
+        conn.execute(
+            "DELETE FROM digital_human_avatars WHERE avatar_key = ?", (safe_key,)
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return {"success": True}
+
+
+@app.get("/api/digital-human/avatars/{avatar_key}/file")
+def serve_avatar_file(avatar_key: str):
+    """提供形象视频文件 (用于前端预览/试播)"""
+    from fastapi.responses import FileResponse
+    import re as _re
+    safe_key = _re.sub(r"[^a-zA-Z0-9_]", "", avatar_key)
+    file_path = os.path.join(DUIX_AVATAR_DIR, f"{safe_key}.mp4")
+    if not os.path.exists(file_path):
+        raise HTTPException(404, "形象视频未找到")
+    return FileResponse(file_path, media_type="video/mp4")
+
+
 @app.post("/api/digital-human/submit")
 def submit_digital_human(
     audio: UploadFile = File(...),
-    video: UploadFile = File(...),
+    avatar_key: str = Form(...),
 ):
-    """上传音频 + 形象视频, 提交数字人对口型任务. 返回 code, 前端轮询 /task/{code}"""
+    """用已保存的形象 + 上传的音频提交数字人对口型. 返回 code, 前端轮询 /task/{code}"""
     import requests as _req
+    import shutil
     import uuid as _uuid
+    import re as _re
+
+    safe_key = _re.sub(r"[^a-zA-Z0-9_]", "", avatar_key)
+    if not safe_key.startswith("avatar_"):
+        raise HTTPException(400, "avatar_key 格式错误")
+
+    avatar_path = os.path.join(DUIX_AVATAR_DIR, f"{safe_key}.mp4")
+    if not os.path.exists(avatar_path):
+        raise HTTPException(404, "形象不存在, 请重新选择")
 
     code = _uuid.uuid4().hex[:16]
     audio_name = f"{code}_audio.wav"
@@ -1280,11 +1483,11 @@ def submit_digital_human(
     try:
         with open(audio_path, "wb") as f:
             f.write(audio.file.read())
-        with open(video_path, "wb") as f:
-            f.write(video.file.read())
+        # HeyGem 只认 /code/data/temp/ 下的文件, 把 avatar 复制过去
+        shutil.copyfile(avatar_path, video_path)
     except Exception as e:
         _duix_cleanup(audio_path, video_path)
-        raise HTTPException(500, f"保存上传文件失败: {e}")
+        raise HTTPException(500, f"准备文件失败: {e}")
 
     payload = {
         "audio_url": audio_name,

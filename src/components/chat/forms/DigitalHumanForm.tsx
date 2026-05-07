@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Loader2, Upload, X, Play, Pause, AudioLines, Check } from 'lucide-react'
+import { Loader2, X, Play, Pause, AudioLines, Check, Plus, Trash2 } from 'lucide-react'
 import { useChatStore } from '../../../store/chatStore'
 import type { AudioResult, ChatMessage } from '../../../types'
 
@@ -22,16 +22,26 @@ interface TaskResp {
   height?: number
 }
 
+interface Avatar {
+  avatar_key: string
+  name: string
+  duration_seconds?: number
+  width?: number
+  height?: number
+  file_size?: number
+  file_url: string             // /api/digital-human/avatars/xxx/file
+  created_at?: string
+}
+
 interface AudioOption extends AudioResult {
-  id: string  // audio_url 作 id (确保唯一)
+  id: string
 }
 
 const POLL_INTERVAL_MS = 3000
-const MAX_POLL_TICKS = 200    // 200 * 3s = 10 min 上限
+const MAX_POLL_TICKS = 200
 
 function collectAudioOptions(messages: ChatMessage[]): AudioOption[] {
   const out: AudioOption[] = []
-  // 倒序遍历, 最新的在前面
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i]
     if (m.role !== 'assistant') continue
@@ -44,11 +54,13 @@ function collectAudioOptions(messages: ChatMessage[]): AudioOption[] {
   return out
 }
 
+function directBase() {
+  return import.meta.env.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'
+}
+
 function resolveAudioFetchUrl(audioUrl: string) {
   if (audioUrl.startsWith('http')) return audioUrl
-  // 相对路径(如 /api/voice/audio/xxx.wav)走直传 NATAPP
-  const directBase = import.meta.env.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'
-  return directBase + audioUrl
+  return directBase() + audioUrl
 }
 
 function audioFileNameFor(opt: AudioOption) {
@@ -61,41 +73,61 @@ export function DigitalHumanForm({ onSubmit, onClose }: Props) {
   const conv = useChatStore(s => s.conversations.find(c => c.id === s.activeId))
   const audioOptions = useMemo(() => collectAudioOptions(conv?.messages || []), [conv?.messages])
 
-  const [selectedAudioId, setSelectedAudioId] = useState<string>(audioOptions[0]?.id || '')
-  const [videoFile, setVideoFile] = useState<File | null>(null)
-  const [videoPreview, setVideoPreview] = useState<string>('')
+  // ─── Avatars ───
+  const [avatars, setAvatars] = useState<Avatar[]>([])
+  const [maxAvatars, setMaxAvatars] = useState(5)
+  const [avatarsLoading, setAvatarsLoading] = useState(true)
+  const [selectedAvatarKey, setSelectedAvatarKey] = useState('')
+  const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState('')
+  const uploadInputRef = useRef<HTMLInputElement>(null)
+  const [pendingDelete, setPendingDelete] = useState<string>('') // 删除中的 key
 
+  // ─── Audio ───
+  const [selectedAudioId, setSelectedAudioId] = useState<string>(audioOptions[0]?.id || '')
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null)
+  const [previewingId, setPreviewingId] = useState('')
+
+  // ─── 提交 / 轮询 ───
   const [phase, setPhase] = useState<Phase>('idle')
   const [progress, setProgress] = useState(0)
   const [statusMsg, setStatusMsg] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
   const [resultUrl, setResultUrl] = useState('')
   const [resultMeta, setResultMeta] = useState<{ duration_ms?: number; width?: number; height?: number }>({})
-
   const pollTimerRef = useRef<number | null>(null)
   const pollTicksRef = useRef(0)
-  const previewAudioRef = useRef<HTMLAudioElement | null>(null)
-  const [previewingId, setPreviewingId] = useState('')
 
-  // 视频上传后生成预览 URL, 卸载时回收
+  // ─── 加载 avatars ───
   useEffect(() => {
-    if (!videoFile) {
-      setVideoPreview('')
-      return
-    }
-    const url = URL.createObjectURL(videoFile)
-    setVideoPreview(url)
-    return () => URL.revokeObjectURL(url)
-  }, [videoFile])
+    let alive = true
+    ;(async () => {
+      try {
+        const r = await fetch('/api/proxy?path=' + encodeURIComponent('/api/digital-human/avatars'))
+        const data = await r.json()
+        if (!alive) return
+        setAvatars(data.items || [])
+        setMaxAvatars(data.max_count || 5)
+        // 默认选第一个
+        if ((data.items || []).length > 0 && !selectedAvatarKey) {
+          setSelectedAvatarKey(data.items[0].avatar_key)
+        }
+      } catch (e) {
+        // 加载失败忽略,用户可以重新打开
+      } finally {
+        if (alive) setAvatarsLoading(false)
+      }
+    })()
+    return () => { alive = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
-  // 自动选中(有新音频时刷新)
   useEffect(() => {
     if (!selectedAudioId && audioOptions.length > 0) {
       setSelectedAudioId(audioOptions[0].id)
     }
   }, [audioOptions, selectedAudioId])
 
-  // 卸载时清掉轮询和音频预览
   useEffect(() => {
     return () => {
       if (pollTimerRef.current) clearInterval(pollTimerRef.current)
@@ -103,6 +135,92 @@ export function DigitalHumanForm({ onSubmit, onClose }: Props) {
     }
   }, [])
 
+  // ─── Avatar 上传 ───
+  const handleAvatarFilePicked = async (file: File) => {
+    if (!file) return
+    if (avatars.length >= maxAvatars) {
+      setUploadError(`已达上限: 最多保留 ${maxAvatars} 个形象, 请先删除一个`)
+      return
+    }
+    setUploading(true)
+    setUploadError('')
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const baseName = file.name.replace(/\.[^.]+$/, '').slice(0, 20) || '我的形象'
+      fd.append('name', baseName)
+      // 直传 NATAPP, 视频文件可能 > 4.5MB
+      const res = await fetch(directBase() + '/api/digital-human/avatars', {
+        method: 'POST',
+        body: fd,
+      })
+      const data = await res.json()
+      if (!res.ok || !data.success) {
+        setUploadError(data.detail || data.error || '上传失败')
+        return
+      }
+      // 加到列表头, 自动选中
+      const newAvatar: Avatar = {
+        avatar_key: data.avatar_key,
+        name: data.name,
+        duration_seconds: data.duration_seconds,
+        width: data.width,
+        height: data.height,
+        file_size: data.file_size,
+        file_url: data.file_url,
+      }
+      setAvatars(prev => [newAvatar, ...prev])
+      setSelectedAvatarKey(data.avatar_key)
+    } catch (e: any) {
+      setUploadError(e?.message || '上传失败')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const handleDeleteAvatar = async (key: string) => {
+    if (pendingDelete) return
+    setPendingDelete(key)
+    try {
+      await fetch(
+        '/api/proxy?path=' + encodeURIComponent('/api/digital-human/avatars/' + key),
+        { method: 'DELETE' },
+      )
+      setAvatars(prev => prev.filter(a => a.avatar_key !== key))
+      if (selectedAvatarKey === key) {
+        setSelectedAvatarKey(prev => {
+          const next = avatars.find(a => a.avatar_key !== key)
+          return next?.avatar_key || ''
+        })
+      }
+    } catch {
+      // 忽略,UI 会保留
+    } finally {
+      setPendingDelete('')
+    }
+  }
+
+  // ─── Audio 试听 ───
+  const togglePreviewAudio = (opt: AudioOption) => {
+    const url = resolveAudioFetchUrl(opt.audio_url)
+    if (previewingId === opt.id && previewAudioRef.current) {
+      previewAudioRef.current.pause()
+      previewAudioRef.current = null
+      setPreviewingId('')
+      return
+    }
+    previewAudioRef.current?.pause()
+    const audio = new Audio(url)
+    audio.onended = () => setPreviewingId('')
+    audio.play()
+    previewAudioRef.current = audio
+    setPreviewingId(opt.id)
+  }
+
+  const selectedAudio = audioOptions.find(o => o.id === selectedAudioId)
+  const selectedAvatar = avatars.find(a => a.avatar_key === selectedAvatarKey)
+
+  // ─── 提交 ───
   const stopPolling = () => {
     if (pollTimerRef.current) {
       clearInterval(pollTimerRef.current)
@@ -119,7 +237,7 @@ export function DigitalHumanForm({ onSubmit, onClose }: Props) {
       if (pollTicksRef.current > MAX_POLL_TICKS) {
         stopPolling()
         setPhase('failed')
-        setErrorMsg('合成超时,请重试')
+        setErrorMsg('合成超时, 请重试')
         return
       }
       try {
@@ -148,33 +266,15 @@ export function DigitalHumanForm({ onSubmit, onClose }: Props) {
           setProgress(data.progress ?? 0)
           if (data.msg) setStatusMsg(data.msg)
         }
-      } catch (e: any) {
-        // 网络错误不停轮询,稍后重试
+      } catch {
+        // 忽略,继续轮询
       }
     }, POLL_INTERVAL_MS)
   }
 
-  const togglePreviewAudio = (opt: AudioOption) => {
-    const url = resolveAudioFetchUrl(opt.audio_url)
-    if (previewingId === opt.id && previewAudioRef.current) {
-      previewAudioRef.current.pause()
-      previewAudioRef.current = null
-      setPreviewingId('')
-      return
-    }
-    previewAudioRef.current?.pause()
-    const audio = new Audio(url)
-    audio.onended = () => setPreviewingId('')
-    audio.play()
-    previewAudioRef.current = audio
-    setPreviewingId(opt.id)
-  }
-
-  const selectedAudio = audioOptions.find(o => o.id === selectedAudioId)
-
   const handleSubmit = async () => {
-    if (!videoFile) {
-      setErrorMsg('请上传形象视频')
+    if (!selectedAvatar) {
+      setErrorMsg('请选择一个数字人形象')
       return
     }
     if (!selectedAudio) {
@@ -187,7 +287,7 @@ export function DigitalHumanForm({ onSubmit, onClose }: Props) {
     setStatusMsg('正在准备文件...')
 
     try {
-      // 1. fetch 已有音频 -> blob
+      // fetch 已有音频 -> blob -> File
       const audioRes = await fetch(resolveAudioFetchUrl(selectedAudio.audio_url))
       if (!audioRes.ok) throw new Error(`音频获取失败: HTTP ${audioRes.status}`)
       const audioBlob = await audioRes.blob()
@@ -195,16 +295,13 @@ export function DigitalHumanForm({ onSubmit, onClose }: Props) {
         type: audioBlob.type || 'audio/wav',
       })
 
-      // 2. 组装 FormData
       const fd = new FormData()
       fd.append('audio', audioFileObj)
-      fd.append('video', videoFile)
+      fd.append('avatar_key', selectedAvatar.avatar_key)
 
       setStatusMsg('正在上传...')
 
-      // 3. 直传 NATAPP, 绕开 Vercel 4.5MB 限制
-      const directBase = import.meta.env.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'
-      const res = await fetch(directBase + '/api/digital-human/submit', {
+      const res = await fetch(directBase() + '/api/digital-human/submit', {
         method: 'POST',
         body: fd,
       })
@@ -244,10 +341,9 @@ export function DigitalHumanForm({ onSubmit, onClose }: Props) {
   }
 
   const isBusy = phase === 'submitting' || phase === 'processing'
-  const previewBase = import.meta.env.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'
-  const finalVideoUrl = resultUrl ? previewBase + resultUrl : ''
-
+  const finalVideoUrl = resultUrl ? directBase() + resultUrl : ''
   const noAudio = audioOptions.length === 0
+  const canUploadMore = avatars.length < maxAvatars
 
   const modal = (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={onClose}>
@@ -257,9 +353,7 @@ export function DigitalHumanForm({ onSubmit, onClose }: Props) {
       >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
-          <div className="text-base font-semibold text-[var(--text)]">
-            口播 · 数字人
-          </div>
+          <div className="text-base font-semibold text-[var(--text)]">口播 · 数字人</div>
           <button
             onClick={onClose}
             disabled={isBusy}
@@ -278,25 +372,42 @@ export function DigitalHumanForm({ onSubmit, onClose }: Props) {
         <div className="flex-1 overflow-y-auto px-5 py-4">
           {phase === 'idle' || phase === 'failed' ? (
             <div className="flex flex-col gap-5">
-              {noAudio ? (
-                <div className="text-xs text-[var(--text-2)] bg-[var(--bg-hover)] border border-[var(--border)] rounded-lg px-3 py-3 leading-relaxed">
-                  💡 还没有已生成的配音。请先在 <b>配音</b> 模块生成一段音频,再回来做数字人。
+              {/* 形象区 */}
+              <AvatarPickGroup
+                avatars={avatars}
+                loading={avatarsLoading}
+                maxCount={maxAvatars}
+                selectedKey={selectedAvatarKey}
+                uploading={uploading}
+                pendingDelete={pendingDelete}
+                onSelect={setSelectedAvatarKey}
+                onUploadClick={() => uploadInputRef.current?.click()}
+                onDelete={handleDeleteAvatar}
+                canUploadMore={canUploadMore}
+              />
+              {uploadError && (
+                <div className="text-xs text-red-400 bg-red-950/20 border border-red-900/30 rounded-lg px-3 py-2 -mt-2">
+                  {uploadError}
                 </div>
-              ) : (
-                <p className="text-xs text-[var(--text-3)] leading-relaxed">
-                  上传你的<b className="text-[var(--text-2)]">形象视频</b>,选一段已生成的<b className="text-[var(--text-2)]">配音</b>,自动对口型生成数字人视频。
-                </p>
               )}
-
-              {/* 形象视频区 */}
-              <VideoSlot
-                file={videoFile}
-                previewUrl={videoPreview}
-                onChange={setVideoFile}
+              <input
+                ref={uploadInputRef}
+                type="file"
+                accept="video/mp4,video/*"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  if (f) handleAvatarFilePicked(f)
+                  if (uploadInputRef.current) uploadInputRef.current.value = ''
+                }}
               />
 
-              {/* 音频选择区 */}
-              {!noAudio && (
+              {/* 音频区 */}
+              {noAudio ? (
+                <div className="text-xs text-[var(--text-2)] bg-[var(--bg-hover)] border border-[var(--border)] rounded-lg px-3 py-3 leading-relaxed">
+                  💡 还没有已生成的配音。请先在 <b>配音</b> 模块生成一段音频, 再回来做数字人。
+                </div>
+              ) : (
                 <AudioPickGroup
                   options={audioOptions}
                   selectedId={selectedAudioId}
@@ -313,7 +424,7 @@ export function DigitalHumanForm({ onSubmit, onClose }: Props) {
               )}
 
               <p className="text-[11px] text-[var(--text-3)] leading-relaxed">
-                💡 输出视频时长 = 音频时长。形象视频只做参考,会自动循环。
+                💡 输出视频时长 = 音频时长。形象视频只做参考, 会自动循环。
               </p>
             </div>
           ) : phase === 'submitting' || phase === 'processing' ? (
@@ -332,12 +443,9 @@ export function DigitalHumanForm({ onSubmit, onClose }: Props) {
                   <span>{progress}%</span>
                 </div>
               </div>
-              <p className="text-[11px] text-[var(--text-3)]">
-                通常 30 秒 - 2 分钟,看音频长度。请勿关闭此窗口。
-              </p>
+              <p className="text-[11px] text-[var(--text-3)]">通常 30 秒 - 2 分钟, 看音频长度。请勿关闭此窗口。</p>
             </div>
           ) : (
-            // completed
             <div className="flex flex-col gap-4">
               <div className="rounded-xl overflow-hidden bg-black">
                 <video
@@ -348,12 +456,8 @@ export function DigitalHumanForm({ onSubmit, onClose }: Props) {
                 />
               </div>
               <div className="flex items-center justify-between text-xs text-[var(--text-3)]">
-                <span>
-                  {resultMeta.width && resultMeta.height ? `${resultMeta.width}×${resultMeta.height}` : ''}
-                </span>
-                <span>
-                  {resultMeta.duration_ms ? `${(resultMeta.duration_ms / 1000).toFixed(1)}s` : ''}
-                </span>
+                <span>{resultMeta.width && resultMeta.height ? `${resultMeta.width}×${resultMeta.height}` : ''}</span>
+                <span>{resultMeta.duration_ms ? `${(resultMeta.duration_ms / 1000).toFixed(1)}s` : ''}</span>
               </div>
             </div>
           )}
@@ -371,9 +475,9 @@ export function DigitalHumanForm({ onSubmit, onClose }: Props) {
               </button>
               <button
                 onClick={handleSubmit}
-                disabled={!videoFile || !selectedAudio}
+                disabled={!selectedAvatar || !selectedAudio}
                 className={`px-4 py-2 text-sm rounded-lg transition-all cursor-pointer ${
-                  videoFile && selectedAudio
+                  selectedAvatar && selectedAudio
                     ? 'bg-[var(--text)] text-[var(--bg)] hover:opacity-80'
                     : 'bg-[var(--bg-hover)] text-[var(--text-3)] cursor-not-allowed'
                 }`}
@@ -424,70 +528,154 @@ export function DigitalHumanForm({ onSubmit, onClose }: Props) {
   return createPortal(modal, document.body)
 }
 
-// ─────────── 形象视频上传组件 ───────────
-function VideoSlot({
-  file,
-  previewUrl,
-  onChange,
+// ─────────── 形象选择网格 ───────────
+function AvatarPickGroup({
+  avatars,
+  loading,
+  maxCount,
+  selectedKey,
+  uploading,
+  pendingDelete,
+  canUploadMore,
+  onSelect,
+  onUploadClick,
+  onDelete,
 }: {
-  file: File | null
-  previewUrl: string
-  onChange: (f: File | null) => void
+  avatars: Avatar[]
+  loading: boolean
+  maxCount: number
+  selectedKey: string
+  uploading: boolean
+  pendingDelete: string
+  canUploadMore: boolean
+  onSelect: (key: string) => void
+  onUploadClick: () => void
+  onDelete: (key: string) => void
 }) {
-  const inputRef = useRef<HTMLInputElement>(null)
-
-  if (file && previewUrl) {
-    return (
-      <div>
-        <div className="text-xs font-medium text-[var(--text-2)] mb-1.5 flex items-center justify-between">
-          <span>形象视频</span>
-          <button
-            onClick={() => onChange(null)}
-            className="text-[11px] text-[var(--text-3)] hover:text-[var(--text)]"
-          >
-            重新选择
-          </button>
-        </div>
-        <div className="rounded-xl overflow-hidden bg-black border border-[var(--border)]">
-          <video
-            src={previewUrl}
-            controls
-            playsInline
-            muted
-            className="w-full max-h-[220px] object-contain"
-          />
-        </div>
-        <div className="text-[11px] text-[var(--text-3)] mt-1 truncate">
-          {file.name} · {(file.size / 1024 / 1024).toFixed(2)} MB
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div>
-      <div className="text-xs font-medium text-[var(--text-2)] mb-1.5">形象视频</div>
-      <div
-        onClick={() => inputRef.current?.click()}
-        className="flex items-center gap-3 px-3 py-3 rounded-lg border border-[var(--border)] hover:bg-[var(--bg-hover)] cursor-pointer transition-colors"
-      >
-        <Upload size={14} className="text-[var(--text-3)] flex-shrink-0"/>
-        <div className="flex-1 min-w-0">
-          <div className="text-sm text-[var(--text-2)]">点击选择文件</div>
-          <div className="text-[11px] text-[var(--text-3)]">MP4 推荐 5-30 秒,正脸,1080p 以内</div>
-        </div>
+      <div className="text-xs font-medium text-[var(--text-2)] mb-1.5 flex items-center justify-between">
+        <span>
+          形象 <span className="text-[var(--text-3)] font-normal">· {avatars.length}/{maxCount}</span>
+        </span>
+        {avatars.length === 0 && !loading && (
+          <span className="text-[11px] text-[var(--text-3)]">点 + 上传第一个形象</span>
+        )}
       </div>
-      <input
-        ref={inputRef}
-        type="file"
-        accept="video/mp4,video/*"
-        className="hidden"
-        onChange={(e) => {
-          const f = e.target.files?.[0] || null
-          onChange(f)
-          if (inputRef.current) inputRef.current.value = ''
-        }}
+
+      {loading ? (
+        <div className="flex items-center justify-center py-8 text-xs text-[var(--text-3)]">
+          <Loader2 size={14} className="animate-spin mr-2"/> 正在加载形象...
+        </div>
+      ) : (
+        <div className="grid grid-cols-3 gap-2">
+          {avatars.map(a => (
+            <AvatarCard
+              key={a.avatar_key}
+              avatar={a}
+              selected={a.avatar_key === selectedKey}
+              deleting={pendingDelete === a.avatar_key}
+              onSelect={() => onSelect(a.avatar_key)}
+              onDelete={() => onDelete(a.avatar_key)}
+            />
+          ))}
+          {canUploadMore && (
+            <button
+              onClick={onUploadClick}
+              disabled={uploading}
+              className={`aspect-[3/4] rounded-lg border-2 border-dashed transition-colors flex flex-col items-center justify-center gap-1 cursor-pointer ${
+                uploading
+                  ? 'border-[var(--border)] bg-[var(--bg-hover)] cursor-wait'
+                  : 'border-[var(--border)] hover:border-[var(--text-2)] hover:bg-[var(--bg-hover)]'
+              }`}
+            >
+              {uploading ? (
+                <>
+                  <Loader2 size={18} className="animate-spin text-[var(--text-2)]"/>
+                  <span className="text-[11px] text-[var(--text-3)]">上传中...</span>
+                </>
+              ) : (
+                <>
+                  <Plus size={18} className="text-[var(--text-2)]"/>
+                  <span className="text-[11px] text-[var(--text-3)]">上传新形象</span>
+                </>
+              )}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function AvatarCard({
+  avatar,
+  selected,
+  deleting,
+  onSelect,
+  onDelete,
+}: {
+  avatar: Avatar
+  selected: boolean
+  deleting: boolean
+  onSelect: () => void
+  onDelete: () => void
+}) {
+  const fileUrl = directBase() + avatar.file_url
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const [hovering, setHovering] = useState(false)
+
+  useEffect(() => {
+    const v = videoRef.current
+    if (!v) return
+    if (hovering) v.play().catch(() => {})
+    else { v.pause(); v.currentTime = 0 }
+  }, [hovering])
+
+  return (
+    <div
+      onClick={onSelect}
+      onMouseEnter={() => setHovering(true)}
+      onMouseLeave={() => setHovering(false)}
+      className={`relative aspect-[3/4] rounded-lg overflow-hidden border-2 cursor-pointer transition-colors group ${
+        selected
+          ? 'border-[var(--text)]'
+          : 'border-[var(--border)] hover:border-[var(--text-3)]'
+      }`}
+    >
+      <video
+        ref={videoRef}
+        src={fileUrl}
+        preload="metadata"
+        muted
+        playsInline
+        loop
+        className="w-full h-full object-cover bg-black"
       />
+      {/* 名字蒙层 */}
+      <div className="absolute bottom-0 left-0 right-0 px-2 py-1.5 bg-gradient-to-t from-black/80 to-transparent">
+        <div className="text-[11px] text-white truncate">{avatar.name}</div>
+        {avatar.duration_seconds && (
+          <div className="text-[10px] text-white/70">{avatar.duration_seconds.toFixed(1)}s</div>
+        )}
+      </div>
+      {/* 选中标记 */}
+      {selected && (
+        <div className="absolute top-1.5 left-1.5 w-5 h-5 rounded-full bg-[var(--text)] text-[var(--bg)] flex items-center justify-center">
+          <Check size={12}/>
+        </div>
+      )}
+      {/* 删除按钮 (hover 显示) */}
+      <button
+        onClick={(e) => { e.stopPropagation(); if (!deleting) onDelete() }}
+        disabled={deleting}
+        className={`absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-black/60 hover:bg-red-600 text-white flex items-center justify-center transition-opacity ${
+          deleting ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+        }`}
+        title="删除"
+      >
+        {deleting ? <Loader2 size={11} className="animate-spin"/> : <Trash2 size={11}/>}
+      </button>
     </div>
   )
 }
@@ -550,3 +738,4 @@ function AudioPickGroup({
     </div>
   )
 }
+
