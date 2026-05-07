@@ -193,10 +193,8 @@ export function DigitalHumanForm({ onSubmit, onClose }: Props) {
       )
       setAvatars(prev => prev.filter(a => a.avatar_key !== key))
       if (selectedAvatarKey === key) {
-        setSelectedAvatarKey(prev => {
-          const next = avatars.find(a => a.avatar_key !== key)
-          return next?.avatar_key || ''
-        })
+        const next = avatars.find(a => a.avatar_key !== key)
+        setSelectedAvatarKey(next?.avatar_key || '')
       }
     } catch {
       // 忽略,UI 会保留
