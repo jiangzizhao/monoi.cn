@@ -1031,8 +1031,8 @@ def _detect_text_language(text: str) -> str:
 def _lookup_preset_engine(preset_key: str, target_text: Optional[str] = None):
     """从 voice_presets 表里查 engine. 用户克隆音色根据目标文本语种智能选引擎:
     - 普通话 → IndexTTS-2 (中文音质天花板)
-    - 粤语 → MiniMax (CosyVoice2 念粤语怪, MiniMax 跨语言克隆质量更稳)
     - 日/韩/英 → CosyVoice2 (cross_lingual, 实测日语 OK)
+    - 粤语 → 不支持克隆, 走 indextts 兜底但实际会在 synthesize_voice 入口直接拒绝
     """
     if not preset_key:
         return None
@@ -1045,8 +1045,6 @@ def _lookup_preset_engine(preset_key: str, target_text: Optional[str] = None):
         if row["category"] == "clone":
             if target_text:
                 lang = _detect_text_language(target_text)
-                if lang == "cantonese":
-                    return "minimax"
                 if lang in ("ja", "ko", "en"):
                     return "cosyvoice"
             return "indextts"
@@ -1294,6 +1292,23 @@ def synthesize_voice(req: VoiceSynthesizeRequest):
         raise HTTPException(400, "text 不能为空")
     if not req.preset_key and not req.clone_id:
         raise HTTPException(400, "preset_key 和 clone_id 至少要传一个")
+
+    # 拒绝: 克隆音色 + 粤语. 引导用户改用粤语预设音色.
+    if req.preset_key:
+        _conn = get_db()
+        _conn.row_factory = sqlite3.Row
+        try:
+            _row = _conn.execute("SELECT category FROM voice_presets WHERE key = ?", (req.preset_key,)).fetchone()
+        finally:
+            _conn.close()
+        if _row and _row["category"] == "clone":
+            if _detect_text_language(req.text) == "cantonese":
+                raise HTTPException(
+                    400,
+                    "粤语暂不支持克隆音色。建议改用粤语预设音色: "
+                    "莫小琳 / 莫小珊 / 莫小桃 / 莫小佳 (阿里云) 或 "
+                    "粤语专业主持 / 粤语温柔女声 (MiniMax)"
+                )
 
     # 按 preset 的 engine 字段决定走哪条路 (克隆音色还会根据目标文本语种智能选)
     engine = _lookup_preset_engine(req.preset_key, req.text) or ("cosyvoice" if req.preset_key else "fish-speech")
