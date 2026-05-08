@@ -1523,12 +1523,26 @@ PREVIEW_TEXTS = {
 _PREVIEW_GENERATING = set()  # 当前正在后台生成的 voice keys
 
 
+def _preview_filename(voice_key: str) -> str:
+    """voice_key 转成安全的文件名 (去掉空格/括号等, 防 Windows 文件名问题)"""
+    return hashlib.md5(voice_key.encode("utf-8")).hexdigest()
+
+
 def _generate_preview_in_background(safe_key: str, demo_text: str, engine: str):
     """后台任务：合成并保存试听音频"""
     import time as _t
     import requests as _req
-    cache_path = os.path.join(VOICE_PREVIEW_DIR, f"{safe_key}.wav")
+    import shutil as _shutil
+    # 文件名要去掉特殊字符 (Windows 不让 voice 名含空格括号当文件名也行,但更稳用 md5)
+    cache_path = os.path.join(VOICE_PREVIEW_DIR, f"{_preview_filename(safe_key)}.wav")
     try:
+        if engine == "minimax":
+            # MiniMax T2A 同步合成, 把 wav 复制到 preview 缓存目录
+            result = _minimax_t2a_sync(demo_text, safe_key, 1.0)
+            _shutil.copy(result["path"], cache_path)
+            print(f"[preview] {safe_key} 缓存完成 (minimax)", flush=True)
+            return
+
         if engine in ("cosyvoice", "indextts"):
             # 本地推理
             server_url = INDEX_SERVER_URL if engine == "indextts" else VOICE_SERVER_URL
@@ -1580,11 +1594,13 @@ def _generate_preview_in_background(safe_key: str, demo_text: str, engine: str):
 @app.get("/api/voice/preview/{voice_key}")
 def voice_preview(voice_key: str, background_tasks: BackgroundTasks):
     """每个音色的试听 demo（异步生成 + 磁盘缓存）"""
-    import re as _re
     from fastapi.responses import FileResponse, JSONResponse
 
-    safe_key = _re.sub(r"[^a-zA-Z0-9_]", "", voice_key)
-    cache_path = os.path.join(VOICE_PREVIEW_DIR, f"{safe_key}.wav")
+    # 阻止路径穿越 (..)  其他字符 (空格/括号/中文/连字符) 都允许 — MiniMax voice_id 有这些
+    if not voice_key or ".." in voice_key or "/" in voice_key or "\\" in voice_key:
+        raise HTTPException(400, "无效 voice_key")
+    safe_key = voice_key
+    cache_path = os.path.join(VOICE_PREVIEW_DIR, f"{_preview_filename(safe_key)}.wav")
 
     # 已缓存 → 直接返回音频
     if os.path.exists(cache_path) and os.path.getsize(cache_path) > 1024:
