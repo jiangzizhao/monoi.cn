@@ -72,7 +72,7 @@ export function VideoPlayer({ data }: { data: VideoResult }) {
           onTimeUpdate={onTime}
           onEnded={() => { setPlaying(false); setProgress(0) }}
           onClick={toggle}
-          preload="metadata"
+          preload="none"
           playsInline
         />
         {!playing && (

@@ -89,7 +89,7 @@ export function AudioPlayer({ data }: { data: AudioResult }) {
           {downloading ? <Loader2 size={14} className="animate-spin"/> : <Download size={14}/>}
         </button>
       </div>
-      <audio ref={audioRef} src={fullUrl} onTimeUpdate={onTime} onEnded={() => { setPlaying(false); setProgress(0) }} preload="metadata"/>
+      <audio ref={audioRef} src={fullUrl} onTimeUpdate={onTime} onEnded={() => { setPlaying(false); setProgress(0) }} preload="none"/>
     </div>
   )
 }

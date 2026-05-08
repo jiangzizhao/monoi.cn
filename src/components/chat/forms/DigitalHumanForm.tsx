@@ -649,7 +649,7 @@ function AvatarCard({
       <video
         ref={videoRef}
         src={fileUrl}
-        preload="metadata"
+        preload="none"
         muted
         playsInline
         loop
