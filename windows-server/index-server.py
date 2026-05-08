@@ -67,6 +67,40 @@ print("Model loaded.", flush=True)
 app = FastAPI()
 
 
+# CUDA assert / device-side error 一旦发生整个进程的 GPU 状态就废了 (PyTorch 文档明确说必须重启进程).
+# 检测到这类错误就主动退出, 由 .bat 循环脚本拉起新进程, 实现自愈.
+@app.exception_handler(Exception)
+async def _cuda_error_recovery(request, exc):
+    err_str = str(exc)
+    is_cuda_dead = (
+        "CUDA error" in err_str
+        or "device-side assert" in err_str
+        or "CUDA out of memory" in err_str
+        or "CUDA kernel" in err_str
+        or "cudaErrorAssert" in err_str
+    )
+    if is_cuda_dead:
+        import threading as _th
+        import time as _t
+
+        def _shutdown():
+            _t.sleep(2)  # 给当前响应一点时间送出去
+            print(f"[FATAL] GPU 状态异常,主动退出让 .bat 重启: {err_str[:200]}", flush=True)
+            os._exit(1)
+
+        _th.Thread(target=_shutdown, daemon=True).start()
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            {"detail": f"GPU 状态异常,服务即将自动重启: {err_str[:200]}"},
+            status_code=503,
+        )
+    # 其他错误按原 HTTPException 走 (FastAPI 自己处理)
+    if isinstance(exc, HTTPException):
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+    raise exc
+
+
 class SynthesizeRequest(BaseModel):
     text: str
     voice_id: Optional[str] = None

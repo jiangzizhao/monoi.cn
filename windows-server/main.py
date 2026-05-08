@@ -157,6 +157,23 @@ def init_db():
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS tts_tasks (
+            task_id TEXT PRIMARY KEY,
+            user_id INTEGER,
+            engine TEXT NOT NULL,
+            text TEXT,
+            preset_key TEXT,
+            speed TEXT,
+            status TEXT DEFAULT 'processing',
+            progress INTEGER DEFAULT 0,
+            audio_url TEXT,
+            duration_seconds REAL,
+            error_message TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
     # 只清掉系统预设，保留用户克隆 (category='clone')
     conn.execute("DELETE FROM voice_presets WHERE category != 'clone'")
     for preset in VOICE_PRESETS:
@@ -927,6 +944,81 @@ def _lookup_preset_engine(preset_key: str):
         conn.close()
 
 
+# ============== TTS 任务异步执行 (indextts / cosyvoice 通用) ==============
+# 同步等待 indextts 推理 (71-189 秒) 会被 NATAPP 隧道 idle timeout (~120s) 切断,
+# 改成"提交立即返回 task_id, 后台线程跑, 前端轮询 task 状态"模式, 跟阿里云预设统一.
+
+def _create_tts_task(engine: str, text: str, preset_key: Optional[str], speed: Optional[str], user_id: Optional[int] = None) -> str:
+    """新建一条 tts 任务, 返回 task_id"""
+    import uuid as _uuid
+    import time as _t
+    task_id = f"local_{int(_t.time())}_{_uuid.uuid4().hex[:8]}"
+    conn = get_db()
+    try:
+        conn.execute(
+            """INSERT INTO tts_tasks (task_id, user_id, engine, text, preset_key, speed)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (task_id, user_id, engine, text, preset_key, speed),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return task_id
+
+
+def _update_tts_task(task_id: str, **fields) -> None:
+    """更新任务字段, updated_at 自动刷新"""
+    if not fields:
+        return
+    cols = ", ".join(f"{k} = ?" for k in fields)
+    vals = list(fields.values())
+    conn = get_db()
+    try:
+        conn.execute(
+            f"UPDATE tts_tasks SET {cols}, updated_at = CURRENT_TIMESTAMP WHERE task_id = ?",
+            vals + [task_id],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _run_tts_task(task_id: str, server_url: str, payload: dict, audio_url_path_prefix: str, server_label: str) -> None:
+    """通用后台任务: POST 到本地推理服务器, 把结果写回 task 表"""
+    import requests as _req
+    try:
+        # 进程内 → 进程内调用, 不受 NATAPP 限制. 给 10 分钟兜底.
+        resp = _req.post(server_url, json=payload, timeout=600)
+        if resp.status_code != 200:
+            _update_tts_task(
+                task_id,
+                status="failed",
+                error_message=f"{server_label} 错误: {resp.status_code} {resp.text[:200]}",
+            )
+            return
+        data = resp.json()
+        if not data.get("file"):
+            _update_tts_task(
+                task_id,
+                status="failed",
+                error_message=f"{server_label} 没返回 file 字段: {str(data)[:200]}",
+            )
+            return
+        _update_tts_task(
+            task_id,
+            status="ready",
+            audio_url=f"{audio_url_path_prefix}/{data['file']}",
+            duration_seconds=data.get("duration_seconds") or 0,
+            progress=100,
+        )
+    except _req.exceptions.ConnectionError:
+        _update_tts_task(task_id, status="failed", error_message=f"{server_label} 未启动")
+    except _req.exceptions.Timeout:
+        _update_tts_task(task_id, status="failed", error_message=f"{server_label} 超时 (>10 分钟)")
+    except Exception as e:
+        _update_tts_task(task_id, status="failed", error_message=f"合成失败: {type(e).__name__}: {e}")
+
+
 @app.post("/api/voice/synthesize")
 def synthesize_voice(req: VoiceSynthesizeRequest):
     import requests as _req
@@ -957,65 +1049,53 @@ def synthesize_voice(req: VoiceSynthesizeRequest):
             "speed": req.speed or "1.0x",
         }
 
-    # ─── IndexTTS-2（用户克隆，最自然） ───
+    # ─── IndexTTS-2（用户克隆，异步任务） ───
     if engine == "indextts":
-        try:
-            # 克隆推理时间随 prompt 复杂度差异极大 (实测 71s-189s, RTF 3.5-9.0)
-            # 给 10 分钟兜底, 避免 main.py 先超时但 index-server 还在跑导致孤儿文件
-            resp = _req.post(
+        import threading as _th
+        task_id = _create_tts_task("indextts", req.text.strip(), req.preset_key, req.speed or "1.0x")
+        _th.Thread(
+            target=_run_tts_task,
+            args=(
+                task_id,
                 f"{INDEX_SERVER_URL}/synthesize",
-                json={"text": req.text.strip(), "voice_id": req.preset_key, "speed": parse_speed(req.speed)},
-                timeout=600,
-            )
-            if resp.status_code != 200:
-                raise HTTPException(500, f"index-server 错误: {resp.status_code} {resp.text[:200]}")
-            data = resp.json()
-            return {
-                "success": True,
-                "status": "ready",
-                "engine": "indextts",
-                "audio_url": f"/api/voice/audio-index/{data['file']}",
-                "duration_seconds": data.get("duration_seconds"),
-                "preset_key": req.preset_key,
-                "speed": req.speed or "1.0x",
-            }
-        except _req.exceptions.ConnectionError:
-            raise HTTPException(503, "index-server (9002) 未启动")
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise HTTPException(500, f"克隆合成失败: {e}")
+                {"text": req.text.strip(), "voice_id": req.preset_key, "speed": parse_speed(req.speed)},
+                "/api/voice/audio-index",
+                "index-server (9002)",
+            ),
+            daemon=True,
+        ).start()
+        return {
+            "success": True,
+            "status": "queued",
+            "engine": "indextts",
+            "task_id": task_id,
+            "preset_key": req.preset_key,
+            "speed": req.speed or "1.0x",
+        }
 
-    # ─── CosyVoice2 同步合成（莫小本等） ───
+    # ─── CosyVoice2（莫小本等，异步任务） ───
     if engine == "cosyvoice":
-        try:
-            resp = _req.post(
+        import threading as _th
+        task_id = _create_tts_task("cosyvoice", req.text.strip(), req.preset_key, req.speed or "1.0x")
+        _th.Thread(
+            target=_run_tts_task,
+            args=(
+                task_id,
                 f"{VOICE_SERVER_URL}/synthesize",
-                json={
-                    "text": req.text.strip(),
-                    "voice_id": req.preset_key,
-                    "speed": parse_speed(req.speed),
-                },
-                timeout=600,
-            )
-            if resp.status_code != 200:
-                raise HTTPException(500, f"voice-server 错误: {resp.status_code} {resp.text[:200]}")
-            data = resp.json()
-            return {
-                "success": True,
-                "status": "ready",
-                "engine": "cosyvoice",
-                "audio_url": f"/api/voice/audio/{data['file']}",
-                "duration_seconds": data.get("duration_seconds"),
-                "preset_key": req.preset_key,
-                "speed": req.speed or "1.0x",
-            }
-        except _req.exceptions.ConnectionError:
-            raise HTTPException(503, "voice-server (9001) 未启动")
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise HTTPException(500, f"合成失败: {e}")
+                {"text": req.text.strip(), "voice_id": req.preset_key, "speed": parse_speed(req.speed)},
+                "/api/voice/audio",
+                "voice-server (9001)",
+            ),
+            daemon=True,
+        ).start()
+        return {
+            "success": True,
+            "status": "queued",
+            "engine": "cosyvoice",
+            "task_id": task_id,
+            "preset_key": req.preset_key,
+            "speed": req.speed or "1.0x",
+        }
 
     # Fish Speech 克隆暂未接入
     return {
@@ -1029,7 +1109,39 @@ def synthesize_voice(req: VoiceSynthesizeRequest):
 
 @app.get("/api/voice/task/{task_id}")
 def get_voice_task(task_id: str):
-    """查询阿里云长文本任务状态"""
+    """查询合成任务状态. 本地任务 (indextts/cosyvoice) 优先, 没有则当阿里云任务查."""
+    # 1. 先查本地 tts_tasks 表 (indextts / cosyvoice)
+    conn = get_db()
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute(
+            "SELECT * FROM tts_tasks WHERE task_id = ?", (task_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+
+    if row:
+        d = dict(row)
+        if d["status"] == "ready":
+            return {
+                "status": "ready",
+                "audio_url": d["audio_url"],
+                "duration_seconds": d.get("duration_seconds") or 0,
+                "engine": d.get("engine"),
+            }
+        if d["status"] == "failed":
+            return {
+                "status": "error",
+                "message": d.get("error_message") or "合成失败",
+                "engine": d.get("engine"),
+            }
+        return {
+            "status": "processing",
+            "progress": d.get("progress") or 0,
+            "engine": d.get("engine"),
+        }
+
+    # 2. 本地没找到 → 当作阿里云任务
     data = aliyun_get_task(task_id)
     print(f"[ALIYUN TASK QUERY] raw response: {data}", flush=True)
 
@@ -1046,13 +1158,13 @@ def get_voice_task(task_id: str):
         # 阿里云 OSS 返回 http://, 但前端在 HTTPS 页面 fetch 会被 mixed-content block
         if isinstance(audio_url, str) and audio_url.startswith("http://"):
             audio_url = "https://" + audio_url[len("http://"):]
-        return {"status": "ready", "audio_url": audio_url, "duration_seconds": duration}
+        return {"status": "ready", "audio_url": audio_url, "duration_seconds": duration, "engine": "aliyun"}
 
     if status_text in ("RUNNING", "QUEUEING") or status_text == "":
-        return {"status": "processing", "task_status": status_text or "UNKNOWN", "raw": str(data)[:400]}
+        return {"status": "processing", "task_status": status_text or "UNKNOWN", "engine": "aliyun", "raw": str(data)[:400]}
 
     error_msg = data.get("error_message") or data.get("message") or status_text
-    return {"status": "error", "message": error_msg, "raw": str(data)[:400]}
+    return {"status": "error", "message": error_msg, "engine": "aliyun", "raw": str(data)[:400]}
 
 
 VOICE_PREVIEW_DIR = "voice-previews"

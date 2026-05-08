@@ -421,10 +421,11 @@ export function useChat() {
         let finalAudioUrl = data.audio_url as string | undefined
         let finalDuration = data.duration_seconds as number | undefined
 
-        // 阿里云长文本是异步任务，需要轮询（前端对用户不暴露引擎名）
-        if (data.engine === 'aliyun' && data.task_id) {
+        // 任何 engine 返回 task_id 都进异步轮询 (阿里云 / IndexTTS / CosyVoice 统一)
+        if (data.task_id) {
           store.updateLastAssistantBlocks(convId, [{ type: 'loading', label: '正在合成音频...' }])
-          for (let i = 0; i < 60; i++) {  // 最多等 2 分钟
+          // 轮询最多 6 分钟 (180 * 2s),够 IndexTTS 长文本(实测 71-189s)
+          for (let i = 0; i < 180; i++) {
             await new Promise(r => setTimeout(r, 2000))
             if (ctrl.signal.aborted) return
             const tr = await fetch('/api/proxy?path=' + encodeURIComponent('/api/voice/task/' + data.task_id))
@@ -438,10 +439,14 @@ export function useChat() {
               store.updateLastAssistantBlocks(convId, [{ type: 'error', message: td.message || '合成失败' }])
               return
             }
-            store.updateLastAssistantBlocks(convId, [{ type: 'loading', label: `正在合成音频...（${(i + 1) * 2}s）` }])
+            // 后端有真实 progress (本地任务) 就显示百分比, 没有就显示已用秒
+            const progressLabel = typeof td.progress === 'number' && td.progress > 0
+              ? `${td.progress}%`
+              : `${(i + 1) * 2}s`
+            store.updateLastAssistantBlocks(convId, [{ type: 'loading', label: `正在合成音频... ${progressLabel}` }])
           }
           if (!finalAudioUrl) {
-            store.updateLastAssistantBlocks(convId, [{ type: 'error', message: '合成超时，请稍后重试' }])
+            store.updateLastAssistantBlocks(convId, [{ type: 'error', message: '合成超时,请稍后重试' }])
             return
           }
         }
