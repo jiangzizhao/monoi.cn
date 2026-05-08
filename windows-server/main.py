@@ -13,6 +13,32 @@ import tempfile
 import subprocess
 from urllib.parse import urlparse
 
+
+# 零依赖的 .env 加载器 (不需要 python-dotenv)
+# 启动时从当前工作目录读取 .env 把键值对塞进 os.environ
+def _load_dotenv_simple(path: str = ".env") -> None:
+    if not os.path.exists(path):
+        return
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                if key and key not in os.environ:
+                    os.environ[key] = value
+    except Exception as _e:
+        print(f"[load_dotenv] 警告: {_e}", flush=True)
+
+
+_load_dotenv_simple()
+
+
 app = FastAPI()
 
 app.add_middleware(
