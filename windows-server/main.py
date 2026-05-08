@@ -61,6 +61,18 @@ VOICE_PRESETS = [
     {"key": "camila",     "name": "Camila", "engine": "aliyun", "category": "language", "gender": "female", "locale": "es-ES", "accent": "spanish",  "emotion": "natural", "speed": "1.0x", "sample_text": "西班牙语女声。"},
     {"key": "perla",      "name": "Perla",  "engine": "aliyun", "category": "language", "gender": "female", "locale": "it-IT", "accent": "italian",  "emotion": "natural", "speed": "1.0x", "sample_text": "意大利语女声。"},
     {"key": "masha",      "name": "masha",  "engine": "aliyun", "category": "language", "gender": "female", "locale": "ru-RU", "accent": "russian",  "emotion": "natural", "speed": "1.0x", "sample_text": "俄语女声。"},
+    # ─── MiniMax 系统预设 (高自然度, 适合内容创作者) ───
+    # 粤语 (用户重点关注)
+    {"key": "Cantonese_ProfessionalHost(F)", "name": "粤语专业主持", "engine": "minimax", "category": "dialect", "gender": "female", "locale": "zh-HK", "accent": "cantonese", "emotion": "natural", "speed": "1.0x", "sample_text": "粤语专业女主持。"},
+    {"key": "Cantonese_GentleLady",          "name": "粤语温柔女声", "engine": "minimax", "category": "dialect", "gender": "female", "locale": "zh-HK", "accent": "cantonese", "emotion": "natural", "speed": "1.0x", "sample_text": "粤语温柔女声。"},
+    # 普通话 MiniMax 主播 (跟阿里云对比)
+    {"key": "Chinese (Mandarin)_Radio_Host",        "name": "电台男主播",   "engine": "minimax", "category": "preset", "gender": "male",   "locale": "zh-CN", "accent": "mandarin", "emotion": "natural", "speed": "1.0x", "sample_text": "深夜电台男声。"},
+    {"key": "Chinese (Mandarin)_Gentle_Senior",     "name": "温柔学姐",     "engine": "minimax", "category": "preset", "gender": "female", "locale": "zh-CN", "accent": "mandarin", "emotion": "natural", "speed": "1.0x", "sample_text": "温柔学姐,知识科普。"},
+    {"key": "Chinese (Mandarin)_Sincere_Adult",     "name": "真诚青年",     "engine": "minimax", "category": "preset", "gender": "male",   "locale": "zh-CN", "accent": "mandarin", "emotion": "natural", "speed": "1.0x", "sample_text": "真诚青年男声。"},
+    {"key": "Chinese (Mandarin)_Southern_Young_Man","name": "南方小哥",     "engine": "minimax", "category": "preset", "gender": "male",   "locale": "zh-CN", "accent": "mandarin", "emotion": "natural", "speed": "1.0x", "sample_text": "南方口音青年男声。"},
+    # 多语种 (MiniMax 自然度更好)
+    {"key": "English_Graceful_Lady",          "name": "Graceful Lady",  "engine": "minimax", "category": "language", "gender": "female", "locale": "en-US", "accent": "english",  "emotion": "natural", "speed": "1.0x", "sample_text": "MiniMax 英语优雅女声。"},
+    {"key": "Japanese_IntellectualSenior",    "name": "日语知性女声",   "engine": "minimax", "category": "language", "gender": "female", "locale": "ja-JP", "accent": "japanese", "emotion": "natural", "speed": "1.0x", "sample_text": "MiniMax 日语知性女声。"},
     {"key": "waan",       "name": "Waan",   "engine": "aliyun", "category": "language", "gender": "female", "locale": "th-TH", "accent": "thai",     "emotion": "natural", "speed": "1.0x", "sample_text": "泰语女声。"},
     {"key": "tien",       "name": "Tien",   "engine": "aliyun", "category": "language", "gender": "female", "locale": "vi-VN", "accent": "vietnamese","emotion": "natural", "speed": "1.0x", "sample_text": "越南语女声。"},
     {"key": "indah",      "name": "Indah",  "engine": "aliyun", "category": "language", "gender": "female", "locale": "id-ID", "accent": "indonesian","emotion": "natural", "speed": "1.0x", "sample_text": "印尼语女声。"},
@@ -172,6 +184,14 @@ def init_db():
             error_message TEXT,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    # 用户克隆音色 → MiniMax voice_id 的映射 (懒加载,首次粤语合成时上传 prompt 创建)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS minimax_voice_clones (
+            clone_key TEXT PRIMARY KEY,
+            minimax_voice_id TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
     # 只清掉系统预设，保留用户克隆 (category='clone')
@@ -958,7 +978,8 @@ def _detect_text_language(text: str) -> str:
 def _lookup_preset_engine(preset_key: str, target_text: Optional[str] = None):
     """从 voice_presets 表里查 engine. 用户克隆音色根据目标文本语种智能选引擎:
     - 普通话 → IndexTTS-2 (中文音质天花板)
-    - 其他 (日/韩/英/粤语) → CosyVoice2 (支持跨语言克隆)
+    - 粤语 → MiniMax (CosyVoice2 念粤语怪, MiniMax 跨语言克隆质量更稳)
+    - 日/韩/英 → CosyVoice2 (cross_lingual, 实测日语 OK)
     """
     if not preset_key:
         return None
@@ -971,7 +992,9 @@ def _lookup_preset_engine(preset_key: str, target_text: Optional[str] = None):
         if row["category"] == "clone":
             if target_text:
                 lang = _detect_text_language(target_text)
-                if lang != "zh":
+                if lang == "cantonese":
+                    return "minimax"
+                if lang in ("ja", "ko", "en"):
                     return "cosyvoice"
             return "indextts"
         return row["engine"]
@@ -1052,6 +1075,162 @@ def _run_tts_task(task_id: str, server_url: str, payload: dict, audio_url_path_p
         _update_tts_task(task_id, status="failed", error_message=f"{server_label} 超时 (>10 分钟)")
     except Exception as e:
         _update_tts_task(task_id, status="failed", error_message=f"合成失败: {type(e).__name__}: {e}")
+
+
+# ============== MiniMax T2A (粤语克隆 + 系统预设) ==============
+MINIMAX_API_KEY = os.environ.get("MINIMAX_API_KEY", "")
+MINIMAX_GROUP_ID = os.environ.get("MINIMAX_GROUP_ID", "")
+MINIMAX_API_BASE = os.environ.get("MINIMAX_API_BASE", "https://api.minimax.io/v1")
+MINIMAX_MODEL = os.environ.get("MINIMAX_MODEL", "speech-02-turbo")  # turbo 便宜实时, hd 更高音质
+MINIMAX_OUTPUT_DIR = "minimax-outputs"
+os.makedirs(MINIMAX_OUTPUT_DIR, exist_ok=True)
+
+
+def _minimax_t2a_sync(text: str, voice_id: str, speed: float = 1.0) -> dict:
+    """调 MiniMax T2A 同步合成. 返回 {file, path, duration_seconds}"""
+    import requests as _req
+    if not MINIMAX_API_KEY or not MINIMAX_GROUP_ID:
+        raise RuntimeError("MiniMax 未配置 (需设置 MINIMAX_API_KEY + MINIMAX_GROUP_ID 环境变量)")
+
+    headers = {
+        "Authorization": f"Bearer {MINIMAX_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": MINIMAX_MODEL,
+        "text": text,
+        "stream": False,
+        "voice_setting": {
+            "voice_id": voice_id,
+            "speed": float(speed),
+            "vol": 1.0,
+            "pitch": 0,
+        },
+        "audio_setting": {
+            "sample_rate": 32000,
+            "bitrate": 128000,
+            "format": "wav",
+            "channel": 1,
+        },
+    }
+    url = f"{MINIMAX_API_BASE}/t2a_v2?GroupId={MINIMAX_GROUP_ID}"
+    resp = _req.post(url, json=payload, headers=headers, timeout=120)
+    if resp.status_code != 200:
+        raise RuntimeError(f"MiniMax HTTP {resp.status_code}: {resp.text[:200]}")
+
+    data = resp.json()
+    base = data.get("base_resp") or {}
+    if base.get("status_code") not in (0, None):
+        raise RuntimeError(f"MiniMax 业务错误: {base.get('status_msg')}")
+
+    audio_hex = (data.get("data") or {}).get("audio")
+    if not audio_hex:
+        raise RuntimeError(f"MiniMax 没返回 audio: {str(data)[:300]}")
+
+    audio_bytes = bytes.fromhex(audio_hex)
+    import uuid as _uuid
+    out_name = f"minimax_{int(time.time()*1000)}_{_uuid.uuid4().hex[:6]}.wav"
+    out_path = os.path.join(MINIMAX_OUTPUT_DIR, out_name)
+    with open(out_path, "wb") as f:
+        f.write(audio_bytes)
+
+    extra = data.get("extra_info") or {}
+    return {
+        "file": out_name,
+        "path": out_path,
+        "duration_seconds": (extra.get("audio_length") or 0) / 1000.0,
+    }
+
+
+def _minimax_create_clone(audio_file_path: str, voice_id_to_use: Optional[str] = None) -> str:
+    """上传 prompt 音频到 MiniMax 创建语音复刻, 返回 voice_id (创建后首次合成时扣 9.9 元)"""
+    import requests as _req
+    import uuid as _uuid
+    if not MINIMAX_API_KEY or not MINIMAX_GROUP_ID:
+        raise RuntimeError("MiniMax 未配置")
+
+    if not voice_id_to_use:
+        voice_id_to_use = f"monoi_clone_{int(time.time())}_{_uuid.uuid4().hex[:6]}"
+
+    headers = {"Authorization": f"Bearer {MINIMAX_API_KEY}"}
+
+    # 1. 上传文件 → 拿 file_id
+    upload_url = f"{MINIMAX_API_BASE}/files/upload?GroupId={MINIMAX_GROUP_ID}"
+    with open(audio_file_path, "rb") as f:
+        files = {"file": (os.path.basename(audio_file_path), f, "audio/wav")}
+        data = {"purpose": "voice_clone"}
+        resp = _req.post(upload_url, headers=headers, files=files, data=data, timeout=60)
+    if resp.status_code != 200:
+        raise RuntimeError(f"MiniMax 上传失败 HTTP {resp.status_code}: {resp.text[:200]}")
+    fdata = resp.json()
+    file_id = (fdata.get("file") or {}).get("file_id")
+    if not file_id:
+        raise RuntimeError(f"MiniMax 没返回 file_id: {str(fdata)[:300]}")
+
+    # 2. 创建克隆
+    clone_url = f"{MINIMAX_API_BASE}/voice_clone?GroupId={MINIMAX_GROUP_ID}"
+    headers2 = {**headers, "Content-Type": "application/json"}
+    payload = {
+        "file_id": file_id,
+        "voice_id": voice_id_to_use,
+        "need_noise_reduction": False,
+    }
+    resp = _req.post(clone_url, json=payload, headers=headers2, timeout=60)
+    if resp.status_code != 200:
+        raise RuntimeError(f"MiniMax 克隆失败 HTTP {resp.status_code}: {resp.text[:200]}")
+    result = resp.json()
+    base = result.get("base_resp") or {}
+    if base.get("status_code") not in (0, None):
+        raise RuntimeError(f"MiniMax 克隆业务错误: {base.get('status_msg')}")
+
+    return voice_id_to_use
+
+
+def _get_or_create_minimax_voice_id(clone_key: str) -> str:
+    """查 minimax_voice_clones 缓存, 没有就上传 prompt 创建. 返回 MiniMax voice_id"""
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT minimax_voice_id FROM minimax_voice_clones WHERE clone_key = ?", (clone_key,)
+        ).fetchone()
+        if row and row[0]:
+            return row[0]
+    finally:
+        conn.close()
+
+    # 没有 → 上传创建
+    prompt_wav = os.path.join(VOICE_PROMPTS_DIR, f"{clone_key}.wav")
+    if not os.path.exists(prompt_wav):
+        raise RuntimeError(f"找不到克隆 prompt 文件: {prompt_wav}")
+
+    minimax_voice_id = _minimax_create_clone(prompt_wav)
+
+    conn = get_db()
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO minimax_voice_clones (clone_key, minimax_voice_id) VALUES (?, ?)",
+            (clone_key, minimax_voice_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    return minimax_voice_id
+
+
+def _run_minimax_t2a_task(task_id: str, text: str, voice_id: str, speed: float) -> None:
+    """MiniMax T2A 后台任务 (跟 _run_tts_task 同模式, 但 endpoint/payload 不同)"""
+    try:
+        result = _minimax_t2a_sync(text, voice_id, speed)
+        _update_tts_task(
+            task_id,
+            status="ready",
+            audio_url=f"/api/voice/audio-minimax/{result['file']}",
+            duration_seconds=result["duration_seconds"],
+            progress=100,
+        )
+    except Exception as e:
+        _update_tts_task(task_id, status="failed", error_message=f"MiniMax: {e}")
 
 
 @app.post("/api/voice/synthesize")
@@ -1143,6 +1322,35 @@ def synthesize_voice(req: VoiceSynthesizeRequest):
             "speed": req.speed or "1.0x",
             "lang": lang,
             "mode": mode,
+        }
+
+    # ─── MiniMax (粤语克隆 + MiniMax 系统预设, 异步任务) ───
+    if engine == "minimax":
+        import threading as _th
+        text = req.text.strip()
+
+        # 用户克隆 → 取/创建 MiniMax voice_id; 系统预设 → preset_key 直接是 MiniMax voice_id
+        try:
+            if req.preset_key and req.preset_key.startswith("clone_"):
+                minimax_voice_id = _get_or_create_minimax_voice_id(req.preset_key)
+            else:
+                minimax_voice_id = req.preset_key
+        except Exception as e:
+            raise HTTPException(500, f"MiniMax 音色获取失败: {e}")
+
+        task_id = _create_tts_task("minimax", text, req.preset_key, req.speed or "1.0x")
+        _th.Thread(
+            target=_run_minimax_t2a_task,
+            args=(task_id, text, minimax_voice_id, parse_speed(req.speed)),
+            daemon=True,
+        ).start()
+        return {
+            "success": True,
+            "status": "queued",
+            "engine": "minimax",
+            "task_id": task_id,
+            "preset_key": req.preset_key,
+            "speed": req.speed or "1.0x",
         }
 
     # Fish Speech 克隆暂未接入
@@ -1424,6 +1632,17 @@ def proxy_audio_index(name: str):
         return StreamingResponse(resp.iter_content(8192), media_type="audio/wav")
     except _req.exceptions.ConnectionError:
         raise HTTPException(503, "index-server (9002) 未启动")
+
+
+@app.get("/api/voice/audio-minimax/{name}")
+def proxy_audio_minimax(name: str):
+    """MiniMax 输出音频代理 (文件直接存在 main.py 同进程的 minimax-outputs/)"""
+    from fastapi.responses import FileResponse
+    safe = os.path.basename(name)
+    file_path = os.path.join(MINIMAX_OUTPUT_DIR, safe)
+    if not os.path.exists(file_path):
+        raise HTTPException(404, "音频未找到")
+    return FileResponse(file_path, media_type="audio/wav", filename=safe)
 
 
 # ============== 数字人 (Duix-Avatar / HeyGem) ==============
