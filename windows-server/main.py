@@ -1307,8 +1307,8 @@ def synthesize_voice(req: VoiceSynthesizeRequest):
                 raise HTTPException(
                     400,
                     "粤语暂不支持克隆音色。建议改用粤语预设音色: "
-                    "莫小琳 / 莫小珊 / 莫小桃 / 莫小佳 (阿里云) 或 "
-                    "粤语专业主持 / 粤语温柔女声 (MiniMax)"
+                    "莫小琳 / 莫小珊 / 莫小桃 / 莫小佳 / "
+                    "莫小港 / 莫小阳 / 莫小怡 / 莫小活 / 莫小可 / 莫小善"
                 )
 
     # 按 preset 的 engine 字段决定走哪条路 (克隆音色还会根据目标文本语种智能选)
