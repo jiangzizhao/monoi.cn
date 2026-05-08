@@ -68,6 +68,9 @@ class SynthesizeRequest(BaseModel):
     prompt_audio_path: Optional[str] = None
     prompt_text: Optional[str] = None
     speed: float = 1.0
+    # zero_shot: 同语种克隆 (默认, 中文 → 中文)
+    # cross_lingual: 跨语言克隆 (中文样本念日/韩/英 等)
+    mode: str = "zero_shot"
 
 
 def resolve_prompt(req: SynthesizeRequest):
@@ -99,10 +102,18 @@ def synthesize(req: SynthesizeRequest):
 
     prompt_wav, prompt_text = resolve_prompt(req)
 
-    # 这版 CosyVoice2 的 frontend._extract_speech_feat 内部会 load_wav，所以传路径
     chunks = []
-    for piece in MODEL.inference_zero_shot(text, prompt_text, prompt_wav, stream=False, speed=req.speed):
-        chunks.append(piece["tts_speech"])
+    if req.mode == "cross_lingual":
+        # 跨语言克隆: 中文 prompt 念其他语言. 不需要 prompt_text.
+        # inference_cross_lingual 接受 tensor 形式的 prompt, 用 patched load_wav 转
+        prompt_speech_16k = load_wav(prompt_wav, 16000)
+        for piece in MODEL.inference_cross_lingual(text, prompt_speech_16k, stream=False, speed=req.speed):
+            chunks.append(piece["tts_speech"])
+    else:
+        # 同语种 zero_shot 克隆 (默认, 中文 → 中文)
+        # 这版 CosyVoice2 的 frontend._extract_speech_feat 内部会 load_wav，所以传路径
+        for piece in MODEL.inference_zero_shot(text, prompt_text, prompt_wav, stream=False, speed=req.speed):
+            chunks.append(piece["tts_speech"])
     audio = torch.concat(chunks, dim=1)
 
     out_name = f"{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}.wav"

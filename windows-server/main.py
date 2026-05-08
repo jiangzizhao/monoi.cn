@@ -926,8 +926,40 @@ def speed_to_aliyun_rate(speed_str):
     # 1.0x → 0, 0.5x → -500, 1.5x → +500
     return int(round((s - 1.0) * 1000))
 
-def _lookup_preset_engine(preset_key: str):
-    """从 voice_presets 表里查这个 preset 的 engine（克隆走 IndexTTS）"""
+def _detect_text_language(text: str) -> str:
+    """检测文本主要语种. 返回: zh / ja / ko / en / cantonese"""
+    import re as _re
+    if not text:
+        return "zh"
+
+    # 日文假名 (片假名 + 平假名)
+    if _re.search(r"[぀-ゟ゠-ヿ]", text):
+        return "ja"
+
+    # 韩文
+    if _re.search(r"[가-힯]", text):
+        return "ko"
+
+    # 英文 (拉丁字母明显多于中文字符)
+    latin = len(_re.findall(r"[a-zA-Z]", text))
+    chinese = len(_re.findall(r"[一-鿿]", text))
+    if latin > 30 and chinese < latin * 0.2:
+        return "en"
+
+    # 粤语 (高辨识度方言字, 出现 2+ 个就判定为粤语)
+    cantonese_markers = ["係", "嘅", "咁", "唔", "嗰", "嘢", "畀", "邊度", "點解", "我哋", "佢哋", "啲", "冇"]
+    cantonese_hits = sum(1 for m in cantonese_markers if m in text)
+    if cantonese_hits >= 2:
+        return "cantonese"
+
+    return "zh"
+
+
+def _lookup_preset_engine(preset_key: str, target_text: Optional[str] = None):
+    """从 voice_presets 表里查 engine. 用户克隆音色根据目标文本语种智能选引擎:
+    - 普通话 → IndexTTS-2 (中文音质天花板)
+    - 其他 (日/韩/英/粤语) → CosyVoice2 (支持跨语言克隆)
+    """
     if not preset_key:
         return None
     conn = get_db()
@@ -936,8 +968,11 @@ def _lookup_preset_engine(preset_key: str):
         row = conn.execute("SELECT engine, category FROM voice_presets WHERE key = ?", (preset_key,)).fetchone()
         if not row:
             return None
-        # 用户克隆 → IndexTTS（更自然的克隆）
         if row["category"] == "clone":
+            if target_text:
+                lang = _detect_text_language(target_text)
+                if lang != "zh":
+                    return "cosyvoice"
             return "indextts"
         return row["engine"]
     finally:
@@ -1028,8 +1063,8 @@ def synthesize_voice(req: VoiceSynthesizeRequest):
     if not req.preset_key and not req.clone_id:
         raise HTTPException(400, "preset_key 和 clone_id 至少要传一个")
 
-    # 按 preset 的 engine 字段决定走哪条路
-    engine = _lookup_preset_engine(req.preset_key) or ("cosyvoice" if req.preset_key else "fish-speech")
+    # 按 preset 的 engine 字段决定走哪条路 (克隆音色还会根据目标文本语种智能选)
+    engine = _lookup_preset_engine(req.preset_key, req.text) or ("cosyvoice" if req.preset_key else "fish-speech")
 
     # ─── 阿里云长文本 TTS ───
     if engine == "aliyun":
@@ -1073,16 +1108,27 @@ def synthesize_voice(req: VoiceSynthesizeRequest):
             "speed": req.speed or "1.0x",
         }
 
-    # ─── CosyVoice2（莫小本等，异步任务） ───
+    # ─── CosyVoice2（莫小本/克隆跨语言 等，异步任务） ───
     if engine == "cosyvoice":
         import threading as _th
-        task_id = _create_tts_task("cosyvoice", req.text.strip(), req.preset_key, req.speed or "1.0x")
+        text = req.text.strip()
+        # 检测语种, 决定 voice-server 的推理模式
+        # zh → zero_shot (同语种克隆, 需要 prompt text 帮 BPE)
+        # 其他 → cross_lingual (跨语言克隆, 中文样本能念日韩英)
+        lang = _detect_text_language(text)
+        mode = "cross_lingual" if lang != "zh" else "zero_shot"
+        task_id = _create_tts_task("cosyvoice", text, req.preset_key, req.speed or "1.0x")
         _th.Thread(
             target=_run_tts_task,
             args=(
                 task_id,
                 f"{VOICE_SERVER_URL}/synthesize",
-                {"text": req.text.strip(), "voice_id": req.preset_key, "speed": parse_speed(req.speed)},
+                {
+                    "text": text,
+                    "voice_id": req.preset_key,
+                    "speed": parse_speed(req.speed),
+                    "mode": mode,
+                },
                 "/api/voice/audio",
                 "voice-server (9001)",
             ),
@@ -1095,6 +1141,8 @@ def synthesize_voice(req: VoiceSynthesizeRequest):
             "task_id": task_id,
             "preset_key": req.preset_key,
             "speed": req.speed or "1.0x",
+            "lang": lang,
+            "mode": mode,
         }
 
     # Fish Speech 克隆暂未接入
