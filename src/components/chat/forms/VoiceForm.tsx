@@ -94,7 +94,8 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
   const [cloneMaxReached, setCloneMaxReached] = useState(false)
   const [showCloneUpload, setShowCloneUpload] = useState(false)
   const [cleanResult, setCleanResult] = useState<any>(null)
-  const [genderFilter, setGenderFilter] = useState<'all' | 'female' | 'male'>('all')
+  // tab 过滤: 全部 / 女声(普通话女) / 男声(普通话男) / 方言 / 外语
+  const [tabFilter, setTabFilter] = useState<'all' | 'female' | 'male' | 'dialect' | 'language'>('all')
   const [previewPlaying, setPreviewPlaying] = useState<string>('')
   const [previewLoading, setPreviewLoading] = useState<string>('')
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -162,9 +163,24 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
 
   const selectedVoice = useMemo(() => voiceOptions.find(v => v.id === voice), [voiceOptions, voice])
 
-  // 按 gender 过滤后再按 category 分组
+  // 按 tab 过滤后再按 category 分组
+  // tab 规则:
+  //   all      → 所有
+  //   female   → 普通话女声 (category=preset & gender=female), 含 cosyvoice 莫小本
+  //   male     → 普通话男声 (category=preset & gender=male)
+  //   dialect  → 所有方言 (含粤语/川/东北 等)
+  //   language → 所有外语
+  // 用户克隆 (clone) 始终显示在 "全部" 中,其他 tab 不显示克隆
   const groupedVoices = useMemo(() => {
-    const filtered = voiceOptions.filter(v => genderFilter === 'all' || v.gender === genderFilter)
+    const filtered = voiceOptions.filter(v => {
+      const cat = v.category || 'preset'
+      if (tabFilter === 'all') return true
+      if (tabFilter === 'female') return cat === 'preset' && v.gender === 'female'
+      if (tabFilter === 'male')   return cat === 'preset' && v.gender === 'male'
+      if (tabFilter === 'dialect')  return cat === 'dialect'
+      if (tabFilter === 'language') return cat === 'language'
+      return true
+    })
     const groups: Record<string, VoiceOption[]> = { clone: [], preset: [], dialect: [], language: [] }
     for (const v of filtered) {
       const cat = v.category || 'preset'
@@ -172,7 +188,7 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
       groups[cat].push(v)
     }
     return groups
-  }, [voiceOptions, genderFilter])
+  }, [voiceOptions, tabFilter])
 
   // 加载用户克隆列表（克隆模式时）
   const loadMyClones = async () => {
@@ -385,19 +401,25 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
         <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-3 min-h-0">
           {mode === 'preset' && (
             <>
-              {/* 性别筛选 */}
-              <div className="flex gap-1.5 sticky top-0 bg-[var(--bg-card)] py-1 z-10">
-                {(['all', 'female', 'male'] as const).map(g => (
+              {/* 分类 tab: 全部 / 女声 / 男声 / 方言 / 外语 */}
+              <div className="flex gap-1.5 sticky top-0 bg-[var(--bg-card)] py-1 z-10 flex-wrap">
+                {([
+                  ['all',      '全部'],
+                  ['female',   '女声'],
+                  ['male',     '男声'],
+                  ['dialect',  '方言'],
+                  ['language', '外语'],
+                ] as const).map(([k, label]) => (
                   <button
-                    key={g}
-                    onClick={() => setGenderFilter(g)}
+                    key={k}
+                    onClick={() => setTabFilter(k)}
                     className={`px-3 py-1 rounded-full text-xs cursor-pointer border transition-colors ${
-                      genderFilter === g
+                      tabFilter === k
                         ? 'border-[var(--text-2)] bg-[var(--bg-hover)] text-[var(--text)]'
                         : 'border-[var(--border)] text-[var(--text-3)] hover:text-[var(--text)]'
                     }`}
                   >
-                    {g === 'all' ? '全部' : GENDER_LABELS[g]}
+                    {label}
                   </button>
                 ))}
               </div>
