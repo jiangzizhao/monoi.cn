@@ -139,15 +139,7 @@ export function NarrationVideoForm({ onSubmit, onClose }: Props) {
                 <div className="h-1.5 rounded-full bg-[var(--bg-hover)] overflow-hidden">
                   <div className="h-full bg-[var(--text)] transition-all" style={{ width: `${Math.max(progress, 8)}%` }}/>
                 </div>
-                <div className="flex items-center justify-between mt-1.5 text-xs text-[var(--text-3)]">
-                  <span>上传 + 转码 + 转录</span>
-                </div>
               </div>
-              <p className="text-[11px] text-[var(--text-3)] text-center max-w-md">
-                视频上传走 NATAPP 隧道, 大文件慢一点是正常的.
-                上传完后端做 ffmpeg 转码 + Whisper 转录, 通常 1 分钟视频耗时 30-60 秒.
-                请勿关闭此窗口.
-              </p>
             </div>
           )}
 
