@@ -130,6 +130,11 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
   const keepRangesRef = useRef<[number, number][]>([])
   useEffect(() => { keepRangesRef.current = keepRanges }, [keepRanges])
 
+  // seek 进行中标志: 防止 video 大文件 seek 慢, ontimeupdate 多次触发导致重复 seek 死循环
+  const seekingRef = useRef(false)
+  // 上次跳过到的位置, 防止往同一位置反复 seek
+  const lastJumpToRef = useRef<number>(-1)
+
   // 视频元数据加载完后, 初始化 wavesurfer 绑定到 video 元素
   // (wavesurfer 会从视频提取音轨显示波形, 进度自动跟视频同步)
   useEffect(() => {
@@ -195,17 +200,31 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
     const t = v.currentTime
     setCurrentTime(t)
     if (v.paused) return
+    // seek 进行中, 别再发新的 seek (避免大视频 seek 慢导致重复跳同一位置死循环)
+    if (seekingRef.current) return
     const ranges = keepRangesRef.current
     if (ranges.length === 0) return
     const inKeep = ranges.some(([s, e]) => t >= s - 0.01 && t <= e + 0.01)
     if (!inKeep) {
       const nextRange = ranges.find(([s]) => s > t)
       if (nextRange) {
+        // 防止 seek 后浏览器没真跳到, ontimeupdate 又来了再跳同一位置
+        if (Math.abs(lastJumpToRef.current - nextRange[0]) < 0.05) {
+          // 短时间内已经跳过这个位置了, 浏览器还没 seek 完, 暂时让它 play
+          return
+        }
+        seekingRef.current = true
+        lastJumpToRef.current = nextRange[0]
         v.currentTime = nextRange[0]
       } else {
         v.pause()
       }
     }
+  }
+
+  const onSeeked = () => {
+    // seek 完成, 解锁 (允许 ontimeupdate 再次触发 seek)
+    seekingRef.current = false
   }
 
   const togglePlay = () => {
@@ -332,6 +351,7 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
           className="w-full max-h-[300px] object-contain"
           onLoadedMetadata={onLoadedMetadata}
           onTimeUpdate={onTimeUpdate}
+          onSeeked={onSeeked}
           onPlay={() => setPlaying(true)}
           onPause={() => setPlaying(false)}
           onEnded={() => setPlaying(false)}
