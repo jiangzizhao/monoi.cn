@@ -14,7 +14,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     setTimeout(() => setToasts(p => p.filter(t => t.id !== n)), 2200)
   }, [])
   const Icon = { success: Check, error: X, info: Info }
-  const style = { success:'border-green-800/50 text-green-400', error:'border-red-800/50 text-red-400', info:'border-indigo-800/50 text-indigo-400' }
+  const style = { success:'border-green-800/50 text-green-400', error:'border-red-800/50 text-red-400', info:'border-[var(--border)] text-[var(--text-2)]' }
   return (
     <Ctx.Provider value={{ toast }}>
       {children}

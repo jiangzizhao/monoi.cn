@@ -71,7 +71,7 @@
     letter-spacing: inherit;
   }
 
-  ::selection { background: var(--indigo-dim); color: var(--indigo-2); }
+  ::selection { background: var(--bg-hover); color: var(--text); }
 
   ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
@@ -93,7 +93,7 @@
 .sheet-enter { animation: sheetUp 0.28s cubic-bezier(0.32, 0.72, 0.0, 1) both; }
 
 @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
-.cursor-blink { display: inline-block; width: 2px; height: 1em; background: var(--indigo-2); border-radius: 1px; margin-left: 2px; vertical-align: text-bottom; animation: blink 1s step-end infinite; }
+.cursor-blink { display: inline-block; width: 2px; height: 1em; background: var(--text); border-radius: 1px; margin-left: 2px; vertical-align: text-bottom; animation: blink 1s step-end infinite; }
 
 /* iOS 毛玻璃工具类 */
 .glass {

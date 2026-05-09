@@ -17,7 +17,7 @@ export function StreamText({ text, className = '', streaming = false }: StreamTe
     <div className={['whitespace-pre-wrap text-sm leading-relaxed', className].join(' ')}>
       {text}
       {streaming && (
-        <span className="inline-block w-0.5 h-4 bg-blue-400 animate-pulse ml-0.5 align-text-bottom" />
+        <span className="inline-block w-0.5 h-4 bg-[var(--text)] animate-pulse ml-0.5 align-text-bottom" />
       )}
       <div ref={endRef} />
     </div>

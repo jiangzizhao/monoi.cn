@@ -25,16 +25,16 @@ export function ChoiceButtons({ question, options, chosen, onChoose }: Props) {
                 'flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border text-sm transition-all duration-150',
                 vertical ? 'w-full' : '',
                 isChosen
-                  ? 'bg-indigo-600 border-indigo-500 text-white shadow-sm shadow-indigo-900/40'
+                  ? 'bg-[var(--text)] border-[var(--text)] text-[var(--bg)]'
                   : isDisabled
                   ? 'bg-transparent border-[var(--border-subtle)] text-[var(--text-3)] cursor-not-allowed opacity-40'
-                  : 'bg-[var(--bg-card)] border-[var(--border)] text-[var(--text)] hover:border-indigo-500/60 hover:bg-[var(--bg-hover)] hover:scale-[1.02] cursor-pointer',
+                  : 'bg-[var(--bg-card)] border-[var(--border)] text-[var(--text)] hover:border-[var(--text-3)] hover:bg-[var(--bg-hover)] cursor-pointer',
               ].join(' ')}
             >
               {opt.icon && <span className="text-base flex-shrink-0">{opt.icon}</span>}
               <div className="text-left">
                 <div className="font-medium leading-tight">{opt.label}</div>
-                {opt.description && <div className={`text-xs mt-0.5 ${isChosen ? 'text-indigo-200' : 'text-[var(--text-3)]'}`}>{opt.description}</div>}
+                {opt.description && <div className={`text-xs mt-0.5 ${isChosen ? 'text-[var(--bg)] opacity-70' : 'text-[var(--text-3)]'}`}>{opt.description}</div>}
               </div>
             </button>
           )

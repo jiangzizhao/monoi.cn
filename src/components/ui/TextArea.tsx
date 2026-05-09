@@ -26,7 +26,7 @@ export function TextArea({ label, showCount, autoResize = true, className = '', 
         className={[
           'w-full rounded-xl bg-[var(--bg-elevated)] border border-[var(--border)] px-4 py-3',
           'text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)]',
-          'focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100',
+          'focus:outline-none focus:border-[var(--text-3)]',
           'resize-none transition-all duration-200',
           className,
         ].join(' ')}

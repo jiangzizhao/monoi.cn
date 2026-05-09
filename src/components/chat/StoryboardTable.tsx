@@ -37,7 +37,7 @@ export function StoryboardTable({ data, onMultiPlatform }: { data: StoryboardRow
                 <td className="px-3 py-2.5 font-mono text-[var(--text-3)] whitespace-nowrap">{r.time}</td>
                 <td className="px-3 py-2.5">
                   <select value={r.visual} onChange={e => setVisual(i, e.target.value)}
-                    className="bg-[var(--bg-input)] border border-[var(--border)] rounded-lg px-2 py-1 text-[var(--text)] text-xs cursor-pointer focus:outline-none focus:border-indigo-500/60">
+                    className="bg-[var(--bg-input)] border border-[var(--border)] rounded-lg px-2 py-1 text-[var(--text)] text-xs cursor-pointer focus:outline-none focus:border-[var(--text-3)]">
                     {VISUAL_OPTS.map(o => <option key={o} value={o}>{o}</option>)}
                   </select>
                 </td>
@@ -60,7 +60,7 @@ export function StoryboardTable({ data, onMultiPlatform }: { data: StoryboardRow
           <FileText size={12}/> 导出文档
         </button>
         {onMultiPlatform && (
-          <button onClick={onMultiPlatform} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs text-indigo-300 hover:text-indigo-200 hover:bg-indigo-950/40 border border-indigo-800/40 hover:border-indigo-500/50 transition-all cursor-pointer">
+          <button onClick={onMultiPlatform} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs text-[var(--text-2)] hover:text-[var(--text)] hover:bg-[var(--bg-hover)] border border-[var(--border)] hover:border-[var(--text-3)] transition-all cursor-pointer">
             <Smartphone size={12}/> 生成多平台文案
           </button>
         )}

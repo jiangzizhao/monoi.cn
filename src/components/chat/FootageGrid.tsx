@@ -8,11 +8,11 @@ import type { FootageSentenceItem, VideoAsset } from '../../types'
 function AssetThumb({ asset, selected, onSelect }: { asset: VideoAsset; selected: boolean; onSelect: () => void }) {
   return (
     <div onClick={onSelect}
-      className={`relative aspect-video rounded-lg overflow-hidden cursor-pointer border-2 transition-all duration-150 group ${selected ? 'border-indigo-500' : 'border-transparent hover:border-indigo-500/40'}`}>
+      className={`relative aspect-video rounded-lg overflow-hidden cursor-pointer border-2 transition-all duration-150 group ${selected ? 'border-[var(--text)]' : 'border-transparent hover:border-[var(--text-3)]'}`}>
       <img src={asset.thumbnail} alt="" className="w-full h-full object-cover"/>
-      {selected && <div className="absolute inset-0 bg-indigo-600/20 flex items-center justify-center"><Check size={20} className="text-white drop-shadow"/></div>}
+      {selected && <div className="absolute inset-0 bg-[var(--text)]/20 flex items-center justify-center"><Check size={20} className="text-white drop-shadow"/></div>}
       <div className="absolute top-1 left-1">
-        <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium text-white ${asset.source === 'pexels' ? 'bg-green-700/80' : 'bg-blue-700/80'}`}>
+        <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium text-white ${asset.source === 'pexels' ? 'bg-black/60' : 'bg-black/40'}`}>
           {asset.source === 'pexels' ? 'P' : 'Px'}
         </span>
       </div>
@@ -58,10 +58,10 @@ function SentenceRow({ item, index, selected, onSelect, onRefresh }: {
         <div className="px-3.5 pb-2.5 flex gap-2" onClick={e => e.stopPropagation()}>
           <input value={kw} onChange={e => setKw(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') { onRefresh(kw); setEditing(false) } }}
-            className="flex-1 bg-[var(--bg-input)] border border-[var(--border)] rounded-lg px-3 py-1.5 text-xs text-[var(--text)] focus:outline-none focus:border-indigo-500/60 transition-colors"
+            className="flex-1 bg-[var(--bg-input)] border border-[var(--border)] rounded-lg px-3 py-1.5 text-xs text-[var(--text)] focus:outline-none focus:border-[var(--text-3)] transition-colors"
             placeholder="修改关键词后回车搜索"/>
           <button onClick={() => { onRefresh(kw); setEditing(false) }}
-            className="px-2.5 py-1.5 rounded-lg bg-indigo-600 text-white text-xs cursor-pointer hover:bg-indigo-500 transition-colors">搜索</button>
+            className="px-2.5 py-1.5 rounded-lg bg-[var(--text)] text-[var(--bg)] text-xs cursor-pointer hover:opacity-80 transition-opacity">搜索</button>
         </div>
       )}
 
@@ -120,9 +120,9 @@ export function FootageGrid({ data, onUpdate }: {
           onRefresh={kw => refresh(i, kw)}/>
       ))}
       {selCount > 0 && (
-        <div className="flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-indigo-950/30 border border-indigo-800/30">
-          <span className="text-xs text-indigo-300">已选 {selCount} / {data.length} 个素材</span>
-          <button onClick={exportList} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-indigo-600 text-white text-xs cursor-pointer hover:bg-indigo-500 transition-colors">
+        <div className="flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-[var(--bg-hover)] border border-[var(--border)]">
+          <span className="text-xs text-[var(--text-2)]">已选 {selCount} / {data.length} 个素材</span>
+          <button onClick={exportList} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[var(--text)] text-[var(--bg)] text-xs cursor-pointer hover:opacity-80 transition-opacity">
             <Download size={12}/> 导出清单
           </button>
         </div>

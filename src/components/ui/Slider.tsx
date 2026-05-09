@@ -28,7 +28,7 @@ export function Slider({ label, min, max, value, onChange, step = 1, unit = '' }
         step={step}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full accent-indigo-500 cursor-pointer h-1.5 rounded-full"
+        className="w-full accent-current cursor-pointer h-1.5 rounded-full"
       />
       <div className="flex justify-between text-xs text-[var(--text-muted)]">
         <span>{min}{unit}</span>

@@ -433,9 +433,9 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
             }}
           />
         ))}
-        {/* 播放进度指示器 (蓝色 cursor) */}
+        {/* 播放进度指示器 (cursor) */}
         <div
-          className="absolute top-0 bottom-0 w-0.5 bg-sky-500 pointer-events-none"
+          className="absolute top-0 bottom-0 w-0.5 bg-[var(--text)] pointer-events-none"
           style={{ left: `${(currentTime / data.duration) * 100}%` }}
         />
       </div>
