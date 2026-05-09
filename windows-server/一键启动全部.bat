@@ -1,7 +1,25 @@
 @echo off
 chcp 65001 >nul
 echo ===================================
-echo monoi 一键启动 (3 个服务)
+echo monoi 一键启动 (先同步代码再启动 3 个服务)
+echo ===================================
+echo.
+
+echo [同步 1/4] main.py
+python -c "import urllib.request; urllib.request.urlretrieve('https://raw.githubusercontent.com/jiangzizhao/monoi.cn/main/windows-server/main.py', r'D:\monoi-server\main.py'); print('  ok')" 2>nul || echo   失败 (网络问题, 用本地老版本)
+
+echo [同步 2/4] oss_helper.py (main 目录)
+python -c "import urllib.request; urllib.request.urlretrieve('https://raw.githubusercontent.com/jiangzizhao/monoi.cn/main/windows-server/oss_helper.py', r'D:\monoi-server\oss_helper.py'); print('  ok')" 2>nul || echo   失败
+
+echo [同步 3/4] voice-server.py
+python -c "import urllib.request; urllib.request.urlretrieve('https://raw.githubusercontent.com/jiangzizhao/monoi.cn/main/windows-server/voice-server.py', r'D:\monoi-server\models\cosyvoice\voice-server.py'); print('  ok')" 2>nul || echo   失败
+
+echo [同步 4/4] oss_helper.py (cosyvoice 目录)
+python -c "import urllib.request; urllib.request.urlretrieve('https://raw.githubusercontent.com/jiangzizhao/monoi.cn/main/windows-server/oss_helper.py', r'D:\monoi-server\models\cosyvoice\oss_helper.py'); print('  ok')" 2>nul || echo   失败
+
+echo.
+echo ===================================
+echo 启动服务...
 echo ===================================
 echo.
 
