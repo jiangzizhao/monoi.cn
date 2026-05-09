@@ -269,11 +269,6 @@ export function NarrationVideoForm({ onSubmit, onClose }: Props) {
                   )}
                 </div>
               </div>
-              {videoDuration && (
-                <p className="text-[11px] text-[var(--text-3)]">
-                  视频 {(videoDuration / 60).toFixed(1)} 分钟 · Whisper 转录大约 {estimatedTranscribeSec}s
-                </p>
-              )}
             </div>
           )}
 
