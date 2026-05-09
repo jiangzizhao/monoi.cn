@@ -209,27 +209,11 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
   const onTimeUpdate = () => {
     const v = videoRef.current
     if (!v) return
-    const t = v.currentTime
-    setCurrentTime(t)
-    if (v.paused) return
-    if (seekingRef.current) return
-    const ranges = keepRangesRef.current
-    if (ranges.length === 0) return
-    const inKeep = ranges.some(([s, e]) => t >= s - 0.01 && t <= e + 0.01)
-    if (!inKeep) {
-      const nextRange = ranges.find(([s]) => s > t)
-      if (nextRange) {
-        // 同一位置短时间内已经 seek 过, 浏览器还没跳完, 等等
-        if (Math.abs(lastJumpToRef.current - nextRange[0]) < 0.05) return
-        seekingRef.current = true
-        lastJumpToRef.current = nextRange[0]
-        v.currentTime = nextRange[0]
-        // 兜底: 600ms 后强制清 seekingRef (防 onSeeked 在某些浏览器不触发)
-        setTimeout(() => { seekingRef.current = false }, 600)
-      } else {
-        v.pause()
-      }
-    }
+    setCurrentTime(v.currentTime)
+    // 不再自动 seek 跳过删除段 — 视频大文件 seek 慢 + wavesurfer 双向绑定
+    // 容易出 bug (重复跳第一句 / 卡回去 / 死循环).
+    // 改用 muted + 红色蒙层: 用户听不到 + 看得到删除段.
+    // 真正的剪辑效果以"完成导出"后的新视频为准.
   }
 
   const onSeeked = () => {
