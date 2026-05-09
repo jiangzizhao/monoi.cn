@@ -126,14 +126,26 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
     return keepRanges.reduce((sum, [s, e]) => sum + (e - s), 0)
   }, [keepRanges])
 
+  // 当前播放位置是否在删除段 (不在任何 keepRange 内)
+  const isInDeletedRange = useMemo(() => {
+    if (keepRanges.length === 0) return false
+    return !keepRanges.some(([s, e]) => currentTime >= s - 0.01 && currentTime <= e + 0.01)
+  }, [currentTime, keepRanges])
+
   // 用 ref 持有最新的 keepRanges, 给 video.ontimeupdate 读
   const keepRangesRef = useRef<[number, number][]>([])
   useEffect(() => { keepRangesRef.current = keepRanges }, [keepRanges])
 
   // seek 进行中标志: 防止 video 大文件 seek 慢, ontimeupdate 多次触发导致重复 seek 死循环
   const seekingRef = useRef(false)
-  // 上次跳过到的位置, 防止往同一位置反复 seek
   const lastJumpToRef = useRef<number>(-1)
+
+  // 删除段静音 (立刻生效, 不依赖 seek 时机)
+  useEffect(() => {
+    const v = videoRef.current
+    if (!v) return
+    v.muted = isInDeletedRange
+  }, [isInDeletedRange])
 
   // 视频元数据加载完后, 初始化 wavesurfer 绑定到 video 元素
   // (wavesurfer 会从视频提取音轨显示波形, 进度自动跟视频同步)
@@ -200,7 +212,6 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
     const t = v.currentTime
     setCurrentTime(t)
     if (v.paused) return
-    // seek 进行中, 别再发新的 seek (避免大视频 seek 慢导致重复跳同一位置死循环)
     if (seekingRef.current) return
     const ranges = keepRangesRef.current
     if (ranges.length === 0) return
@@ -208,14 +219,13 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
     if (!inKeep) {
       const nextRange = ranges.find(([s]) => s > t)
       if (nextRange) {
-        // 防止 seek 后浏览器没真跳到, ontimeupdate 又来了再跳同一位置
-        if (Math.abs(lastJumpToRef.current - nextRange[0]) < 0.05) {
-          // 短时间内已经跳过这个位置了, 浏览器还没 seek 完, 暂时让它 play
-          return
-        }
+        // 同一位置短时间内已经 seek 过, 浏览器还没跳完, 等等
+        if (Math.abs(lastJumpToRef.current - nextRange[0]) < 0.05) return
         seekingRef.current = true
         lastJumpToRef.current = nextRange[0]
         v.currentTime = nextRange[0]
+        // 兜底: 600ms 后强制清 seekingRef (防 onSeeked 在某些浏览器不触发)
+        setTimeout(() => { seekingRef.current = false }, 600)
       } else {
         v.pause()
       }
@@ -223,7 +233,6 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
   }
 
   const onSeeked = () => {
-    // seek 完成, 解锁 (允许 ontimeupdate 再次触发 seek)
     seekingRef.current = false
   }
 
@@ -371,6 +380,14 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
         {!ready && (
           <div className="absolute inset-0 flex items-center justify-center text-white/70 text-xs">
             <Loader2 size={20} className="animate-spin"/>
+          </div>
+        )}
+        {/* 当前在删除段时的红色蒙层 + 标识 (跟 muted 状态联动) */}
+        {isInDeletedRange && playing && (
+          <div className="absolute inset-0 bg-red-500/35 flex items-center justify-center pointer-events-none">
+            <span className="text-white text-xs font-medium bg-black/60 px-3 py-1 rounded-full">
+              已删除段 (跳过中)
+            </span>
           </div>
         )}
       </div>
