@@ -1687,20 +1687,18 @@ def finalize_narration_proxy(req: FinalizeNarrationRequest):
         raise HTTPException(503, "voice-server (9001) 未启动")
 
 
+NARRATION_OUTPUT_DIR = r"D:\monoi-server\models\cosyvoice\narration_outputs"
+
+
 @app.get("/api/voice/narration-audio/{name}")
 def proxy_narration_audio(name: str):
-    """代理清洗后的录音文件"""
-    import requests as _req
-    from fastapi.responses import StreamingResponse
-
+    """剪辑后的录音文件 (直接读 voice-server 输出目录, FileResponse 自动支持 HTTP Range)"""
+    from fastapi.responses import FileResponse
     safe = os.path.basename(name)
-    try:
-        resp = _req.get(f"{VOICE_SERVER_URL}/narration/{safe}", stream=True, timeout=30)
-        if resp.status_code != 200:
-            raise HTTPException(resp.status_code, "音频未找到")
-        return StreamingResponse(resp.iter_content(8192), media_type="audio/wav")
-    except _req.exceptions.ConnectionError:
-        raise HTTPException(503, "voice-server (9001) 未启动")
+    file_path = os.path.join(NARRATION_OUTPUT_DIR, safe)
+    if not os.path.exists(file_path):
+        raise HTTPException(404, "音频未找到")
+    return FileResponse(file_path, media_type="audio/wav")
 
 
 # ============== 口播视频剪辑代理 (转发到 voice-server) ==============
@@ -1753,18 +1751,14 @@ def finalize_narration_video_proxy(req: FinalizeNarrationVideoRequest):
 
 @app.get("/api/voice/narration-video/{name}")
 def proxy_narration_video(name: str):
-    """代理剪辑后的视频文件"""
-    import requests as _req
-    from fastapi.responses import StreamingResponse
-
+    """剪辑后的视频文件 (直接读 voice-server 输出目录, FileResponse 自动支持 HTTP Range,
+    video tag 才能正常 seek + 流式播放)"""
+    from fastapi.responses import FileResponse
     safe = os.path.basename(name)
-    try:
-        resp = _req.get(f"{VOICE_SERVER_URL}/narration-video/{safe}", stream=True, timeout=60)
-        if resp.status_code != 200:
-            raise HTTPException(resp.status_code, "视频未找到")
-        return StreamingResponse(resp.iter_content(8192), media_type="video/mp4")
-    except _req.exceptions.ConnectionError:
-        raise HTTPException(503, "voice-server (9001) 未启动")
+    file_path = os.path.join(NARRATION_OUTPUT_DIR, safe)
+    if not os.path.exists(file_path):
+        raise HTTPException(404, "视频未找到")
+    return FileResponse(file_path, media_type="video/mp4")
 
 
 @app.get("/api/voice/audio-index/{name}")
