@@ -131,9 +131,8 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
   const keepRangesRef = useRef<[number, number][]>([])
   useEffect(() => { keepRangesRef.current = keepRanges }, [keepRanges])
 
-  // seek 进行中标志: 防止 video 大文件 seek 慢, ontimeupdate 多次触发导致重复 seek 死循环
+  // seek 进行中标志 (留着但暂未使用,自动跳过逻辑被砍了, 只在 onSeeked 里清)
   const seekingRef = useRef(false)
-  const lastJumpToRef = useRef<number>(-1)
 
   // 删除段静音 (立刻生效, 不依赖 seek 时机)
   useEffect(() => {
