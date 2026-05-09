@@ -1,5 +1,45 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Play, Loader2, Check, X, Scissors, Undo2 } from 'lucide-react'
+
+// 提取成独立 memo 组件: 长视频 (8 分钟+) 1500-3000 词时, currentTime 每秒
+// 变化 4-10 次, 不 memo 会让所有词 span 重渲染. memo 后只有 isDel/isCurrent
+// 变化的两个词重渲染, 性能从 O(N) 降到 O(2)
+interface WordSpanProps {
+  wKey: string
+  word: string
+  start: number
+  end: number
+  isDel: boolean
+  isCurrent: boolean
+  onToggle: (key: string) => void
+  onSeek: (start: number) => void
+}
+
+const WordSpan = memo(function WordSpan({
+  wKey, word, start, end, isDel, isCurrent, onToggle, onSeek,
+}: WordSpanProps) {
+  return (
+    <span
+      data-word-key={wKey}
+      onClick={() => {
+        const sel = window.getSelection()
+        if (sel && !sel.isCollapsed && sel.toString().length > 0) return
+        onToggle(wKey)
+      }}
+      onDoubleClick={() => onSeek(start)}
+      title={`${start.toFixed(2)}s - ${end.toFixed(2)}s`}
+      className={`cursor-pointer px-0.5 rounded transition-colors ${
+        isDel
+          ? 'line-through text-[var(--text-3)] opacity-50'
+          : isCurrent
+            ? 'bg-yellow-400/40 text-[var(--text)]'
+            : 'text-[var(--text)] hover:bg-[var(--bg-card)]'
+      }`}
+    >
+      {word}
+    </span>
+  )
+})
 
 interface Word {
   start: number
@@ -176,20 +216,31 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
     else v.pause()
   }
 
-  const toggleWord = (key: string) => {
+  // useCallback: 让 WordSpan memo 生效 (回调引用稳定才不会触发重渲染)
+  const toggleWord = useCallback((key: string) => {
     setDeletedKeys(prev => {
       const next = new Set(prev)
       if (next.has(key)) next.delete(key)
       else next.add(key)
       return next
     })
-  }
+  }, [])
 
-  const seekToWord = (t: WordToken) => {
+  const seekToWordTime = useCallback((start: number) => {
     const v = videoRef.current
     if (!v || !ready) return
-    v.currentTime = t.start
-  }
+    v.currentTime = start
+  }, [ready])
+
+  // 当前播放词 key (单独 memo, currentTime 变化只重算这个, 不重渲染所有词)
+  const currentWordKey = useMemo(() => {
+    for (const t of allWords) {
+      if (currentTime >= t.start - 0.01 && currentTime <= t.end + 0.01) {
+        return wordKey(t)
+      }
+    }
+    return null
+  }, [allWords, currentTime])
 
   // 拖选 → 删除选中范围内的词
   const deleteSelected = () => {
@@ -381,36 +432,25 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
         </div>
       </div>
 
-      {/* 转录字幕 */}
+      {/* 转录字幕 (WordSpan 用 React.memo 优化, 长视频 1500-3000 词不卡) */}
       <div ref={textContainerRef} tabIndex={0} className="text-sm leading-loose max-h-40 overflow-y-auto bg-[var(--bg-hover)] rounded-[12px] p-3 outline-none focus:ring-1 focus:ring-[var(--text-3)]">
         {allWords.length === 0 ? (
           <div className="text-[var(--text-3)]">没有转录到内容</div>
         ) : (
           allWords.map((t) => {
             const key = wordKey(t)
-            const isDel = deletedKeys.has(key)
-            const isCurrent = currentTime >= t.start && currentTime <= t.end
             return (
-              <span
+              <WordSpan
                 key={key}
-                data-word-key={key}
-                onClick={() => {
-                  const sel = window.getSelection()
-                  if (sel && !sel.isCollapsed && sel.toString().length > 0) return
-                  toggleWord(key)
-                }}
-                onDoubleClick={() => seekToWord(t)}
-                title={`${t.start.toFixed(2)}s - ${t.end.toFixed(2)}s`}
-                className={`cursor-pointer px-0.5 rounded transition-colors ${
-                  isDel
-                    ? 'line-through text-[var(--text-3)] opacity-50'
-                    : isCurrent
-                      ? 'bg-yellow-400/40 text-[var(--text)]'
-                      : 'text-[var(--text)] hover:bg-[var(--bg-card)]'
-                }`}
-              >
-                {t.word}
-              </span>
+                wKey={key}
+                word={t.word}
+                start={t.start}
+                end={t.end}
+                isDel={deletedKeys.has(key)}
+                isCurrent={key === currentWordKey}
+                onToggle={toggleWord}
+                onSeek={seekToWordTime}
+              />
             )
           })
         )}

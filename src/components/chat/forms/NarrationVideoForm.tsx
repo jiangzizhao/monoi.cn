@@ -14,6 +14,7 @@ const ACCEPTED_FORMATS = 'video/mp4,video/quicktime,video/x-msvideo,video/x-matr
 
 export function NarrationVideoForm({ onSubmit, onClose }: Props) {
   const [videoFile, setVideoFile] = useState<File | null>(null)
+  const [videoDuration, setVideoDuration] = useState<number | null>(null)
   const [phase, setPhase] = useState<Phase>('idle')
   const [progress, setProgress] = useState(0)
   const [transcribeSec, setTranscribeSec] = useState(0)
@@ -22,6 +23,23 @@ export function NarrationVideoForm({ onSubmit, onClose }: Props) {
   const inputRef = useRef<HTMLInputElement>(null)
 
   const directBase = import.meta.env.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'
+
+  // 选文件后, 用临时 video element 探测时长 (给转录进度估计用)
+  useEffect(() => {
+    if (!videoFile) {
+      setVideoDuration(null)
+      return
+    }
+    const url = URL.createObjectURL(videoFile)
+    const v = document.createElement('video')
+    v.preload = 'metadata'
+    v.onloadedmetadata = () => {
+      setVideoDuration(v.duration)
+      URL.revokeObjectURL(url)
+    }
+    v.onerror = () => { URL.revokeObjectURL(url) }
+    v.src = url
+  }, [videoFile])
 
   // transcribing 阶段计时器
   useEffect(() => {
@@ -35,6 +53,9 @@ export function NarrationVideoForm({ onSubmit, onClose }: Props) {
     }, 1000)
     return () => clearInterval(timer)
   }, [phase])
+
+  // Whisper 估算: 5060 Ti small 模型 RTF 约 0.4
+  const estimatedTranscribeSec = videoDuration ? Math.round(videoDuration * 0.4) : null
 
   const handleUpload = () => {
     if (!videoFile) {
@@ -174,12 +195,29 @@ export function NarrationVideoForm({ onSubmit, onClose }: Props) {
           {phase === 'transcribing' && (
             <div className="flex flex-col items-center justify-center gap-4 py-10">
               <Loader2 size={36} className="animate-spin text-[var(--text-2)]"/>
-              <div className="text-sm text-[var(--text)]">正在转录... {transcribeSec}s</div>
+              <div className="text-sm text-[var(--text)]">
+                正在转录... {transcribeSec}s
+                {estimatedTranscribeSec && (
+                  <span className="text-[var(--text-3)]"> / 约 {estimatedTranscribeSec}s</span>
+                )}
+              </div>
               <div className="w-full max-w-xs">
                 <div className="h-1.5 rounded-full bg-[var(--bg-hover)] overflow-hidden">
-                  <div className="h-full bg-[var(--text)] animate-pulse" style={{ width: '100%' }}/>
+                  {estimatedTranscribeSec ? (
+                    <div
+                      className="h-full bg-[var(--text)] transition-all"
+                      style={{ width: `${Math.min(100, Math.round((transcribeSec / estimatedTranscribeSec) * 100))}%` }}
+                    />
+                  ) : (
+                    <div className="h-full bg-[var(--text)] animate-pulse" style={{ width: '100%' }}/>
+                  )}
                 </div>
               </div>
+              {videoDuration && (
+                <p className="text-[11px] text-[var(--text-3)]">
+                  视频 {(videoDuration / 60).toFixed(1)} 分钟 · Whisper 转录大约 {estimatedTranscribeSec}s
+                </p>
+              )}
             </div>
           )}
 
