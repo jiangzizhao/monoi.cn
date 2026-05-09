@@ -55,8 +55,9 @@ interface Segment {
 }
 
 interface CleanResponse {
-  source_file: string
-  video_url_full: string  // 含完整域名 (apiBase + video_url_path)
+  source_file?: string         // 旧 NATAPP 模式: 后端文件名
+  source_oss_key?: string      // 新 OSS 模式: clean 阶段保存到 OSS 的 key
+  video_url_full: string       // 含完整域名 (NATAPP 路径) 或签名 GET URL (OSS)
   duration: number
   transcription: string
   segments: Segment[]
@@ -332,20 +333,22 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
     setFinalizing(true)
     setError('')
     try {
+      // OSS 模式优先, 否则退回旧 NATAPP 模式
+      const body = data.source_oss_key
+        ? { source_oss_key: data.source_oss_key, keep_ranges: keepRanges }
+        : { source_file: data.source_file, keep_ranges: keepRanges }
       const res = await fetch(apiBase + '/api/voice/finalize-narration-video', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          source_file: data.source_file,
-          keep_ranges: keepRanges,
-        }),
+        body: JSON.stringify(body),
       })
       const result = await res.json()
       if (!res.ok || !result.success) {
         setError(result.detail || result.error || '导出失败')
         return
       }
-      const finalUrl = apiBase + result.video_url_path
+      // OSS 模式: 后端返回签名 GET URL (video_url); NATAPP 模式: 拼 apiBase + video_url_path
+      const finalUrl = result.video_url || (apiBase + result.video_url_path)
       const finalText = allWords.filter(t => !deletedKeys.has(wordKey(t))).map(t => t.word).join('')
       onDone(finalUrl, result.duration, finalText)
     } catch (e: any) {

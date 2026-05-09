@@ -1701,14 +1701,67 @@ def proxy_narration_audio(name: str):
     return FileResponse(file_path, media_type="audio/wav")
 
 
+# ============== OSS 直传签名 (浏览器 → OSS, 绕开 NATAPP) ==============
+
+
+class OssSignUploadRequest(BaseModel):
+    filename: str = "video.mp4"
+    content_type: str = "video/mp4"
+
+
+@app.post("/api/oss/sign-upload")
+def oss_sign_upload(req: OssSignUploadRequest):
+    """生成 OSS PUT 签名 URL. 前端用这个 URL 直接 PUT 文件到 OSS,
+    不再走 NATAPP. 拿到 oss_key 后再调 clean-narration-video."""
+    from oss_helper import oss_make_upload_key, oss_sign_put, oss_is_configured
+    if not oss_is_configured():
+        raise HTTPException(503, "OSS 未配置, 请在 .env 设 OSS_ENDPOINT/OSS_BUCKET/OSS_ACCESS_KEY_ID/OSS_ACCESS_KEY_SECRET")
+    oss_key = oss_make_upload_key(req.filename, prefix="uploads")
+    put_url = oss_sign_put(oss_key, content_type=req.content_type, expires=3600)
+    return {
+        "oss_key": oss_key,
+        "put_url": put_url,
+        "content_type": req.content_type,
+        "expires_in": 3600,
+    }
+
+
 # ============== 口播视频剪辑代理 (转发到 voice-server) ==============
 
 
+class CleanNarrationVideoOssRequest(BaseModel):
+    oss_key: str
+    filename: Optional[str] = "video.mp4"
+
+
 @app.post("/api/voice/clean-narration-video")
-async def clean_narration_video_proxy(file: UploadFile = File(...)):
-    """转发到 voice-server: 上传视频 → 转录 → 返回 video_url + 词级 segments"""
+async def clean_narration_video_proxy(
+    req: Optional[CleanNarrationVideoOssRequest] = None,
+    file: Optional[UploadFile] = File(None),
+):
+    """转发到 voice-server. 支持两种入参:
+    - 新: JSON {oss_key} → voice-server 从 OSS 拉 (绕开 NATAPP, 推荐)
+    - 旧: multipart file → 直接转发 (兼容 OSS 没配的情况)
+    """
     import requests as _req
 
+    # OSS 模式
+    if req and req.oss_key:
+        try:
+            resp = _req.post(
+                f"{VOICE_SERVER_URL}/clean-narration-video-oss",
+                json={"oss_key": req.oss_key, "filename": req.filename or "video.mp4"},
+                timeout=1800,
+            )
+            if resp.status_code != 200:
+                raise HTTPException(resp.status_code, f"voice-server 错误: {resp.text[:200]}")
+            return resp.json()  # 返回里直接含 OSS 签名 GET URL, 前端不用拼路径
+        except _req.exceptions.ConnectionError:
+            raise HTTPException(503, "voice-server (9001) 未启动")
+
+    # 兼容: 老的 multipart 模式
+    if not file:
+        raise HTTPException(400, "需要 oss_key 或 file 二选一")
     raw = await file.read()
     try:
         files = {"file": (file.filename or "video.mp4", raw, file.content_type or "video/mp4")}
@@ -1716,7 +1769,6 @@ async def clean_narration_video_proxy(file: UploadFile = File(...)):
         if resp.status_code != 200:
             raise HTTPException(resp.status_code, f"voice-server 错误: {resp.text[:200]}")
         result = resp.json()
-        # 改写视频路径为 main.py 代理路径 (让前端能通过 NATAPP 访问)
         if result.get("source_file"):
             result["video_url_path"] = f"/api/voice/narration-video/{result['source_file']}"
         return result
@@ -1725,15 +1777,27 @@ async def clean_narration_video_proxy(file: UploadFile = File(...)):
 
 
 class FinalizeNarrationVideoRequest(BaseModel):
-    source_file: str
+    source_file: Optional[str] = None       # 旧: 本地文件名
+    source_oss_key: Optional[str] = None    # 新: OSS 上 clean 阶段保留的源 key
     keep_ranges: list[list[float]]
 
 
 @app.post("/api/voice/finalize-narration-video")
 def finalize_narration_video_proxy(req: FinalizeNarrationVideoRequest):
-    """转发到 voice-server: 接 keep_ranges → 剪视频"""
+    """转发到 voice-server: 接 keep_ranges → 剪视频. OSS 模式下输出也存 OSS, 直接返签名 URL."""
     import requests as _req
     try:
+        # OSS 模式
+        if req.source_oss_key:
+            resp = _req.post(
+                f"{VOICE_SERVER_URL}/finalize-narration-video-oss",
+                json={"source_oss_key": req.source_oss_key, "keep_ranges": req.keep_ranges},
+                timeout=1800,
+            )
+            if resp.status_code != 200:
+                raise HTTPException(resp.status_code, f"voice-server 错误: {resp.text[:200]}")
+            return resp.json()
+        # 旧的本地模式
         resp = _req.post(
             f"{VOICE_SERVER_URL}/finalize-narration-video",
             json={"source_file": req.source_file, "keep_ranges": req.keep_ranges},

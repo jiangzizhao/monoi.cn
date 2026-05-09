@@ -57,7 +57,7 @@ export function NarrationVideoForm({ onSubmit, onClose }: Props) {
   // Whisper 估算: 5060 Ti small 模型 RTF 约 0.4
   const estimatedTranscribeSec = videoDuration ? Math.round(videoDuration * 0.4) : null
 
-  const handleUpload = () => {
+  const handleUpload = async () => {
     if (!videoFile) {
       setError('请选择视频文件')
       return
@@ -66,28 +66,90 @@ export function NarrationVideoForm({ onSubmit, onClose }: Props) {
     setError('')
     setProgress(0)
 
+    try {
+      // 1. 找后端要 OSS PUT 签名 URL
+      const signRes = await fetch(directBase + '/api/oss/sign-upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          filename: videoFile.name,
+          content_type: videoFile.type || 'video/mp4',
+        }),
+      })
+      if (!signRes.ok) {
+        // OSS 没配 → 退回旧的走 NATAPP 上传
+        if (signRes.status === 503) {
+          uploadViaNatapp()
+          return
+        }
+        const err = await signRes.text()
+        throw new Error(`签名失败: ${err.slice(0, 200)}`)
+      }
+      const { put_url, oss_key, content_type } = await signRes.json()
+
+      // 2. 浏览器直传 OSS (XHR 才能监听上传进度)
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest()
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            setProgress(Math.round((e.loaded / e.total) * 100))
+          }
+        }
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            setProgress(100)
+            resolve()
+          } else {
+            reject(new Error(`OSS 上传失败 (${xhr.status}): ${xhr.responseText.slice(0, 200)}`))
+          }
+        }
+        xhr.onerror = () => reject(new Error('OSS 网络错误'))
+        xhr.ontimeout = () => reject(new Error('OSS 上传超时'))
+        xhr.timeout = 1200_000
+        xhr.open('PUT', put_url)
+        xhr.setRequestHeader('Content-Type', content_type)
+        xhr.send(videoFile)
+      })
+
+      // 3. 上传完, 通知后端开始处理 (此时 NATAPP 只传一个 oss_key)
+      setPhase('transcribing')
+      const cleanRes = await fetch(directBase + '/api/voice/clean-narration-video', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ oss_key, filename: videoFile.name }),
+      })
+      const data = await cleanRes.json()
+      if (!cleanRes.ok || !data.success) {
+        throw new Error(data.detail || data.error || `处理失败 (HTTP ${cleanRes.status})`)
+      }
+      // OSS 模式: video_url 已经是签名 GET URL, 直接用
+      // 旧模式兼容: 拼 directBase + video_url_path
+      if (!data.video_url_full && data.video_url_path?.startsWith('/')) {
+        data.video_url_full = directBase + data.video_url_path
+      }
+      setCleanResult(data)
+      setPhase('editing')
+    } catch (e: any) {
+      setError(e.message || '上传失败')
+      setPhase('idle')
+    }
+  }
+
+  // 兜底: OSS 没配的环境走老的 NATAPP 上传
+  const uploadViaNatapp = () => {
+    if (!videoFile) return
     const fd = new FormData()
     fd.append('file', videoFile)
-
-    // XMLHttpRequest 才能监听上传进度 (fetch 不支持 upload progress)
     const xhr = new XMLHttpRequest()
     xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) {
-        setProgress(Math.round((e.loaded / e.total) * 100))
-      }
+      if (e.lengthComputable) setProgress(Math.round((e.loaded / e.total) * 100))
     }
-    xhr.upload.onload = () => {
-      // 上传完成, 进入转录阶段 (后端 ffmpeg + Whisper, 无法预知耗时)
-      setProgress(100)
-      setPhase('transcribing')
-    }
+    xhr.upload.onload = () => { setProgress(100); setPhase('transcribing') }
     xhr.onload = () => {
       let data: any
       try { data = JSON.parse(xhr.responseText) } catch { data = { error: xhr.responseText.slice(0, 200) } }
       if (xhr.status >= 200 && xhr.status < 300 && data.success) {
-        if (data.video_url_path && data.video_url_path.startsWith('/')) {
-          data.video_url_full = directBase + data.video_url_path
-        }
+        if (data.video_url_path?.startsWith('/')) data.video_url_full = directBase + data.video_url_path
         setCleanResult(data)
         setPhase('editing')
       } else {
@@ -95,15 +157,9 @@ export function NarrationVideoForm({ onSubmit, onClose }: Props) {
         setPhase('idle')
       }
     }
-    xhr.onerror = () => {
-      setError('网络错误,上传失败')
-      setPhase('idle')
-    }
-    xhr.ontimeout = () => {
-      setError('请求超时')
-      setPhase('idle')
-    }
-    xhr.timeout = 1200_000  // 20 分钟兜底
+    xhr.onerror = () => { setError('网络错误,上传失败'); setPhase('idle') }
+    xhr.ontimeout = () => { setError('请求超时'); setPhase('idle') }
+    xhr.timeout = 1200_000
     xhr.open('POST', directBase + '/api/voice/clean-narration-video')
     xhr.send(fd)
   }

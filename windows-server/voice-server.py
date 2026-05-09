@@ -551,6 +551,201 @@ def get_narration_video(name: str):
     return FileResponse(path, media_type="video/mp4", filename=safe)
 
 
+# ============== 口播视频剪辑 OSS 模式 (浏览器直传 OSS, 绕开 NATAPP) ==============
+
+
+class CleanVideoOssRequest(BaseModel):
+    oss_key: str
+    filename: str = "video.mp4"
+
+
+@app.post("/clean-narration-video-oss")
+def clean_narration_video_oss(req: CleanVideoOssRequest):
+    """OSS 模式: 浏览器已直传到 OSS, 这里从 OSS 拉源视频做转码 + 转录,
+    再把转码后的视频回传 OSS 给前端播放. 流程跟 /clean-narration-video 一样,
+    只是 IO 换成 OSS."""
+    import shutil
+    import subprocess
+    import tempfile
+    from oss_helper import oss_download, oss_upload, oss_sign_get, oss_delete
+
+    job_id = f"narrv_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}"
+    raw_path = os.path.join(tempfile.gettempdir(), f"{job_id}_raw")
+    video_path = os.path.join(NARRATION_OUTPUT_DIR, f"{job_id}_input.mp4")
+    audio_path = os.path.join(NARRATION_OUTPUT_DIR, f"{job_id}_input.wav")
+
+    # 1. 从 OSS 下载原始视频
+    try:
+        oss_download(req.oss_key, raw_path)
+    except Exception as e:
+        raise HTTPException(400, f"OSS 下载失败: {e}")
+
+    # 2. 转 mp4 (h264_nvenc GPU 加速)
+    proc = subprocess.run(
+        ["ffmpeg", "-y", "-i", raw_path,
+         "-c:v", "h264_nvenc", "-preset", "p4", "-cq", "23",
+         "-c:a", "aac", "-pix_fmt", "yuv420p",
+         "-movflags", "+faststart",
+         video_path],
+        capture_output=True, timeout=600,
+    )
+    if proc.returncode != 0:
+        try: os.unlink(raw_path)
+        except: pass
+        oss_delete(req.oss_key)
+        err = proc.stderr.decode("utf-8", errors="ignore")[-300:]
+        raise HTTPException(400, f"视频转换失败: {err}")
+
+    # 3. 提取音频 16kHz mono wav
+    proc = subprocess.run(
+        ["ffmpeg", "-y", "-i", raw_path, "-vn", "-ar", "16000", "-ac", "1", "-f", "wav", audio_path],
+        capture_output=True, timeout=300,
+    )
+    try: os.unlink(raw_path)
+    except: pass
+    if proc.returncode != 0:
+        oss_delete(req.oss_key)
+        err = proc.stderr.decode("utf-8", errors="ignore")[-300:]
+        raise HTTPException(400, f"音频提取失败: {err}")
+
+    info = sf.info(audio_path)
+    orig_dur = info.duration
+
+    # 4. Whisper 转录
+    model = get_whisper()
+    segments_iter, _ = model.transcribe(audio_path, language="zh", beam_size=5, word_timestamps=True)
+    segments = []
+    for s in segments_iter:
+        words = []
+        if s.words:
+            for w in s.words:
+                words.append({"start": w.start, "end": w.end, "word": _to_simplified(w.word)})
+        segments.append({"start": s.start, "end": s.end, "text": _to_simplified(s.text), "words": words})
+    full_text = "".join(s["text"] for s in segments).strip()
+
+    # 5. 检测气口/重复/填充词
+    silences = _ffmpeg_silence_detect(audio_path, noise_db=-25, min_silence=0.4)
+    word_gaps = _detect_word_gaps(segments, min_gap=0.4)
+    repeats = _detect_repeats(segments)
+    fillers = _detect_fillers(segments)
+
+    try: os.unlink(audio_path)
+    except: pass
+
+    # 6. 把转码后的视频回传 OSS (前端播放 + finalize 阶段会用)
+    source_oss_key = f"sources/{job_id}.mp4"
+    try:
+        oss_upload(source_oss_key, video_path, content_type="video/mp4")
+    except Exception as e:
+        oss_delete(req.oss_key)
+        raise HTTPException(500, f"OSS 上传失败: {e}")
+    finally:
+        # 不管成功失败, 本地转码后的文件不需要保留 (finalize 阶段从 OSS 重拉)
+        try: os.unlink(video_path)
+        except: pass
+
+    # 7. 删 OSS 上的原始上传 (短暂中转, 用完即弃)
+    oss_delete(req.oss_key)
+
+    # 8. 给前端签个 GET URL (6 小时有效, 够用户编辑)
+    video_url = oss_sign_get(source_oss_key, expires=6 * 3600)
+
+    return {
+        "success": True,
+        "source_oss_key": source_oss_key,  # finalize 阶段回传这个 key
+        "video_url": video_url,             # 签名 GET URL, 浏览器直接播
+        "video_url_full": video_url,        # 兼容前端 (旧字段名)
+        "duration": orig_dur,
+        "transcription": full_text,
+        "segments": segments,
+        "suggested_removals": {
+            "silences": [{"start": s, "end": e} for s, e in silences],
+            "word_gaps": [{"start": s, "end": e} for s, e in word_gaps],
+            "repeats": [{"start": s, "end": e} for s, e in repeats],
+            "fillers": [{"start": s, "end": e} for s, e in fillers],
+        },
+    }
+
+
+class FinalizeVideoOssRequest(BaseModel):
+    source_oss_key: str
+    keep_ranges: list[list[float]]
+
+
+@app.post("/finalize-narration-video-oss")
+def finalize_narration_video_oss(req: FinalizeVideoOssRequest):
+    """OSS 模式: 从 OSS 拉源视频 (clean 阶段保存的), 切完上传 OSS 输出, 返回签名 GET URL."""
+    import subprocess
+    import tempfile
+    from oss_helper import oss_download, oss_upload, oss_sign_get, oss_delete
+
+    if not req.keep_ranges:
+        raise HTTPException(400, "keep_ranges 不能为空")
+
+    job_id = f"final_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}"
+    src_path = os.path.join(tempfile.gettempdir(), f"{job_id}_src.mp4")
+    out_path = os.path.join(tempfile.gettempdir(), f"{job_id}_out.mp4")
+
+    # 1. 从 OSS 下载源视频
+    try:
+        oss_download(req.source_oss_key, src_path)
+    except Exception as e:
+        raise HTTPException(400, f"OSS 下载失败: {e}")
+
+    # 2. ffmpeg select + aselect 切, h264_nvenc GPU 加速
+    select_expr = "+".join(f"between(t,{s},{e})" for s, e in req.keep_ranges)
+    proc = subprocess.run(
+        ["ffmpeg", "-y", "-i", src_path,
+         "-vf", f"select='{select_expr}',setpts=N/FRAME_RATE/TB",
+         "-af", f"aselect='{select_expr}',asetpts=N/SR/TB",
+         "-c:v", "h264_nvenc", "-preset", "p4", "-cq", "23",
+         "-c:a", "aac", "-pix_fmt", "yuv420p",
+         "-movflags", "+faststart",
+         out_path],
+        capture_output=True, timeout=900,
+    )
+    try: os.unlink(src_path)
+    except: pass
+    if proc.returncode != 0:
+        err = proc.stderr.decode("utf-8", errors="ignore")[-500:]
+        raise HTTPException(500, f"ffmpeg 剪辑失败: {err}")
+
+    # 3. ffprobe 取时长
+    probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+         "-of", "default=noprint_wrappers=1:nokey=1", out_path],
+        capture_output=True, text=True,
+    )
+    new_dur = 0.0
+    if probe.returncode == 0:
+        try: new_dur = float(probe.stdout.strip())
+        except ValueError: pass
+
+    # 4. 输出上传 OSS
+    out_oss_key = f"outputs/{job_id}.mp4"
+    try:
+        oss_upload(out_oss_key, out_path, content_type="video/mp4")
+    except Exception as e:
+        raise HTTPException(500, f"OSS 上传失败: {e}")
+    finally:
+        try: os.unlink(out_path)
+        except: pass
+
+    # 5. 删源 OSS (用完即弃, lifecycle 也会兜底)
+    oss_delete(req.source_oss_key)
+
+    # 6. 签 GET URL 返回
+    video_url = oss_sign_get(out_oss_key, expires=6 * 3600)
+
+    return {
+        "success": True,
+        "output_oss_key": out_oss_key,
+        "video_url": video_url,
+        "video_url_full": video_url,
+        "duration": new_dur,
+    }
+
+
 @app.get("/audio/{name}")
 def get_audio(name: str):
     safe = os.path.basename(name)
