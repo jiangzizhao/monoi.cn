@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Loader2, Upload, X } from 'lucide-react'
 import { NarrationVideoEditor } from '../NarrationVideoEditor'
@@ -8,7 +8,7 @@ interface Props {
   onClose: () => void
 }
 
-type Phase = 'idle' | 'uploading' | 'editing'
+type Phase = 'idle' | 'uploading' | 'transcribing' | 'editing'
 
 const ACCEPTED_FORMATS = 'video/mp4,video/quicktime,video/x-msvideo,video/x-matroska,video/webm,video/*'
 
@@ -16,14 +16,27 @@ export function NarrationVideoForm({ onSubmit, onClose }: Props) {
   const [videoFile, setVideoFile] = useState<File | null>(null)
   const [phase, setPhase] = useState<Phase>('idle')
   const [progress, setProgress] = useState(0)
-  const [statusMsg, setStatusMsg] = useState('')
+  const [transcribeSec, setTranscribeSec] = useState(0)
   const [error, setError] = useState('')
   const [cleanResult, setCleanResult] = useState<any>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const directBase = import.meta.env.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'
 
-  const handleUpload = async () => {
+  // transcribing 阶段计时器
+  useEffect(() => {
+    if (phase !== 'transcribing') {
+      setTranscribeSec(0)
+      return
+    }
+    const start = Date.now()
+    const timer = window.setInterval(() => {
+      setTranscribeSec(Math.round((Date.now() - start) / 1000))
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [phase])
+
+  const handleUpload = () => {
     if (!videoFile) {
       setError('请选择视频文件')
       return
@@ -31,32 +44,47 @@ export function NarrationVideoForm({ onSubmit, onClose }: Props) {
     setPhase('uploading')
     setError('')
     setProgress(0)
-    setStatusMsg('正在上传 + 转录...')
-    try {
-      const fd = new FormData()
-      fd.append('file', videoFile)
-      const res = await fetch(directBase + '/api/voice/clean-narration-video', {
-        method: 'POST',
-        body: fd,
-      })
-      const text = await res.text()
+
+    const fd = new FormData()
+    fd.append('file', videoFile)
+
+    // XMLHttpRequest 才能监听上传进度 (fetch 不支持 upload progress)
+    const xhr = new XMLHttpRequest()
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) {
+        setProgress(Math.round((e.loaded / e.total) * 100))
+      }
+    }
+    xhr.upload.onload = () => {
+      // 上传完成, 进入转录阶段 (后端 ffmpeg + Whisper, 无法预知耗时)
+      setProgress(100)
+      setPhase('transcribing')
+    }
+    xhr.onload = () => {
       let data: any
-      try { data = JSON.parse(text) } catch { data = { error: text.slice(0, 200) } }
-      if (!res.ok || !data.success) {
-        setError(data.detail || data.error || `处理失败 (HTTP ${res.status})`)
+      try { data = JSON.parse(xhr.responseText) } catch { data = { error: xhr.responseText.slice(0, 200) } }
+      if (xhr.status >= 200 && xhr.status < 300 && data.success) {
+        if (data.video_url_path && data.video_url_path.startsWith('/')) {
+          data.video_url_full = directBase + data.video_url_path
+        }
+        setCleanResult(data)
+        setPhase('editing')
+      } else {
+        setError(data.detail || data.error || `处理失败 (HTTP ${xhr.status})`)
         setPhase('idle')
-        return
       }
-      // 把相对路径补成完整 URL 给 video tag 用
-      if (data.video_url_path && data.video_url_path.startsWith('/')) {
-        data.video_url_full = directBase + data.video_url_path
-      }
-      setCleanResult(data)
-      setPhase('editing')
-    } catch (e: any) {
-      setError(e?.message || '网络错误')
+    }
+    xhr.onerror = () => {
+      setError('网络错误,上传失败')
       setPhase('idle')
     }
+    xhr.ontimeout = () => {
+      setError('请求超时')
+      setPhase('idle')
+    }
+    xhr.timeout = 1200_000  // 20 分钟兜底
+    xhr.open('POST', directBase + '/api/voice/clean-narration-video')
+    xhr.send(fd)
   }
 
   const handleDone = (videoUrl: string, duration: number, transcription: string) => {
@@ -74,7 +102,7 @@ export function NarrationVideoForm({ onSubmit, onClose }: Props) {
     setError('')
   }
 
-  const isBusy = phase === 'uploading'
+  const isBusy = phase === 'uploading' || phase === 'transcribing'
   const isEditing = phase === 'editing' && cleanResult
 
   const modal = (
@@ -134,10 +162,22 @@ export function NarrationVideoForm({ onSubmit, onClose }: Props) {
           {phase === 'uploading' && (
             <div className="flex flex-col items-center justify-center gap-4 py-10">
               <Loader2 size={36} className="animate-spin text-[var(--text-2)]"/>
-              <div className="text-sm text-[var(--text)]">{statusMsg}</div>
+              <div className="text-sm text-[var(--text)]">正在上传... {progress}%</div>
               <div className="w-full max-w-xs">
                 <div className="h-1.5 rounded-full bg-[var(--bg-hover)] overflow-hidden">
-                  <div className="h-full bg-[var(--text)] transition-all" style={{ width: `${Math.max(progress, 8)}%` }}/>
+                  <div className="h-full bg-[var(--text)] transition-all" style={{ width: `${Math.max(progress, 2)}%` }}/>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {phase === 'transcribing' && (
+            <div className="flex flex-col items-center justify-center gap-4 py-10">
+              <Loader2 size={36} className="animate-spin text-[var(--text-2)]"/>
+              <div className="text-sm text-[var(--text)]">正在转录... {transcribeSec}s</div>
+              <div className="w-full max-w-xs">
+                <div className="h-1.5 rounded-full bg-[var(--bg-hover)] overflow-hidden">
+                  <div className="h-full bg-[var(--text)] animate-pulse" style={{ width: '100%' }}/>
                 </div>
               </div>
             </div>
