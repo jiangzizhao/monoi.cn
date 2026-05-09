@@ -314,6 +314,11 @@ export function useChat() {
         displayText = `口播视频剪辑完成${dur ? ` · ${dur}` : ''}`
       } catch { /* keep raw */ }
     }
+    if (text.startsWith('__paste_script__')) {
+      const script = text.slice('__paste_script__'.length)
+      const charCount = script.replace(/\s/g, '').length
+      displayText = `我有现成文案 · ${charCount} 字`
+    }
     if (text.startsWith('__dialect__')) {
       const m = text.match(/^__dialect__(\w+)__/)
       const labelMap: Record<string, string> = {
@@ -344,6 +349,13 @@ export function useChat() {
     let rawText = ''
     try {
       const messages = [...conv.messages, userMsg]
+
+      // 用户直接粘贴文案: 跳过 LLM, 直接生成 script_card 进入下游流程
+      if (text.startsWith('__paste_script__')) {
+        const script = text.slice('__paste_script__'.length).trim()
+        store.updateLastAssistantBlocks(convId, [makeScriptCard(script)])
+        return
+      }
 
       // 方言改写：基于上一篇文案，让 AI 改写成方言版本
       if (text.startsWith('__dialect__')) {

@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Loader2, AlertCircle } from 'lucide-react'
+import { useState, useRef } from 'react'
+import { Loader2, AlertCircle, Upload } from 'lucide-react'
 
 const PLATFORMS = ['抖音', '视频号', '小红书', 'B站', 'YouTube', 'Reels']
 const STYLES = ['案例启发型', '避坑指南型', '反常认知型', '共鸣观点型', '问题解决型']
@@ -20,7 +20,7 @@ interface Answers {
 }
 
 interface Props {
-  mode: 'original' | 'rewrite'
+  mode: 'original' | 'rewrite' | 'paste'
   onSubmit: (message: string) => void
   onClose: () => void
 }
@@ -29,6 +29,13 @@ const ORIGINAL_STEPS = ['platform', 'style', 'length', 'industry', 'audience']
 const REWRITE_STEPS = ['url', 'platform', 'style', 'length']
 
 export function CopywritingForm({ mode, onSubmit, onClose }: Props) {
+  if (mode === 'paste') {
+    return <PasteScriptForm onSubmit={onSubmit} onClose={onClose}/>
+  }
+  return <GuidedForm mode={mode} onSubmit={onSubmit} onClose={onClose}/>
+}
+
+function GuidedForm({ mode, onSubmit, onClose }: { mode: 'original' | 'rewrite'; onSubmit: (m: string) => void; onClose: () => void }) {
   const [step, setStep] = useState(0)
   const [answers, setAnswers] = useState<Answers>({})
   const [inputVal, setInputVal] = useState('')
@@ -210,6 +217,100 @@ export function CopywritingForm({ mode, onSubmit, onClose }: Props) {
             </div>
           )}
 
+        </div>
+      </div>
+    </>
+  )
+}
+
+function PasteScriptForm({ onSubmit, onClose }: { onSubmit: (m: string) => void; onClose: () => void }) {
+  const [text, setText] = useState('')
+  const [error, setError] = useState('')
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const charCount = text.replace(/\s/g, '').length
+
+  const handleFile = async (f: File) => {
+    if (f.size > 1024 * 1024) {
+      setError('文件太大 (>1MB), 请粘贴文本')
+      return
+    }
+    try {
+      const content = await f.text()
+      setText(content.trim())
+      setError('')
+    } catch {
+      setError('读取文件失败')
+    }
+  }
+
+  const handleSubmit = () => {
+    const trimmed = text.trim()
+    if (!trimmed) {
+      setError('请粘贴文案或上传 .txt 文件')
+      return
+    }
+    if (trimmed.length < 20) {
+      setError('文案太短 (<20 字), 这能配音吗?')
+      return
+    }
+    onSubmit(`__paste_script__${trimmed}`)
+  }
+
+  return (
+    <>
+      <div className="fixed inset-0 z-10" onClick={onClose}/>
+      <div className="absolute bottom-full left-0 right-0 mb-2 z-20 bg-[var(--bg-card)] border border-[var(--border)] rounded-[18px] shadow-ios-lg overflow-hidden sheet-enter">
+        <div className="px-4 py-2.5 border-b border-[var(--border)] flex items-center justify-between">
+          <span className="text-xs text-[var(--text-3)]">我有文案 · 直接用</span>
+          <span className="text-xs text-[var(--text-3)]">{charCount} 字</span>
+        </div>
+
+        <div className="px-4 pt-3 pb-4 flex flex-col gap-2">
+          <textarea
+            autoFocus
+            value={text}
+            onChange={e => { setText(e.target.value); setError('') }}
+            placeholder="把你写好的口播文案粘贴在这里, 后面接配音/素材/分镜..."
+            rows={6}
+            className={`w-full bg-[var(--bg-input)] border rounded-lg px-3 py-2 text-sm text-[var(--text)] placeholder:text-[var(--text-3)] focus:outline-none transition-colors resize-none ${error ? 'border-red-500/60' : 'border-[var(--border)] focus:border-[var(--text-3)]'}`}
+            style={{ minHeight: '120px', maxHeight: '300px' }}
+          />
+
+          {error && (
+            <div className="flex items-center gap-1.5 text-xs text-red-400">
+              <AlertCircle size={12}/>
+              <span>{error}</span>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between gap-2 mt-1">
+            <button
+              onClick={() => fileRef.current?.click()}
+              className="flex items-center gap-1.5 px-3 py-2 text-xs text-[var(--text-2)] hover:bg-[var(--bg-hover)] rounded-lg transition-colors cursor-pointer"
+            >
+              <Upload size={12}/>
+              上传 .txt 文件
+            </button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".txt,text/plain"
+              className="hidden"
+              onChange={e => {
+                const f = e.target.files?.[0]
+                if (f) handleFile(f)
+                if (fileRef.current) fileRef.current.value = ''
+              }}
+            />
+            <button
+              onClick={handleSubmit}
+              disabled={!text.trim()}
+              className="px-4 py-2 bg-[var(--text)] text-[var(--bg)] rounded-lg text-sm font-medium hover:opacity-80 disabled:opacity-40 cursor-pointer"
+            >
+              用这篇
+            </button>
+          </div>
         </div>
       </div>
     </>

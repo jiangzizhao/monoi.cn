@@ -23,6 +23,7 @@ const MODULE_OPTIONS: Record<string, { id: string; label: string; desc: string }
   '文案': [
     { id: '__form_original__', label: '原创', desc: '从零写一篇新文案' },
     { id: '__form_rewrite__', label: '仿写', desc: '粘贴链接或视频改写' },
+    { id: '__form_paste__', label: '我有文案', desc: '直接粘贴或上传 .txt' },
   ],
   '配音': [
     { id: '__voice_preset__', label: '预设音色', desc: '从音色库中选择' },
@@ -59,7 +60,7 @@ interface Props {
 
 export function ChatInput({ moduleMenu, onModuleClick, onModuleMenuClose }: Props) {
   const [text, setText] = useState('')
-  const [copyForm, setCopyForm] = useState<'original' | 'rewrite' | null>(null)
+  const [copyForm, setCopyForm] = useState<'original' | 'rewrite' | 'paste' | null>(null)
   const [voiceForm, setVoiceForm] = useState<'preset' | 'upload' | 'clone' | null>(null)
   const [digitalHumanForm, setDigitalHumanForm] = useState(false)
   const [narrationVideoForm, setNarrationVideoForm] = useState(false)
@@ -89,6 +90,8 @@ export function ChatInput({ moduleMenu, onModuleClick, onModuleMenuClose }: Prop
       setCopyForm('original')
     } else if (optId === '__form_rewrite__') {
       setCopyForm('rewrite')
+    } else if (optId === '__form_paste__') {
+      setCopyForm('paste')
     } else if (optId === '__voice_preset__') {
       setVoiceForm('preset')
     } else if (optId === '__voice_upload__') {
