@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Play, Pause, Loader2, Check, X, Scissors, Undo2 } from 'lucide-react'
+import { Play, Loader2, Check, X, Scissors, Undo2 } from 'lucide-react'
 
 interface Word {
   start: number

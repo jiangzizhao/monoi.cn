@@ -196,7 +196,7 @@ function VideoUploadSlot({
   onChange,
 }: {
   file: File | null
-  inputRef: React.RefObject<HTMLInputElement>
+  inputRef: React.RefObject<HTMLInputElement | null>
   onChange: (f: File | null) => void
 }) {
   return (
