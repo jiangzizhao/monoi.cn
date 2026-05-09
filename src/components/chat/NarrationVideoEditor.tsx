@@ -160,26 +160,10 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
   const onTimeUpdate = () => {
     const v = videoRef.current
     if (!v) return
-    const t = v.currentTime
-    setCurrentTime(t)
-    if (v.paused) return
-    if (seekingRef.current) return
-    const ranges = keepRangesRef.current
-    if (ranges.length === 0) return
-    const inKeep = ranges.some(([s, e]) => t >= s - 0.01 && t <= e + 0.01)
-    if (!inKeep) {
-      const nextRange = ranges.find(([s]) => s > t)
-      if (nextRange) {
-        if (Math.abs(lastJumpToRef.current - nextRange[0]) < 0.05) return
-        seekingRef.current = true
-        lastJumpToRef.current = nextRange[0]
-        v.currentTime = nextRange[0]
-        // 兜底: 600ms 强制清 (防 onSeeked 不触发死锁)
-        setTimeout(() => { seekingRef.current = false }, 600)
-      } else {
-        v.pause()
-      }
-    }
+    setCurrentTime(v.currentTime)
+    // 不自动 seek 跳过删除段 — 视频画面流畅度优先, seek 会让画面突变.
+    // 删除段由 muted (静音) + 红色蒙层 (视觉) 标识.
+    // 真正的剪辑效果以"完成导出"后的新视频为准.
   }
 
   const onSeeked = () => {
