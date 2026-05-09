@@ -95,7 +95,7 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
   const [error, setError] = useState('')
   const [hasSelection, setHasSelection] = useState(false)
 
-  // 摊平 segments → word tokens
+  // 摊平 segments → word tokens (用于 keepRanges 计算 / 拖选 / 全局逻辑)
   const allWords: WordToken[] = useMemo(() => {
     const result: WordToken[] = []
     data.segments.forEach((seg, segIdx) => {
@@ -109,6 +109,23 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
     })
     return result
   }, [data])
+
+  // 按 segment 分组的 word tokens (一句话一行展示)
+  const wordsBySegment = useMemo(() => {
+    const groups: WordToken[][] = []
+    let currentSegIdx = -1
+    let currentGroup: WordToken[] = []
+    for (const t of allWords) {
+      if (t.segIdx !== currentSegIdx) {
+        if (currentGroup.length > 0) groups.push(currentGroup)
+        currentGroup = []
+        currentSegIdx = t.segIdx
+      }
+      currentGroup.push(t)
+    }
+    if (currentGroup.length > 0) groups.push(currentGroup)
+    return groups
+  }, [allWords])
 
   const wordKey = (t: WordToken) => `${t.segIdx}_${t.wordIdx}`
 
@@ -222,6 +239,20 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
       const next = new Set(prev)
       if (next.has(key)) next.delete(key)
       else next.add(key)
+      return next
+    })
+  }, [])
+
+  // 整句切删除/恢复 (一键删整句, 适合删整段口误重复)
+  const toggleSegment = useCallback((words: WordToken[]) => {
+    setDeletedKeys(prev => {
+      const next = new Set(prev)
+      const allDel = words.every(t => next.has(`${t.segIdx}_${t.wordIdx}`))
+      if (allDel) {
+        words.forEach(t => next.delete(`${t.segIdx}_${t.wordIdx}`))
+      } else {
+        words.forEach(t => next.add(`${t.segIdx}_${t.wordIdx}`))
+      }
       return next
     })
   }, [])
@@ -432,25 +463,45 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
         </div>
       </div>
 
-      {/* 转录字幕 (WordSpan 用 React.memo 优化, 长视频 1500-3000 词不卡) */}
-      <div ref={textContainerRef} tabIndex={0} className="text-sm leading-loose max-h-40 overflow-y-auto bg-[var(--bg-hover)] rounded-[12px] p-3 outline-none focus:ring-1 focus:ring-[var(--text-3)]">
-        {allWords.length === 0 ? (
+      {/* 转录字幕: 按句子分组(每句一行), 句末"删整句"按钮 hover 显示 */}
+      <div ref={textContainerRef} tabIndex={0} className="text-sm leading-loose max-h-56 overflow-y-auto bg-[var(--bg-hover)] rounded-[12px] p-3 outline-none focus:ring-1 focus:ring-[var(--text-3)]">
+        {wordsBySegment.length === 0 ? (
           <div className="text-[var(--text-3)]">没有转录到内容</div>
         ) : (
-          allWords.map((t) => {
-            const key = wordKey(t)
+          wordsBySegment.map((segWords, sIdx) => {
+            const allDel = segWords.every(t => deletedKeys.has(wordKey(t)))
             return (
-              <WordSpan
-                key={key}
-                wKey={key}
-                word={t.word}
-                start={t.start}
-                end={t.end}
-                isDel={deletedKeys.has(key)}
-                isCurrent={key === currentWordKey}
-                onToggle={toggleWord}
-                onSeek={seekToWordTime}
-              />
+              <div key={sIdx} className="group flex items-baseline gap-1 mb-0.5">
+                <div className="flex-1">
+                  {segWords.map((t) => {
+                    const key = wordKey(t)
+                    return (
+                      <WordSpan
+                        key={key}
+                        wKey={key}
+                        word={t.word}
+                        start={t.start}
+                        end={t.end}
+                        isDel={deletedKeys.has(key)}
+                        isCurrent={key === currentWordKey}
+                        onToggle={toggleWord}
+                        onSeek={seekToWordTime}
+                      />
+                    )
+                  })}
+                </div>
+                <button
+                  onClick={() => toggleSegment(segWords)}
+                  className={`text-[10px] px-1.5 py-0.5 rounded transition-opacity flex-shrink-0 ${
+                    allDel
+                      ? 'opacity-100 text-[var(--text-3)] hover:text-[var(--text-2)] hover:bg-[var(--bg-card)]'
+                      : 'opacity-0 group-hover:opacity-100 text-red-400 hover:bg-red-950/30'
+                  }`}
+                  title={allDel ? '恢复整句' : '删除整句'}
+                >
+                  {allDel ? '↩' : '✂'}
+                </button>
+              </div>
             )
           })
         )}

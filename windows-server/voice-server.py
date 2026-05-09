@@ -129,6 +129,7 @@ NARRATION_OUTPUT_DIR = os.path.join(COSYVOICE_DIR, "narration_outputs")
 os.makedirs(NARRATION_OUTPUT_DIR, exist_ok=True)
 
 _WHISPER_MODEL = None
+_T2S_CONVERTER = None  # 繁体 → 简体 转换器 (zhconv 懒加载, 没装就跳过)
 
 def get_whisper():
     """懒加载 faster-whisper"""
@@ -139,6 +140,27 @@ def get_whisper():
         _WHISPER_MODEL = WhisperModel("small", device="cuda", compute_type="float16")
         print("Whisper loaded.", flush=True)
     return _WHISPER_MODEL
+
+
+def _to_simplified(text):
+    """繁体转简体. zhconv 没装就原样返回 (Whisper 默认可能输出繁体)"""
+    if not text:
+        return text
+    global _T2S_CONVERTER
+    if _T2S_CONVERTER is False:
+        return text  # 之前 import 失败过, 不再尝试
+    if _T2S_CONVERTER is None:
+        try:
+            from zhconv import convert
+            _T2S_CONVERTER = convert
+        except ImportError:
+            print("[zhconv 未安装, 转录结果保持原始繁简]", flush=True)
+            _T2S_CONVERTER = False
+            return text
+    try:
+        return _T2S_CONVERTER(text, "zh-cn")
+    except Exception:
+        return text
 
 
 def _ffmpeg_silence_detect(audio_path, noise_db=-30, min_silence=0.6):
@@ -155,8 +177,9 @@ def _ffmpeg_silence_detect(audio_path, noise_db=-30, min_silence=0.6):
     return list(zip(starts, ends))
 
 
-def _detect_repeats(segments, similarity_threshold=0.7, max_gap=5.0):
-    """检测口误重复段：相邻两段文本相似度高且时间近的，标记前一个为删除"""
+def _detect_repeats(segments, similarity_threshold=0.6, max_gap=8.0):
+    """检测口误重复: 相邻段文本相似度高 → 标记前一个为删除.
+    阈值放宽 (70% → 60%, 5s → 8s) + 短文本也算 (3+ 字, 之前要 4+)"""
     from difflib import SequenceMatcher
     to_remove = []
     for i in range(len(segments) - 1):
@@ -165,8 +188,15 @@ def _detect_repeats(segments, similarity_threshold=0.7, max_gap=5.0):
         gap = b["start"] - a["end"]
         if gap > max_gap:
             continue
-        sim = SequenceMatcher(None, a["text"].strip(), b["text"].strip()).ratio()
-        if sim >= similarity_threshold and len(a["text"].strip()) >= 4:
+        ta = a["text"].strip().rstrip("，。、；！？!?,.;:")
+        tb = b["text"].strip().rstrip("，。、；！？!?,.;:")
+        if len(ta) < 3:
+            continue
+        sim = SequenceMatcher(None, ta, tb).ratio()
+        if sim >= similarity_threshold:
+            to_remove.append((a["start"], a["end"]))
+        # 包含关系: 后段重新念了前段一部分 (前段是后段的子串或反之)
+        elif (ta in tb or tb in ta) and min(len(ta), len(tb)) >= 3:
             to_remove.append((a["start"], a["end"]))
     return to_remove
 
@@ -181,29 +211,43 @@ _FILLER_PUNCTUATION = "，。、；！？!?,.;:：~～-—_… "
 
 
 def _detect_fillers(segments):
-    """识别词级"嗯啊呃哦"等填充词, 返回时间区间列表"""
+    """识别词级"嗯啊呃哦"等填充词. 跳过开头第一个 + 结尾最后一个词
+    (用户反馈: "把开头或者结尾的字给去掉了", 边界保护避免误删开场招呼/收尾)"""
     intervals = []
+    # 摊平所有词
+    all_words = []
     for seg in segments:
         for word in seg.get("words") or []:
-            raw = (word.get("word") or "").strip()
-            clean = raw.strip(_FILLER_PUNCTUATION)
-            if not clean:
-                continue
-            if clean in _FILLER_WORDS:
-                intervals.append((word["start"], word["end"]))
+            all_words.append(word)
+    if len(all_words) < 3:
+        return intervals  # 太短, 不识别
+    # 跳过第一个和最后一个词 (保护边界)
+    for i in range(1, len(all_words) - 1):
+        word = all_words[i]
+        raw = (word.get("word") or "").strip()
+        clean = raw.strip(_FILLER_PUNCTUATION)
+        if not clean:
+            continue
+        if clean in _FILLER_WORDS:
+            intervals.append((word["start"], word["end"]))
     return intervals
 
 
 def _detect_word_gaps(segments, min_gap=0.4):
-    """检测词与词之间的停顿 (silencedetect 兜底, 一些场景下 silencedetect 漏掉的)"""
+    """检测词与词之间的停顿. 跳过开头/结尾相邻的 gap (保护边界)"""
     intervals = []
+    all_words = []
     for seg in segments:
-        words = seg.get("words") or []
-        for i in range(len(words) - 1):
-            gap_start = words[i]["end"]
-            gap_end = words[i + 1]["start"]
-            if gap_end - gap_start >= min_gap:
-                intervals.append((gap_start, gap_end))
+        for word in seg.get("words") or []:
+            all_words.append(word)
+    if len(all_words) < 3:
+        return intervals
+    # 第 1 对 (开头) 和 最后 1 对 (结尾) 不识别
+    for i in range(1, len(all_words) - 2):
+        gap_start = all_words[i]["end"]
+        gap_end = all_words[i + 1]["start"]
+        if gap_end - gap_start >= min_gap:
+            intervals.append((gap_start, gap_end))
     return intervals
 
 
@@ -275,8 +319,8 @@ async def clean_narration(file: UploadFile = File(...), reference_text: str = Fo
         words = []
         if s.words:
             for w in s.words:
-                words.append({"start": w.start, "end": w.end, "word": w.word})
-        segments.append({"start": s.start, "end": s.end, "text": s.text, "words": words})
+                words.append({"start": w.start, "end": w.end, "word": _to_simplified(w.word)})
+        segments.append({"start": s.start, "end": s.end, "text": _to_simplified(s.text), "words": words})
 
     full_text = "".join(s["text"] for s in segments).strip()
 
@@ -403,7 +447,7 @@ async def clean_narration_video(file: UploadFile = File(...)):
     info = sf.info(audio_path)
     orig_dur = info.duration
 
-    # 5. Whisper 转录 (词级)
+    # 5. Whisper 转录 (词级, 输出转简体)
     model = get_whisper()
     segments_iter, _ = model.transcribe(audio_path, language="zh", beam_size=5, word_timestamps=True)
     segments = []
@@ -411,8 +455,8 @@ async def clean_narration_video(file: UploadFile = File(...)):
         words = []
         if s.words:
             for w in s.words:
-                words.append({"start": w.start, "end": w.end, "word": w.word})
-        segments.append({"start": s.start, "end": s.end, "text": s.text, "words": words})
+                words.append({"start": w.start, "end": w.end, "word": _to_simplified(w.word)})
+        segments.append({"start": s.start, "end": s.end, "text": _to_simplified(s.text), "words": words})
 
     full_text = "".join(s["text"] for s in segments).strip()
 
