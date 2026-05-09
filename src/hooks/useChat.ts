@@ -307,6 +307,13 @@ export function useChat() {
         displayText = `数字人视频${dur ? ` · ${dur}` : ''}`
       } catch { /* keep raw */ }
     }
+    if (text.startsWith('__narration_video_done__')) {
+      try {
+        const p = JSON.parse(text.slice('__narration_video_done__'.length))
+        const dur = p.duration_ms ? `${(p.duration_ms / 1000).toFixed(1)}s` : ''
+        displayText = `口播视频剪辑完成${dur ? ` · ${dur}` : ''}`
+      } catch { /* keep raw */ }
+    }
     if (text.startsWith('__dialect__')) {
       const m = text.match(/^__dialect__(\w+)__/)
       const labelMap: Record<string, string> = {
@@ -352,6 +359,37 @@ export function useChat() {
           store.updateLastAssistantBlocks(convId, [{ type: 'loading', label: 'AI 正在改写...' }])
         }, ctrl.signal, 'dialect')
         store.updateLastAssistantBlocks(convId, [makeScriptCard(newScript)])
+        return
+      }
+
+      // 口播视频剪辑完成: 显示视频 + 引导下一步 (素材 / 分镜)
+      if (text.startsWith('__narration_video_done__')) {
+        const p = JSON.parse(text.slice('__narration_video_done__'.length))
+        store.updateLastAssistantBlocks(convId, [
+          {
+            type: 'video_player',
+            data: {
+              video_url: p.video_url,
+              duration_ms: p.duration_ms,
+              audio_label: '口播剪辑',
+              source: 'upload',
+              text_preview: p.transcription?.slice(0, 80),
+            },
+          },
+          {
+            type: 'text',
+            content: '✂️ 口播视频已剪辑完成。要为这段视频内容找配套素材吗?',
+          },
+          {
+            type: 'choices',
+            question: '下一步',
+            options: [
+              { id: '我要为这段视频找素材', label: '搜素材', description: '按转录文案拆句, 搜 Pexels/Pixabay 视频' },
+              { id: '我要做分镜表', label: '做分镜', description: '生成达芬奇 EDL 兼容的分镜表' },
+              { id: '保留这段视频, 暂不做下一步', label: '保留视频', description: '稍后再决定' },
+            ],
+          },
+        ])
         return
       }
 

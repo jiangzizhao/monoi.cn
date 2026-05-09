@@ -311,6 +311,154 @@ def get_narration(name: str):
     return FileResponse(path, media_type="audio/wav", filename=safe)
 
 
+# ============== 口播视频剪辑 (跟音频剪辑同套逻辑, 但处理视频) ==============
+
+
+@app.post("/clean-narration-video")
+async def clean_narration_video(file: UploadFile = File(...)):
+    """上传视频 → 提取音频 → Whisper 转录词级时间戳 → silencedetect 找气口
+    返回原视频 URL + 词级 segments + 静音/重复建议删除区间
+    """
+    import shutil
+    import subprocess
+    import tempfile
+
+    job_id = f"narrv_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}"
+    raw_path = os.path.join(tempfile.gettempdir(), f"{job_id}_raw")
+    video_path = os.path.join(NARRATION_OUTPUT_DIR, f"{job_id}_input.mp4")
+    audio_path = os.path.join(NARRATION_OUTPUT_DIR, f"{job_id}_input.wav")
+
+    # 1. 保存上传文件 (任意格式: mp4/mov/avi/mkv/webm 等)
+    with open(raw_path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+
+    # 2. 转 mp4 (libx264 + aac, 浏览器友好, faststart 利于流式播放)
+    proc = subprocess.run(
+        ["ffmpeg", "-y", "-i", raw_path,
+         "-c:v", "libx264", "-c:a", "aac", "-pix_fmt", "yuv420p",
+         "-movflags", "+faststart",
+         video_path],
+        capture_output=True, timeout=600,
+    )
+    if proc.returncode != 0:
+        try: os.unlink(raw_path)
+        except: pass
+        err = proc.stderr.decode("utf-8", errors="ignore")[-300:]
+        raise HTTPException(400, f"视频转换失败: {err}")
+
+    # 3. 提取音频 16kHz mono wav (给 Whisper 用)
+    proc = subprocess.run(
+        ["ffmpeg", "-y", "-i", raw_path, "-vn", "-ar", "16000", "-ac", "1", "-f", "wav", audio_path],
+        capture_output=True, timeout=300,
+    )
+    try: os.unlink(raw_path)
+    except: pass
+    if proc.returncode != 0:
+        err = proc.stderr.decode("utf-8", errors="ignore")[-300:]
+        raise HTTPException(400, f"音频提取失败: {err}")
+
+    # 4. 测时长 (从音频测,跟视频对齐)
+    info = sf.info(audio_path)
+    orig_dur = info.duration
+
+    # 5. Whisper 转录 (词级)
+    model = get_whisper()
+    segments_iter, _ = model.transcribe(audio_path, language="zh", beam_size=5, word_timestamps=True)
+    segments = []
+    for s in segments_iter:
+        words = []
+        if s.words:
+            for w in s.words:
+                words.append({"start": w.start, "end": w.end, "word": w.word})
+        segments.append({"start": s.start, "end": s.end, "text": s.text, "words": words})
+
+    full_text = "".join(s["text"] for s in segments).strip()
+
+    # 6. 静音 + 口误重复建议
+    silences = _ffmpeg_silence_detect(audio_path, noise_db=-30, min_silence=0.6)
+    repeats = _detect_repeats(segments)
+
+    # 清理音频中转件 (前端只用 video, 不需要这个 wav)
+    try: os.unlink(audio_path)
+    except: pass
+
+    return {
+        "success": True,
+        "source_file": os.path.basename(video_path),
+        "video_url_path": f"/narration-video/{os.path.basename(video_path)}",
+        "duration": orig_dur,
+        "transcription": full_text,
+        "segments": segments,
+        "suggested_removals": {
+            "silences": [{"start": s, "end": e} for s, e in silences],
+            "repeats": [{"start": s, "end": e} for s, e in repeats],
+        },
+    }
+
+
+class FinalizeVideoRequest(BaseModel):
+    source_file: str             # /clean-narration-video 返回的 source_file
+    keep_ranges: list[list[float]]  # [[start, end], ...]
+
+
+@app.post("/finalize-narration-video")
+def finalize_narration_video(req: FinalizeVideoRequest):
+    """根据用户保留段, ffmpeg select+aselect 切视频. 重编码 (libx264) 保证段间过渡平滑."""
+    import subprocess
+
+    safe = os.path.basename(req.source_file)
+    src_path = os.path.join(NARRATION_OUTPUT_DIR, safe)
+    if not os.path.exists(src_path):
+        raise HTTPException(404, "源视频不存在")
+    if not req.keep_ranges:
+        raise HTTPException(400, "keep_ranges 不能为空")
+
+    out_name = f"final_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}.mp4"
+    out_path = os.path.join(NARRATION_OUTPUT_DIR, out_name)
+
+    # ffmpeg select + aselect 同步切视频和音频, 重编码 + faststart
+    select_expr = "+".join(f"between(t,{s},{e})" for s, e in req.keep_ranges)
+    proc = subprocess.run(
+        ["ffmpeg", "-y", "-i", src_path,
+         "-vf", f"select='{select_expr}',setpts=N/FRAME_RATE/TB",
+         "-af", f"aselect='{select_expr}',asetpts=N/SR/TB",
+         "-c:v", "libx264", "-c:a", "aac", "-pix_fmt", "yuv420p",
+         "-movflags", "+faststart",
+         out_path],
+        capture_output=True, timeout=900,
+    )
+    if proc.returncode != 0:
+        err = proc.stderr.decode("utf-8", errors="ignore")[-500:]
+        raise HTTPException(500, f"ffmpeg 剪辑失败: {err}")
+
+    # ffprobe 取新视频时长
+    probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+         "-of", "default=noprint_wrappers=1:nokey=1", out_path],
+        capture_output=True, text=True,
+    )
+    new_dur = 0.0
+    if probe.returncode == 0:
+        try: new_dur = float(probe.stdout.strip())
+        except ValueError: pass
+
+    return {
+        "success": True,
+        "file": out_name,
+        "video_url_path": f"/narration-video/{out_name}",
+        "duration": new_dur,
+    }
+
+
+@app.get("/narration-video/{name}")
+def get_narration_video(name: str):
+    safe = os.path.basename(name)
+    path = os.path.join(NARRATION_OUTPUT_DIR, safe)
+    if not os.path.exists(path):
+        raise HTTPException(404, "video not found")
+    return FileResponse(path, media_type="video/mp4", filename=safe)
+
+
 @app.get("/audio/{name}")
 def get_audio(name: str):
     safe = os.path.basename(name)

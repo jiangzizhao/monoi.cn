@@ -6,6 +6,7 @@ import { useChat } from '../../hooks/useChat'
 import { CopywritingForm } from './forms/CopywritingForm'
 import { VoiceForm } from './forms/VoiceForm'
 import { DigitalHumanForm } from './forms/DigitalHumanForm'
+import { NarrationVideoForm } from './forms/NarrationVideoForm'
 
 const MODULES: { label: string; Icon: LucideIcon }[] = [
   { label: '文案',  Icon: FileText  },
@@ -29,7 +30,7 @@ const MODULE_OPTIONS: Record<string, { id: string; label: string; desc: string }
     { id: '__voice_clone__', label: '克隆声音', desc: '上传样本复刻你的声音' },
   ],
   '口播': [
-    { id: '我想上传自己录制的口播视频', label: '自录上传', desc: '上传已录好的口播' },
+    { id: '__narration_video__', label: '口播剪辑', desc: '上传口播视频自动去气口去重复' },
     { id: '__digital_human__', label: '数字人', desc: '上传形象视频+音频自动对口型' },
     { id: '我想用AI生成口播视频', label: 'AI生成', desc: '根据文案自动生成' },
   ],
@@ -61,6 +62,7 @@ export function ChatInput({ moduleMenu, onModuleClick, onModuleMenuClose }: Prop
   const [copyForm, setCopyForm] = useState<'original' | 'rewrite' | null>(null)
   const [voiceForm, setVoiceForm] = useState<'preset' | 'upload' | 'clone' | null>(null)
   const [digitalHumanForm, setDigitalHumanForm] = useState(false)
+  const [narrationVideoForm, setNarrationVideoForm] = useState(false)
   const textRef = useRef<HTMLTextAreaElement>(null)
   const { isGenerating } = useChatStore()
   const { send, stop } = useChat()
@@ -95,6 +97,8 @@ export function ChatInput({ moduleMenu, onModuleClick, onModuleMenuClose }: Prop
       setVoiceForm('clone')
     } else if (optId === '__digital_human__') {
       setDigitalHumanForm(true)
+    } else if (optId === '__narration_video__') {
+      setNarrationVideoForm(true)
     } else {
       send(optId)
     }
@@ -146,6 +150,12 @@ export function ChatInput({ moduleMenu, onModuleClick, onModuleMenuClose }: Prop
           <DigitalHumanForm
             onSubmit={(msg) => { setDigitalHumanForm(false); send(msg) }}
             onClose={() => setDigitalHumanForm(false)}
+          />
+        )}
+        {narrationVideoForm && (
+          <NarrationVideoForm
+            onSubmit={(msg) => { setNarrationVideoForm(false); send(msg) }}
+            onClose={() => setNarrationVideoForm(false)}
           />
         )}
 

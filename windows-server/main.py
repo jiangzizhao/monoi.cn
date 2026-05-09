@@ -1703,6 +1703,70 @@ def proxy_narration_audio(name: str):
         raise HTTPException(503, "voice-server (9001) 未启动")
 
 
+# ============== 口播视频剪辑代理 (转发到 voice-server) ==============
+
+
+@app.post("/api/voice/clean-narration-video")
+async def clean_narration_video_proxy(file: UploadFile = File(...)):
+    """转发到 voice-server: 上传视频 → 转录 → 返回 video_url + 词级 segments"""
+    import requests as _req
+
+    raw = await file.read()
+    try:
+        files = {"file": (file.filename or "video.mp4", raw, file.content_type or "video/mp4")}
+        resp = _req.post(f"{VOICE_SERVER_URL}/clean-narration-video", files=files, timeout=900)
+        if resp.status_code != 200:
+            raise HTTPException(resp.status_code, f"voice-server 错误: {resp.text[:200]}")
+        result = resp.json()
+        # 改写视频路径为 main.py 代理路径 (让前端能通过 NATAPP 访问)
+        if result.get("source_file"):
+            result["video_url_path"] = f"/api/voice/narration-video/{result['source_file']}"
+        return result
+    except _req.exceptions.ConnectionError:
+        raise HTTPException(503, "voice-server (9001) 未启动")
+
+
+class FinalizeNarrationVideoRequest(BaseModel):
+    source_file: str
+    keep_ranges: list[list[float]]
+
+
+@app.post("/api/voice/finalize-narration-video")
+def finalize_narration_video_proxy(req: FinalizeNarrationVideoRequest):
+    """转发到 voice-server: 接 keep_ranges → 剪视频"""
+    import requests as _req
+    try:
+        resp = _req.post(
+            f"{VOICE_SERVER_URL}/finalize-narration-video",
+            json={"source_file": req.source_file, "keep_ranges": req.keep_ranges},
+            timeout=900,
+        )
+        if resp.status_code != 200:
+            raise HTTPException(resp.status_code, f"voice-server 错误: {resp.text[:200]}")
+        result = resp.json()
+        if result.get("file"):
+            result["video_url_path"] = f"/api/voice/narration-video/{result['file']}"
+        return result
+    except _req.exceptions.ConnectionError:
+        raise HTTPException(503, "voice-server (9001) 未启动")
+
+
+@app.get("/api/voice/narration-video/{name}")
+def proxy_narration_video(name: str):
+    """代理剪辑后的视频文件"""
+    import requests as _req
+    from fastapi.responses import StreamingResponse
+
+    safe = os.path.basename(name)
+    try:
+        resp = _req.get(f"{VOICE_SERVER_URL}/narration-video/{safe}", stream=True, timeout=60)
+        if resp.status_code != 200:
+            raise HTTPException(resp.status_code, "视频未找到")
+        return StreamingResponse(resp.iter_content(8192), media_type="video/mp4")
+    except _req.exceptions.ConnectionError:
+        raise HTTPException(503, "voice-server (9001) 未启动")
+
+
 @app.get("/api/voice/audio-index/{name}")
 def proxy_audio_index(name: str):
     """IndexTTS 输出音频代理"""
