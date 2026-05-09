@@ -22,6 +22,42 @@ import time
 import uuid
 
 _BUCKET_CACHE = None
+_ENV_LOADED = False
+
+
+def _try_load_env():
+    """voice-server 跑在 cosyvoice 目录, .env 在 D:\\monoi-server\\, 主动加载.
+    main.py 已经加载过的话, os.environ 已有, 这里 setdefault 不会覆盖."""
+    global _ENV_LOADED
+    if _ENV_LOADED:
+        return
+    _ENV_LOADED = True
+    here = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.path.join(here, ".env"),                  # oss_helper 同目录
+        os.path.join(here, "..", "..", ".env"),      # cosyvoice 往上 2 层 → monoi-server/
+        os.path.join(here, "..", ".env"),            # 上 1 层
+        r"D:\monoi-server\.env",                     # 硬编码兜底
+    ]
+    for path in candidates:
+        path = os.path.abspath(path)
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    k, v = line.split("=", 1)
+                    k = k.strip()
+                    v = v.strip().strip('"').strip("'")
+                    if k and k not in os.environ:
+                        os.environ[k] = v
+            print(f"[oss_helper] 加载 .env: {path}", flush=True)
+            return
+        except Exception as e:
+            print(f"[oss_helper] 加载 .env 失败 ({path}): {e}", flush=True)
 
 
 def _get_bucket():
@@ -29,6 +65,8 @@ def _get_bucket():
     global _BUCKET_CACHE
     if _BUCKET_CACHE is not None:
         return _BUCKET_CACHE
+
+    _try_load_env()
 
     try:
         import oss2
