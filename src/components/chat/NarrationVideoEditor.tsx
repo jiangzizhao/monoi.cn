@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Play, Loader2, Check, X, Scissors, Undo2 } from 'lucide-react'
+import WaveSurfer from 'wavesurfer.js'
+import RegionsPlugin from 'wavesurfer.js/dist/plugins/regions.js'
 
 interface Word {
   start: number
@@ -46,6 +48,9 @@ interface WordToken {
 export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const textContainerRef = useRef<HTMLDivElement>(null)
+  const wsContainerRef = useRef<HTMLDivElement>(null)
+  const wsRef = useRef<WaveSurfer | null>(null)
+  const regionsRef = useRef<any>(null)
 
   const [ready, setReady] = useState(false)
   const [playing, setPlaying] = useState(false)
@@ -124,6 +129,62 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
   // 用 ref 持有最新的 keepRanges, 给 video.ontimeupdate 读
   const keepRangesRef = useRef<[number, number][]>([])
   useEffect(() => { keepRangesRef.current = keepRanges }, [keepRanges])
+
+  // 视频元数据加载完后, 初始化 wavesurfer 绑定到 video 元素
+  // (wavesurfer 会从视频提取音轨显示波形, 进度自动跟视频同步)
+  useEffect(() => {
+    if (!ready || !videoRef.current || !wsContainerRef.current) return
+    const regions = RegionsPlugin.create()
+    const ws = WaveSurfer.create({
+      container: wsContainerRef.current,
+      media: videoRef.current,
+      height: 50,
+      waveColor: '#94a3b8',
+      progressColor: '#0ea5e9',
+      cursorColor: '#475569',
+      barWidth: 2,
+      barRadius: 2,
+      plugins: [regions],
+    })
+    wsRef.current = ws
+    regionsRef.current = regions
+    return () => {
+      try { ws.destroy() } catch {}
+      wsRef.current = null
+      regionsRef.current = null
+    }
+  }, [ready])
+
+  // 同步删除段到 wavesurfer regions (红色阴影)
+  useEffect(() => {
+    const regions = regionsRef.current
+    if (!regions) return
+    regions.clearRegions()
+    // 把连续的删除词合并成区间
+    const delRanges: [number, number][] = []
+    let s: number | null = null
+    let lastE: number | null = null
+    for (const t of allWords) {
+      const isDel = deletedKeys.has(wordKey(t))
+      if (isDel) {
+        if (s === null) s = t.start
+        lastE = t.end
+      } else if (s !== null && lastE !== null) {
+        delRanges.push([s, lastE])
+        s = null
+        lastE = null
+      }
+    }
+    if (s !== null && lastE !== null) delRanges.push([s, lastE])
+    for (const [start, end] of delRanges) {
+      regions.addRegion({
+        start, end,
+        color: 'rgba(220, 38, 38, 0.28)',
+        drag: false,
+        resize: false,
+      })
+    }
+  }, [deletedKeys, allWords])
 
   // 视频事件
   const onLoadedMetadata = () => setReady(true)
@@ -292,6 +353,11 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
             <Loader2 size={20} className="animate-spin"/>
           </div>
         )}
+      </div>
+
+      {/* 波形时间轴 (绑定到上面 video 元素, 进度自动同步, 删除段红色阴影) */}
+      <div className="rounded-lg bg-[var(--bg-hover)] px-3 py-2">
+        <div ref={wsContainerRef} className="w-full"/>
       </div>
 
       {/* 工具栏 */}
