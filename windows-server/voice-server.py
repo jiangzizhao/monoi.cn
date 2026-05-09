@@ -171,6 +171,42 @@ def _detect_repeats(segments, similarity_threshold=0.7, max_gap=5.0):
     return to_remove
 
 
+# 中文口播常见纯填充词 (没语义贡献, 可以无脑删)
+_FILLER_WORDS = {
+    "嗯", "啊", "呃", "哦", "诶", "欸", "哎", "唉", "咦", "哟", "呵",
+    "唔", "呢", "嘿", "哈", "哇", "诶嘿", "嗯嗯", "啊啊", "呃呃",
+}
+# 标点 (Whisper 词级时间戳的 word 可能带标点 like "嗯,")
+_FILLER_PUNCTUATION = "，。、；！？!?,.;:：~～-—_… "
+
+
+def _detect_fillers(segments):
+    """识别词级"嗯啊呃哦"等填充词, 返回时间区间列表"""
+    intervals = []
+    for seg in segments:
+        for word in seg.get("words") or []:
+            raw = (word.get("word") or "").strip()
+            clean = raw.strip(_FILLER_PUNCTUATION)
+            if not clean:
+                continue
+            if clean in _FILLER_WORDS:
+                intervals.append((word["start"], word["end"]))
+    return intervals
+
+
+def _detect_word_gaps(segments, min_gap=0.4):
+    """检测词与词之间的停顿 (silencedetect 兜底, 一些场景下 silencedetect 漏掉的)"""
+    intervals = []
+    for seg in segments:
+        words = seg.get("words") or []
+        for i in range(len(words) - 1):
+            gap_start = words[i]["end"]
+            gap_end = words[i + 1]["start"]
+            if gap_end - gap_start >= min_gap:
+                intervals.append((gap_start, gap_end))
+    return intervals
+
+
 def _ffmpeg_concat_keep(audio_path, removed_intervals, total_duration, out_path):
     """根据要删除的区间，输出剩余拼接的 wav"""
     import subprocess
@@ -244,9 +280,11 @@ async def clean_narration(file: UploadFile = File(...), reference_text: str = Fo
 
     full_text = "".join(s["text"] for s in segments).strip()
 
-    # 5. 找静音段 + 重复段（作为"建议删除"提示给用户，不直接删）
-    silences = _ffmpeg_silence_detect(norm_path, noise_db=-30, min_silence=0.6)
+    # 5. 找静音 + 词间隔 + 重复 + 填充词 (作为"建议删除"提示给用户)
+    silences = _ffmpeg_silence_detect(norm_path, noise_db=-25, min_silence=0.4)
+    word_gaps = _detect_word_gaps(segments, min_gap=0.4)
     repeats = _detect_repeats(segments)
+    fillers = _detect_fillers(segments)
 
     return {
         "success": True,
@@ -257,7 +295,9 @@ async def clean_narration(file: UploadFile = File(...), reference_text: str = Fo
         "segments": segments,  # 含 words 数组（词级时间戳）
         "suggested_removals": {
             "silences": [{"start": s, "end": e} for s, e in silences],
+            "word_gaps": [{"start": s, "end": e} for s, e in word_gaps],
             "repeats": [{"start": s, "end": e} for s, e in repeats],
+            "fillers": [{"start": s, "end": e} for s, e in fillers],
         },
     }
 
@@ -374,9 +414,11 @@ async def clean_narration_video(file: UploadFile = File(...)):
 
     full_text = "".join(s["text"] for s in segments).strip()
 
-    # 6. 静音 + 口误重复建议
-    silences = _ffmpeg_silence_detect(audio_path, noise_db=-30, min_silence=0.6)
+    # 6. 静音 + 词间隔 + 重复 + 填充词 (建议删除)
+    silences = _ffmpeg_silence_detect(audio_path, noise_db=-25, min_silence=0.4)
+    word_gaps = _detect_word_gaps(segments, min_gap=0.4)
     repeats = _detect_repeats(segments)
+    fillers = _detect_fillers(segments)
 
     # 清理音频中转件 (前端只用 video, 不需要这个 wav)
     try: os.unlink(audio_path)
@@ -391,7 +433,9 @@ async def clean_narration_video(file: UploadFile = File(...)):
         "segments": segments,
         "suggested_removals": {
             "silences": [{"start": s, "end": e} for s, e in silences],
+            "word_gaps": [{"start": s, "end": e} for s, e in word_gaps],
             "repeats": [{"start": s, "end": e} for s, e in repeats],
+            "fillers": [{"start": s, "end": e} for s, e in fillers],
         },
     }
 

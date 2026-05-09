@@ -23,8 +23,10 @@ interface CleanResponse {
   transcription: string
   segments: Segment[]
   suggested_removals?: {
-    silences: { start: number; end: number }[]
-    repeats: { start: number; end: number }[]
+    silences?: { start: number; end: number }[]
+    word_gaps?: { start: number; end: number }[]
+    repeats?: { start: number; end: number }[]
+    fillers?: { start: number; end: number }[]
   }
 }
 
@@ -77,9 +79,12 @@ export function NarrationEditor({ data, apiBase, onCancel, onDone }: Props) {
   // 初始化预删段（建议删除的）
   useEffect(() => {
     if (!data.suggested_removals) return
+    const sr = data.suggested_removals
     const removeRanges = [
-      ...data.suggested_removals.silences,
-      ...data.suggested_removals.repeats,
+      ...(sr.silences || []),
+      ...(sr.word_gaps || []),
+      ...(sr.repeats || []),
+      ...(sr.fillers || []),
     ]
     const initial = new Set<string>()
     for (const t of allWords) {
