@@ -416,11 +416,11 @@ async def clean_narration_video(file: UploadFile = File(...)):
     with open(raw_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
 
-    # 2. 转 mp4 (h264_nvenc + aac, NVIDIA GPU 加速, 比 libx264 快 5-10 倍)
-    #    p4 preset = 平衡速度/质量; cq 23 = 质量 (类似 libx264 -crf 23)
+    # 2. 转 mp4 (-hwaccel cuda 解码 H.265 .MOV; h264_nvenc 编码; preset p2 速度优先)
+    #    iPhone 录的 .MOV 是 HEVC, 必须 GPU 解码, 否则 CPU 解 H.265 4K 巨慢甚至卡死
     proc = subprocess.run(
-        ["ffmpeg", "-y", "-i", raw_path,
-         "-c:v", "h264_nvenc", "-preset", "p4", "-cq", "23",
+        ["ffmpeg", "-y", "-hwaccel", "cuda", "-i", raw_path,
+         "-c:v", "h264_nvenc", "-preset", "p2", "-cq", "26",
          "-c:a", "aac", "-pix_fmt", "yuv420p",
          "-movflags", "+faststart",
          video_path],
@@ -432,7 +432,7 @@ async def clean_narration_video(file: UploadFile = File(...)):
         err = proc.stderr.decode("utf-8", errors="ignore")[-300:]
         raise HTTPException(400, f"视频转换失败: {err}")
 
-    # 3. 提取音频 16kHz mono wav (给 Whisper 用)
+    # 3. 提取音频 16kHz mono wav (给 Whisper 用; 不用解视频, 不需要 hwaccel)
     proc = subprocess.run(
         ["ffmpeg", "-y", "-i", raw_path, "-vn", "-ar", "16000", "-ac", "1", "-f", "wav", audio_path],
         capture_output=True, timeout=300,
@@ -506,14 +506,13 @@ def finalize_narration_video(req: FinalizeVideoRequest):
     out_name = f"final_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}.mp4"
     out_path = os.path.join(NARRATION_OUTPUT_DIR, out_name)
 
-    # ffmpeg select + aselect 同步切视频和音频, h264_nvenc GPU 加速重编码
-    # 8 分钟视频 ffmpeg 切片从 1-2 分钟 → 10-15 秒
+    # ffmpeg select + aselect 同步切视频和音频; -hwaccel cuda 解码 + nvenc 编码
     select_expr = "+".join(f"between(t,{s},{e})" for s, e in req.keep_ranges)
     proc = subprocess.run(
-        ["ffmpeg", "-y", "-i", src_path,
+        ["ffmpeg", "-y", "-hwaccel", "cuda", "-i", src_path,
          "-vf", f"select='{select_expr}',setpts=N/FRAME_RATE/TB",
          "-af", f"aselect='{select_expr}',asetpts=N/SR/TB",
-         "-c:v", "h264_nvenc", "-preset", "p4", "-cq", "23",
+         "-c:v", "h264_nvenc", "-preset", "p2", "-cq", "26",
          "-c:a", "aac", "-pix_fmt", "yuv420p",
          "-movflags", "+faststart",
          out_path],
@@ -580,10 +579,10 @@ def clean_narration_video_oss(req: CleanVideoOssRequest):
     except Exception as e:
         raise HTTPException(400, f"OSS 下载失败: {e}")
 
-    # 2. 转 mp4 (h264_nvenc GPU 加速)
+    # 2. 转 mp4 (-hwaccel cuda 解 H.265, nvenc 编, p2 速度优先)
     proc = subprocess.run(
-        ["ffmpeg", "-y", "-i", raw_path,
-         "-c:v", "h264_nvenc", "-preset", "p4", "-cq", "23",
+        ["ffmpeg", "-y", "-hwaccel", "cuda", "-i", raw_path,
+         "-c:v", "h264_nvenc", "-preset", "p2", "-cq", "26",
          "-c:a", "aac", "-pix_fmt", "yuv420p",
          "-movflags", "+faststart",
          video_path],
@@ -692,13 +691,13 @@ def finalize_narration_video_oss(req: FinalizeVideoOssRequest):
     except Exception as e:
         raise HTTPException(400, f"OSS 下载失败: {e}")
 
-    # 2. ffmpeg select + aselect 切, h264_nvenc GPU 加速
+    # 2. ffmpeg select + aselect 切; -hwaccel cuda 解 H.265, nvenc 编
     select_expr = "+".join(f"between(t,{s},{e})" for s, e in req.keep_ranges)
     proc = subprocess.run(
-        ["ffmpeg", "-y", "-i", src_path,
+        ["ffmpeg", "-y", "-hwaccel", "cuda", "-i", src_path,
          "-vf", f"select='{select_expr}',setpts=N/FRAME_RATE/TB",
          "-af", f"aselect='{select_expr}',asetpts=N/SR/TB",
-         "-c:v", "h264_nvenc", "-preset", "p4", "-cq", "23",
+         "-c:v", "h264_nvenc", "-preset", "p2", "-cq", "26",
          "-c:a", "aac", "-pix_fmt", "yuv420p",
          "-movflags", "+faststart",
          out_path],
