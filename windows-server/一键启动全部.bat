@@ -36,11 +36,11 @@ if errorlevel 1 (
 
 curl -s --fail --max-time 30 -o "D:\monoi-server\oss_helper.py.tmp" https://raw.githubusercontent.com/jiangzizhao/monoi.cn/main/windows-server/oss_helper.py
 if errorlevel 1 (
-    echo   X oss_helper.py (main) 下载失败, 保留旧版
+    echo   X oss_helper.py [main] 下载失败, 保留旧版
     if exist "D:\monoi-server\oss_helper.py.tmp" del "D:\monoi-server\oss_helper.py.tmp"
 ) else (
     move /y "D:\monoi-server\oss_helper.py.tmp" "D:\monoi-server\oss_helper.py" >nul
-    echo   OK oss_helper.py (main)
+    echo   OK oss_helper.py [main]
 )
 
 curl -s --fail --max-time 30 -o "D:\monoi-server\models\cosyvoice\oss_helper.py.tmp" https://raw.githubusercontent.com/jiangzizhao/monoi.cn/main/windows-server/oss_helper.py

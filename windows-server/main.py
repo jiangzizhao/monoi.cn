@@ -1734,34 +1734,29 @@ class CleanNarrationVideoOssRequest(BaseModel):
     filename: Optional[str] = "video.mp4"
 
 
+@app.post("/api/voice/clean-narration-video-oss")
+def clean_narration_video_oss_proxy(req: CleanNarrationVideoOssRequest):
+    """OSS 模式 (推荐): 浏览器已直传到 OSS, 这里转发 oss_key 给 voice-server,
+    voice-server 从 OSS 拉源 → 处理 → 上传输出 → 返回 OSS 签名 GET URL."""
+    import requests as _req
+    try:
+        resp = _req.post(
+            f"{VOICE_SERVER_URL}/clean-narration-video-oss",
+            json={"oss_key": req.oss_key, "filename": req.filename or "video.mp4"},
+            timeout=1800,
+        )
+        if resp.status_code != 200:
+            raise HTTPException(resp.status_code, f"voice-server 错误: {resp.text[:200]}")
+        return resp.json()
+    except _req.exceptions.ConnectionError:
+        raise HTTPException(503, "voice-server (9001) 未启动")
+
+
 @app.post("/api/voice/clean-narration-video")
-async def clean_narration_video_proxy(
-    req: Optional[CleanNarrationVideoOssRequest] = None,
-    file: Optional[UploadFile] = File(None),
-):
-    """转发到 voice-server. 支持两种入参:
-    - 新: JSON {oss_key} → voice-server 从 OSS 拉 (绕开 NATAPP, 推荐)
-    - 旧: multipart file → 直接转发 (兼容 OSS 没配的情况)
-    """
+async def clean_narration_video_proxy(file: UploadFile = File(...)):
+    """旧 NATAPP 模式 (兼容 OSS 没配的情况): multipart 转发到 voice-server."""
     import requests as _req
 
-    # OSS 模式
-    if req and req.oss_key:
-        try:
-            resp = _req.post(
-                f"{VOICE_SERVER_URL}/clean-narration-video-oss",
-                json={"oss_key": req.oss_key, "filename": req.filename or "video.mp4"},
-                timeout=1800,
-            )
-            if resp.status_code != 200:
-                raise HTTPException(resp.status_code, f"voice-server 错误: {resp.text[:200]}")
-            return resp.json()  # 返回里直接含 OSS 签名 GET URL, 前端不用拼路径
-        except _req.exceptions.ConnectionError:
-            raise HTTPException(503, "voice-server (9001) 未启动")
-
-    # 兼容: 老的 multipart 模式
-    if not file:
-        raise HTTPException(400, "需要 oss_key 或 file 二选一")
     raw = await file.read()
     try:
         files = {"file": (file.filename or "video.mp4", raw, file.content_type or "video/mp4")}

@@ -113,7 +113,7 @@ export function NarrationVideoForm({ onSubmit, onClose }: Props) {
 
       // 3. 上传完, 通知后端开始处理 (此时 NATAPP 只传一个 oss_key)
       setPhase('transcribing')
-      const cleanRes = await fetch(directBase + '/api/voice/clean-narration-video', {
+      const cleanRes = await fetch(directBase + '/api/voice/clean-narration-video-oss', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ oss_key, filename: videoFile.name }),
