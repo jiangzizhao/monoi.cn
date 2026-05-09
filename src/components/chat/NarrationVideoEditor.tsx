@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Play, Loader2, Check, X, Scissors, Undo2 } from 'lucide-react'
-import WaveSurfer from 'wavesurfer.js'
-import RegionsPlugin from 'wavesurfer.js/dist/plugins/regions.js'
 
 interface Word {
   start: number
@@ -48,9 +46,6 @@ interface WordToken {
 export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const textContainerRef = useRef<HTMLDivElement>(null)
-  const wsContainerRef = useRef<HTMLDivElement>(null)
-  const wsRef = useRef<WaveSurfer | null>(null)
-  const regionsRef = useRef<any>(null)
 
   const [ready, setReady] = useState(false)
   const [playing, setPlaying] = useState(false)
@@ -147,61 +142,17 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
     v.muted = isInDeletedRange
   }, [isInDeletedRange])
 
-  // 视频元数据加载完后, 初始化 wavesurfer 绑定到 video 元素
-  // (wavesurfer 会从视频提取音轨显示波形, 进度自动跟视频同步)
-  useEffect(() => {
-    if (!ready || !videoRef.current || !wsContainerRef.current) return
-    const regions = RegionsPlugin.create()
-    const ws = WaveSurfer.create({
-      container: wsContainerRef.current,
-      media: videoRef.current,
-      height: 50,
-      waveColor: '#94a3b8',
-      progressColor: '#0ea5e9',
-      cursorColor: '#475569',
-      barWidth: 2,
-      barRadius: 2,
-      plugins: [regions],
-    })
-    wsRef.current = ws
-    regionsRef.current = regions
-    return () => {
-      try { ws.destroy() } catch {}
-      wsRef.current = null
-      regionsRef.current = null
+  // 自定义时间轴用的删除段 (跟 keepRanges 取反)
+  const deleteRanges = useMemo<[number, number][]>(() => {
+    const out: [number, number][] = []
+    let prevEnd = 0
+    for (const [s, e] of keepRanges) {
+      if (s > prevEnd + 0.05) out.push([prevEnd, s])
+      prevEnd = e
     }
-  }, [ready])
-
-  // 同步删除段到 wavesurfer regions (红色阴影)
-  useEffect(() => {
-    const regions = regionsRef.current
-    if (!regions) return
-    regions.clearRegions()
-    // 把连续的删除词合并成区间
-    const delRanges: [number, number][] = []
-    let s: number | null = null
-    let lastE: number | null = null
-    for (const t of allWords) {
-      const isDel = deletedKeys.has(wordKey(t))
-      if (isDel) {
-        if (s === null) s = t.start
-        lastE = t.end
-      } else if (s !== null && lastE !== null) {
-        delRanges.push([s, lastE])
-        s = null
-        lastE = null
-      }
-    }
-    if (s !== null && lastE !== null) delRanges.push([s, lastE])
-    for (const [start, end] of delRanges) {
-      regions.addRegion({
-        start, end,
-        color: 'rgba(220, 38, 38, 0.28)',
-        drag: false,
-        resize: false,
-      })
-    }
-  }, [deletedKeys, allWords])
+    if (prevEnd < data.duration - 0.05) out.push([prevEnd, data.duration])
+    return out
+  }, [keepRanges, data.duration])
 
   // 视频事件
   const onLoadedMetadata = () => setReady(true)
@@ -209,11 +160,26 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
   const onTimeUpdate = () => {
     const v = videoRef.current
     if (!v) return
-    setCurrentTime(v.currentTime)
-    // 不再自动 seek 跳过删除段 — 视频大文件 seek 慢 + wavesurfer 双向绑定
-    // 容易出 bug (重复跳第一句 / 卡回去 / 死循环).
-    // 改用 muted + 红色蒙层: 用户听不到 + 看得到删除段.
-    // 真正的剪辑效果以"完成导出"后的新视频为准.
+    const t = v.currentTime
+    setCurrentTime(t)
+    if (v.paused) return
+    if (seekingRef.current) return
+    const ranges = keepRangesRef.current
+    if (ranges.length === 0) return
+    const inKeep = ranges.some(([s, e]) => t >= s - 0.01 && t <= e + 0.01)
+    if (!inKeep) {
+      const nextRange = ranges.find(([s]) => s > t)
+      if (nextRange) {
+        if (Math.abs(lastJumpToRef.current - nextRange[0]) < 0.05) return
+        seekingRef.current = true
+        lastJumpToRef.current = nextRange[0]
+        v.currentTime = nextRange[0]
+        // 兜底: 600ms 强制清 (防 onSeeked 不触发死锁)
+        setTimeout(() => { seekingRef.current = false }, 600)
+      } else {
+        v.pause()
+      }
+    }
   }
 
   const onSeeked = () => {
@@ -376,9 +342,37 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
         )}
       </div>
 
-      {/* 波形时间轴 (绑定到上面 video 元素, 进度自动同步, 删除段红色阴影) */}
-      <div className="rounded-lg bg-[var(--bg-hover)] px-3 py-2">
-        <div ref={wsContainerRef} className="w-full"/>
+      {/* 自定义时间轴: 绿色保留段 + 红色删除段 + 蓝色播放进度 */}
+      <div
+        className="relative h-8 bg-[var(--bg-hover)] rounded-lg overflow-hidden cursor-pointer select-none"
+        onClick={(e) => {
+          const v = videoRef.current
+          if (!v || !ready) return
+          const rect = e.currentTarget.getBoundingClientRect()
+          const x = e.clientX - rect.left
+          const t = (x / rect.width) * data.duration
+          v.currentTime = t
+        }}
+        title="点击跳转"
+      >
+        {/* 整条时间轴底色 (浅绿表示保留) */}
+        <div className="absolute inset-0 bg-emerald-500/15"/>
+        {/* 删除段 (红色阴影) */}
+        {deleteRanges.map(([s, e], i) => (
+          <div
+            key={i}
+            className="absolute top-0 bottom-0 bg-red-500/55"
+            style={{
+              left: `${(s / data.duration) * 100}%`,
+              width: `${((e - s) / data.duration) * 100}%`,
+            }}
+          />
+        ))}
+        {/* 播放进度指示器 (蓝色 cursor) */}
+        <div
+          className="absolute top-0 bottom-0 w-0.5 bg-sky-500 pointer-events-none"
+          style={{ left: `${(currentTime / data.duration) * 100}%` }}
+        />
       </div>
 
       {/* 工具栏 */}
