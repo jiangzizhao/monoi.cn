@@ -416,12 +416,14 @@ async def clean_narration_video(file: UploadFile = File(...)):
     with open(raw_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
 
-    # 2. 转 mp4 (-hwaccel cuda 解码 H.265 .MOV; h264_nvenc 编码; preset p2 速度优先)
-    #    iPhone 录的 .MOV 是 HEVC, 必须 GPU 解码, 否则 CPU 解 H.265 4K 巨慢甚至卡死
+    # 2. 转 mp4 (高质量 + 密集关键帧, 让 finalize 阶段能 stream copy 不重编码)
+    # -g 30 + -force_key_frames "expr:gte(t,n_forced)": 每秒一个 keyframe (30fps), finalize 切片精度 ≤1s 误差
+    # -cq 18 + preset p4: 高质量 (跟原视频接近)
     proc = subprocess.run(
         ["ffmpeg", "-y", "-hwaccel", "cuda", "-i", raw_path,
-         "-c:v", "h264_nvenc", "-preset", "p2", "-cq", "26",
-         "-c:a", "aac", "-pix_fmt", "yuv420p",
+         "-c:v", "h264_nvenc", "-preset", "p4", "-cq", "18",
+         "-g", "30", "-force_key_frames", "expr:gte(t,n_forced)",
+         "-c:a", "aac", "-b:a", "192k", "-pix_fmt", "yuv420p",
          "-movflags", "+faststart",
          video_path],
         capture_output=True, timeout=600,
@@ -493,8 +495,9 @@ class FinalizeVideoRequest(BaseModel):
 
 @app.post("/finalize-narration-video")
 def finalize_narration_video(req: FinalizeVideoRequest):
-    """根据用户保留段, ffmpeg select+aselect 切视频. 重编码 (libx264) 保证段间过渡平滑."""
+    """根据用户保留段, 用 stream copy 无损切片 + concat 拼接 (画质 100% 不掉)."""
     import subprocess
+    import shutil
 
     safe = os.path.basename(req.source_file)
     src_path = os.path.join(NARRATION_OUTPUT_DIR, safe)
@@ -506,21 +509,40 @@ def finalize_narration_video(req: FinalizeVideoRequest):
     out_name = f"final_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}.mp4"
     out_path = os.path.join(NARRATION_OUTPUT_DIR, out_name)
 
-    # ffmpeg select + aselect 同步切视频和音频; -hwaccel cuda 解码 + nvenc 编码
-    select_expr = "+".join(f"between(t,{s},{e})" for s, e in req.keep_ranges)
-    proc = subprocess.run(
-        ["ffmpeg", "-y", "-hwaccel", "cuda", "-i", src_path,
-         "-vf", f"select='{select_expr}',setpts=N/FRAME_RATE/TB",
-         "-af", f"aselect='{select_expr}',asetpts=N/SR/TB",
-         "-c:v", "h264_nvenc", "-preset", "p2", "-cq", "26",
-         "-c:a", "aac", "-pix_fmt", "yuv420p",
-         "-movflags", "+faststart",
-         out_path],
-        capture_output=True, timeout=900,
-    )
-    if proc.returncode != 0:
-        err = proc.stderr.decode("utf-8", errors="ignore")[-500:]
-        raise HTTPException(500, f"ffmpeg 剪辑失败: {err}")
+    # 无损切片: 每个 keep_range 用 -ss/-to + -c copy 切成片段, 再用 concat demuxer 拼起来
+    # 不重编码, 画质 100% 跟 clean 阶段一致 (clean 已设每秒 keyframe, 切片精度 ≤1s)
+    seg_files: list[str] = []
+    seg_dir = os.path.join(NARRATION_OUTPUT_DIR, f"_seg_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}")
+    os.makedirs(seg_dir, exist_ok=True)
+    try:
+        for i, (s, e) in enumerate(req.keep_ranges):
+            seg_path = os.path.join(seg_dir, f"seg_{i:04d}.mp4")
+            cut = subprocess.run(
+                ["ffmpeg", "-y", "-ss", f"{s:.3f}", "-to", f"{e:.3f}", "-i", src_path,
+                 "-c", "copy", "-avoid_negative_ts", "make_zero", seg_path],
+                capture_output=True, timeout=300,
+            )
+            if cut.returncode != 0 or not os.path.exists(seg_path):
+                err = cut.stderr.decode("utf-8", errors="ignore")[-300:]
+                raise HTTPException(500, f"切片 {i} 失败: {err}")
+            seg_files.append(seg_path)
+
+        # concat demuxer 拼接 (stream copy, 无损)
+        list_path = os.path.join(seg_dir, 'list.txt')
+        with open(list_path, 'w', encoding='utf-8') as f:
+            for sf in seg_files:
+                f.write(f"file '{sf.replace(chr(92), '/')}'\n")
+        proc = subprocess.run(
+            ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", list_path,
+             "-c", "copy", "-movflags", "+faststart", out_path],
+            capture_output=True, timeout=600,
+        )
+        if proc.returncode != 0:
+            err = proc.stderr.decode("utf-8", errors="ignore")[-500:]
+            raise HTTPException(500, f"ffmpeg concat 失败: {err}")
+    finally:
+        try: shutil.rmtree(seg_dir, ignore_errors=True)
+        except: pass
 
     # ffprobe 取新视频时长
     probe = subprocess.run(
@@ -579,11 +601,12 @@ def clean_narration_video_oss(req: CleanVideoOssRequest):
     except Exception as e:
         raise HTTPException(400, f"OSS 下载失败: {e}")
 
-    # 2. 转 mp4 (-hwaccel cuda 解 H.265, nvenc 编, p2 速度优先)
+    # 2. 转 mp4 (高质量 + 密集关键帧, finalize 阶段能 stream copy 不重编码)
     proc = subprocess.run(
         ["ffmpeg", "-y", "-hwaccel", "cuda", "-i", raw_path,
-         "-c:v", "h264_nvenc", "-preset", "p2", "-cq", "26",
-         "-c:a", "aac", "-pix_fmt", "yuv420p",
+         "-c:v", "h264_nvenc", "-preset", "p4", "-cq", "18",
+         "-g", "30", "-force_key_frames", "expr:gte(t,n_forced)",
+         "-c:a", "aac", "-b:a", "192k", "-pix_fmt", "yuv420p",
          "-movflags", "+faststart",
          video_path],
         capture_output=True, timeout=600,
@@ -673,8 +696,9 @@ class FinalizeVideoOssRequest(BaseModel):
 
 @app.post("/finalize-narration-video-oss")
 def finalize_narration_video_oss(req: FinalizeVideoOssRequest):
-    """OSS 模式: 从 OSS 拉源视频 (clean 阶段保存的), 切完上传 OSS 输出, 返回签名 GET URL."""
+    """OSS 模式: 从 OSS 拉源视频, 用 stream copy 无损切片 + concat 拼接 (画质 100% 不掉)."""
     import subprocess
+    import shutil
     import tempfile
     from oss_helper import oss_download, oss_upload, oss_sign_get, oss_delete
 
@@ -684,6 +708,8 @@ def finalize_narration_video_oss(req: FinalizeVideoOssRequest):
     job_id = f"final_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}"
     src_path = os.path.join(tempfile.gettempdir(), f"{job_id}_src.mp4")
     out_path = os.path.join(tempfile.gettempdir(), f"{job_id}_out.mp4")
+    seg_dir = os.path.join(tempfile.gettempdir(), f"{job_id}_segs")
+    os.makedirs(seg_dir, exist_ok=True)
 
     # 1. 从 OSS 下载源视频
     try:
@@ -691,22 +717,39 @@ def finalize_narration_video_oss(req: FinalizeVideoOssRequest):
     except Exception as e:
         raise HTTPException(400, f"OSS 下载失败: {e}")
 
-    # 2. ffmpeg select + aselect 切; -hwaccel cuda 解 H.265, nvenc 编
-    select_expr = "+".join(f"between(t,{s},{e})" for s, e in req.keep_ranges)
-    proc = subprocess.run(
-        ["ffmpeg", "-y", "-hwaccel", "cuda", "-i", src_path,
-         "-vf", f"select='{select_expr}',setpts=N/FRAME_RATE/TB",
-         "-af", f"aselect='{select_expr}',asetpts=N/SR/TB",
-         "-c:v", "h264_nvenc", "-preset", "p2", "-cq", "26",
-         "-c:a", "aac", "-pix_fmt", "yuv420p",
-         "-movflags", "+faststart",
-         out_path],
-        capture_output=True, timeout=900,
-    )
-    try: os.unlink(src_path)
-    except: pass
-    if proc.returncode != 0:
-        err = proc.stderr.decode("utf-8", errors="ignore")[-500:]
+    # 2. 无损切片 + concat 拼接 (不重编码)
+    seg_files: list[str] = []
+    proc = None
+    try:
+        for i, (s, e) in enumerate(req.keep_ranges):
+            seg_path = os.path.join(seg_dir, f"seg_{i:04d}.mp4")
+            cut = subprocess.run(
+                ["ffmpeg", "-y", "-ss", f"{s:.3f}", "-to", f"{e:.3f}", "-i", src_path,
+                 "-c", "copy", "-avoid_negative_ts", "make_zero", seg_path],
+                capture_output=True, timeout=300,
+            )
+            if cut.returncode != 0 or not os.path.exists(seg_path):
+                err = cut.stderr.decode("utf-8", errors="ignore")[-300:]
+                raise HTTPException(500, f"切片 {i} 失败: {err}")
+            seg_files.append(seg_path)
+
+        list_path = os.path.join(seg_dir, 'list.txt')
+        with open(list_path, 'w', encoding='utf-8') as f:
+            for sf in seg_files:
+                f.write(f"file '{sf.replace(chr(92), '/')}'\n")
+        proc = subprocess.run(
+            ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", list_path,
+             "-c", "copy", "-movflags", "+faststart", out_path],
+            capture_output=True, timeout=600,
+        )
+    finally:
+        try: os.unlink(src_path)
+        except: pass
+        try: shutil.rmtree(seg_dir, ignore_errors=True)
+        except: pass
+
+    if proc is None or proc.returncode != 0:
+        err = proc.stderr.decode("utf-8", errors="ignore")[-500:] if proc else 'unknown'
         raise HTTPException(500, f"ffmpeg 剪辑失败: {err}")
 
     # 3. ffprobe 取时长
