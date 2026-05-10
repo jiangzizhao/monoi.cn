@@ -24,10 +24,11 @@ function AssetThumb({ asset, selected, onSelect }: { asset: VideoAsset; selected
   )
 }
 
-function SentenceRow({ item, index, selected, onSelect, onRefresh }: {
-  item: FootageSentenceItem; index: number; selected: VideoAsset | undefined
-  onSelect: (a: VideoAsset) => void; onRefresh: (kw: string) => void
+function SentenceRow({ item, index, selected, onToggle, onRefresh }: {
+  item: FootageSentenceItem; index: number; selected: VideoAsset[]
+  onToggle: (a: VideoAsset) => void; onRefresh: (kw: string) => void
 }) {
+  const isSelected = (a: VideoAsset) => selected.some(s => s.id === a.id && s.source === a.source)
   const [expanded, setExpanded] = useState(true)
   const [editing, setEditing] = useState(false)
   const [kw, setKw] = useState(item.search_en[0] || '')
@@ -74,7 +75,7 @@ function SentenceRow({ item, index, selected, onSelect, onRefresh }: {
           ) : item.assets && item.assets.length > 0 ? (
             <div className="grid grid-cols-3 gap-2">
               {item.assets.map(a => (
-                <AssetThumb key={`${a.source}-${a.id}`} asset={a} selected={selected?.id === a.id && selected?.source === a.source} onSelect={() => onSelect(a)}/>
+                <AssetThumb key={`${a.source}-${a.id}`} asset={a} selected={isSelected(a)} onSelect={() => onToggle(a)}/>
               ))}
             </div>
           ) : (
@@ -91,7 +92,7 @@ export function FootageGrid({ data, onUpdate }: {
   msgId?: string; blockIndex?: number
   onUpdate: (newData: FootageSentenceItem[]) => void
 }) {
-  const [selected, setSelected] = useState<Record<number, VideoAsset>>({})
+  const [selected, setSelected] = useState<Record<number, VideoAsset[]>>({})
 
   const refresh = async (index: number, keyword: string) => {
     const updated = data.map((it, i) => i === index ? { ...it, loadingAssets: true } : it)
@@ -100,28 +101,43 @@ export function FootageGrid({ data, onUpdate }: {
     onUpdate(data.map((it, i) => i === index ? { ...it, assets: [...p, ...px], loadingAssets: false } : it))
   }
 
+  const toggle = (sentenceIdx: number, asset: VideoAsset) => {
+    setSelected(prev => {
+      const list = prev[sentenceIdx] || []
+      const exists = list.some(s => s.id === asset.id && s.source === asset.source)
+      const next = exists
+        ? list.filter(s => !(s.id === asset.id && s.source === asset.source))
+        : [...list, asset]
+      return { ...prev, [sentenceIdx]: next }
+    })
+  }
+
   const exportList = () => {
-    const lines = Object.entries(selected).map(([i, a]) => {
-      const s = data[Number(i)]
-      return `句子 ${Number(i)+1}：${s?.text}\n来源：${a.source}\n链接：${a.source_url}`
-    }).join('\n\n---\n\n')
+    const lines = Object.entries(selected)
+      .filter(([_, list]) => list.length > 0)
+      .map(([i, list]) => {
+        const s = data[Number(i)]
+        const items = list.map((a, idx) => `  ${idx + 1}. [${a.source}] ${a.source_url}`).join('\n')
+        return `句子 ${Number(i)+1}：${s?.text}\n${items}`
+      }).join('\n\n---\n\n')
     const blob = new Blob([lines], { type: 'text/plain' })
     const el = document.createElement('a'); el.href = URL.createObjectURL(blob); el.download = 'footage.txt'; el.click()
   }
 
-  const selCount = Object.keys(selected).length
+  const selTotal = Object.values(selected).reduce((sum, list) => sum + list.length, 0)
+  const selSentenceCount = Object.values(selected).filter(l => l.length > 0).length
 
   return (
     <div className="w-full flex flex-col gap-2">
       {data.map((item, i) => (
         <SentenceRow key={i} item={item} index={i}
-          selected={selected[i]}
-          onSelect={a => setSelected(p => ({ ...p, [i]: a }))}
+          selected={selected[i] || []}
+          onToggle={a => toggle(i, a)}
           onRefresh={kw => refresh(i, kw)}/>
       ))}
-      {selCount > 0 && (
+      {selTotal > 0 && (
         <div className="flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-[var(--bg-hover)] border border-[var(--border)]">
-          <span className="text-xs text-[var(--text-2)]">已选 {selCount} / {data.length} 个素材</span>
+          <span className="text-xs text-[var(--text-2)]">已选 {selTotal} 个素材 · 覆盖 {selSentenceCount} / {data.length} 句</span>
           <button onClick={exportList} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[var(--text)] text-[var(--bg)] text-xs cursor-pointer hover:opacity-80 transition-opacity">
             <Download size={12}/> 导出清单
           </button>
