@@ -831,7 +831,7 @@ def compose_footage(req: ComposeRequest):
                 try:
                     if asset.oss_key:
                         oss_download(asset.oss_key, local)
-                    else:
+                    elif asset.url:
                         # 公网 URL (Pexels/Pixabay) — 必须带浏览器 UA, 否则 403 Forbidden
                         ureq = urllib.request.Request(asset.url, headers={
                             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -839,10 +839,23 @@ def compose_footage(req: ComposeRequest):
                         })
                         with urllib.request.urlopen(ureq, timeout=120) as resp, open(local, 'wb') as f:
                             shutil.copyfileobj(resp, f)
+                    else:
+                        raise ValueError('asset 没 url 也没 oss_key')
+
+                    # ffprobe 验文件是有效视频 (Pexels CDN 偶尔返 HTML 错误页, 文件大小不是 0 但不能解码)
+                    probe = subprocess.run(
+                        ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
+                         '-show_entries', 'stream=codec_name', '-of', 'default=nw=1:nk=1', local],
+                        capture_output=True, timeout=30,
+                    )
+                    if probe.returncode != 0 or not probe.stdout.strip():
+                        raise ValueError(f'下载的文件不是有效视频 (ffprobe 失败)')
                     asset_files[(si, ai)] = local
                 except Exception as e:
-                    print(f"[compose] asset {si}/{ai} 下载失败: {e}", flush=True)
+                    print(f"[compose] asset {si}/{ai} 下载/校验失败 ({asset.url[:80] if asset.url else asset.oss_key}): {e}", flush=True)
                     # 失败的镜头让 ffmpeg fallback 用口播画面 (跟"没素材"一样处理)
+                    try: os.unlink(local)
+                    except: pass
 
         # 3. 构造 ffmpeg filter_complex
         # 输入: 0=narration, 1..N = 所有素材 (按出现顺序)

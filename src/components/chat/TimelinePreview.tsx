@@ -89,11 +89,14 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
       const shots = segmentTimes.map((seg, i) => ({
         start: seg.start,
         end: seg.end,
-        assets: (selected[i] || []).map(a => ({
-          url: a.preview_url || a.source_url,
-          oss_key: a.oss_key,
-          duration: a.duration || 0,
-        })),
+        // 过滤掉没真实视频 URL 的 asset (没 preview_url 又没 oss_key 的会拉到 HTML 网页, 让 ffmpeg 挂)
+        assets: (selected[i] || [])
+          .filter(a => a.oss_key || (a.preview_url && /\.(mp4|mov|webm|mkv)(\?|$)/i.test(a.preview_url)))
+          .map(a => ({
+            url: a.oss_key ? '' : (a.preview_url || ''),    // oss_key 优先, 没就用 preview_url
+            oss_key: a.oss_key,
+            duration: a.duration || 0,
+          })),
       }))
       const body = {
         narration_oss_key: narrationOssKey,
