@@ -69,11 +69,64 @@ interface CleanResponse {
   }
 }
 
+export interface KeptSegment {
+  start: number   // 在剪辑后视频里的时间
+  end: number
+  text: string
+  words: Word[]
+}
+
+// 把原 segments 按 keep_ranges 重映射到剪辑后视频的时间. 对每个原 word, 看它的 [start, end] 在哪个
+// keep_range 内, 算出新时间. 跨边界被部分删除的词丢弃. 相邻保留词组装回 segment (按原 segment 边界 + 新时间连续性).
+function computeKeptSegments(originalSegments: Segment[], keepRanges: number[][]): KeptSegment[] {
+  const ranges = [...keepRanges].sort((a, b) => a[0] - b[0])
+  // 累计偏移: priorLen[i] = ranges[0..i-1] 的总长度
+  const priorLen: number[] = []
+  let acc = 0
+  for (const r of ranges) {
+    priorLen.push(acc)
+    acc += r[1] - r[0]
+  }
+
+  const result: KeptSegment[] = []
+  for (const seg of originalSegments) {
+    const keptWords: Word[] = []
+    let lastNewEnd = -1
+    for (const w of seg.words || []) {
+      const idx = ranges.findIndex(r => w.start >= r[0] && w.end <= r[1])
+      if (idx === -1) continue
+      const newStart = priorLen[idx] + (w.start - ranges[idx][0])
+      const newEnd = priorLen[idx] + (w.end - ranges[idx][0])
+      // 中间出现 gap (词被删了一段) → 切成新 segment
+      if (lastNewEnd >= 0 && newStart - lastNewEnd > 0.05 && keptWords.length > 0) {
+        result.push({
+          start: keptWords[0].start,
+          end: keptWords[keptWords.length - 1].end,
+          text: keptWords.map(x => x.word).join(''),
+          words: [...keptWords],
+        })
+        keptWords.length = 0
+      }
+      keptWords.push({ start: newStart, end: newEnd, word: w.word })
+      lastNewEnd = newEnd
+    }
+    if (keptWords.length > 0) {
+      result.push({
+        start: keptWords[0].start,
+        end: keptWords[keptWords.length - 1].end,
+        text: keptWords.map(x => x.word).join(''),
+        words: keptWords,
+      })
+    }
+  }
+  return result
+}
+
 interface Props {
   data: CleanResponse
   apiBase: string
   onCancel: () => void
-  onDone: (videoUrlFull: string, duration: number, transcription: string) => void
+  onDone: (videoUrlFull: string, duration: number, transcription: string, keptSegments: KeptSegment[]) => void
 }
 
 interface WordToken {
@@ -350,7 +403,8 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
       // OSS 模式: 后端返回签名 GET URL (video_url); NATAPP 模式: 拼 apiBase + video_url_path
       const finalUrl = result.video_url || (apiBase + result.video_url_path)
       const finalText = allWords.filter(t => !deletedKeys.has(wordKey(t))).map(t => t.word).join('')
-      onDone(finalUrl, result.duration, finalText)
+      const keptSegments = computeKeptSegments(data.segments, keepRanges)
+      onDone(finalUrl, result.duration, finalText, keptSegments)
     } catch (e: any) {
       setError(e.message || '导出失败')
     } finally {

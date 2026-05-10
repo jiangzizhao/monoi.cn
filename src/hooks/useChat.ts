@@ -1,6 +1,6 @@
 import { useRef, useCallback } from 'react'
 import { useChatStore, makeUserMsg, makeAssistantMsg } from '../store/chatStore'
-import { callAI, callScriptAI, callFootageAI, isScriptPrompt, parseBlocks } from '../services/ai'
+import { callAI, callScriptAI, callFootageAI, callFootageAIBySegments, isScriptPrompt, parseBlocks } from '../services/ai'
 import { searchPexels } from '../services/pexels'
 import { searchPixabay } from '../services/pixabay'
 import type { ChoiceOption, FootageSentenceItem, MessageBlock } from '../types'
@@ -324,6 +324,9 @@ export function useChat() {
       const charCount = script.replace(/\s/g, '').length
       displayText = `智能匹配素材 · ${charCount} 字文案`
     }
+    if (text === '__auto_footage_from_video__') {
+      displayText = '智能匹配素材 · 用上一段口播视频'
+    }
     if (text.startsWith('__dialect__')) {
       const m = text.match(/^__dialect__(\w+)__/)
       const labelMap: Record<string, string> = {
@@ -359,6 +362,68 @@ export function useChat() {
       if (text.startsWith('__paste_script__')) {
         const script = text.slice('__paste_script__'.length).trim()
         store.updateLastAssistantBlocks(convId, [makeScriptCard(script)])
+        return
+      }
+
+      // 自动从最近的口播视频接 segments 做素材匹配 (跳过拆句, 跟时间戳严格对齐)
+      if (text === '__auto_footage_from_video__') {
+        // 从对话里找最近一个 video_player.data 拿 kept_segments
+        let segments: { text: string; start: number; end: number }[] | null = null
+        for (let i = conv.messages.length - 1; i >= 0; i--) {
+          const msg = conv.messages[i]
+          if (msg.role !== 'assistant') continue
+          for (const block of msg.blocks) {
+            if (block.type === 'video_player') {
+              const ks = (block as any).data?.kept_segments
+              if (Array.isArray(ks) && ks.length > 0) {
+                segments = ks.map((s: any) => ({ text: s.text, start: s.start, end: s.end }))
+                break
+              }
+            }
+          }
+          if (segments) break
+        }
+        if (!segments || segments.length === 0) {
+          store.updateLastAssistantBlocks(convId, [{ type: 'error', message: '没找到可用的口播视频 segments. 先做口播剪辑再试.' }])
+          return
+        }
+
+        store.updateLastAssistantBlocks(convId, [{ type: 'loading', label: `AI 正在为 ${segments.length} 个镜头提取画面词...` }])
+        try {
+          const inputs = segments.map(s => ({ text: s.text, duration: s.end - s.start }))
+          const keywords = await callFootageAIBySegments(inputs, ctrl.signal)
+          const items: FootageSentenceItem[] = segments.map((s, i) => ({
+            text: s.text,
+            scene: keywords[i]?.scene || '',
+            search_en: keywords[i]?.search_en || [],
+            search_cn: keywords[i]?.search_cn || [],
+            duration: s.end - s.start,
+            assets: [],
+            loadingAssets: true,
+          }))
+          store.updateLastAssistantBlocks(convId, [
+            { type: 'text', content: `✓ 拆出 ${items.length} 镜, 正在并发去 Pexels + Pixabay 拉素材...` },
+            { type: 'footage_grid', data: items },
+          ])
+          const updated = [...items]
+          for (let i = 0; i < updated.length; i++) {
+            if (ctrl.signal.aborted) return
+            const kw = updated[i].search_en[0] || updated[i].search_cn[0] || updated[i].text
+            const [p, px] = await Promise.all([searchPexels(kw, 5), searchPixabay(kw, 3)])
+            updated[i] = { ...updated[i], assets: [...p, ...px], loadingAssets: false }
+            store.updateLastAssistantBlocks(convId, [
+              { type: 'text', content: `拉素材中... (${i + 1}/${items.length})` },
+              { type: 'footage_grid', data: [...updated] },
+            ])
+            await new Promise(r => setTimeout(r, 200))
+          }
+          store.updateLastAssistantBlocks(convId, [
+            { type: 'text', content: `✓ 匹配完成 ${items.length} 镜. 每镜挑你喜欢的, 后续会接预览 + 合成.` },
+            { type: 'footage_grid', data: [...updated] },
+          ])
+        } catch (e: any) {
+          store.updateLastAssistantBlocks(convId, [{ type: 'error', message: e.message || '匹配失败' }])
+        }
         return
       }
 
@@ -435,6 +500,7 @@ export function useChat() {
               audio_label: '口播剪辑',
               source: 'upload',
               text_preview: p.transcription?.slice(0, 80),
+              kept_segments: p.kept_segments,    // 给后续 footage 匹配用
             },
           },
           {
@@ -445,7 +511,7 @@ export function useChat() {
             type: 'choices',
             question: '下一步',
             options: [
-              { id: '我要为这段视频找素材', label: '搜素材', description: '按转录文案拆句, 搜 Pexels/Pixabay 视频' },
+              { id: '__auto_footage_from_video__', label: '智能匹配素材', description: '按视频时间戳自动拆镜, 拉 Pexels/Pixabay 候选' },
               { id: '我要做分镜表', label: '做分镜', description: '生成达芬奇 EDL 兼容的分镜表' },
               { id: '保留这段视频, 暂不做下一步', label: '保留视频', description: '稍后再决定' },
             ],
@@ -642,7 +708,8 @@ export function useChat() {
     const convId = store.activeId
     if (!convId) return
     store.chooseOption(convId, msgId, blockIdx, opt.id)
-    send(opt.label)
+    // __ 前缀的 id 是内部 payload (走特殊处理), 用 id 触发; 否则用 label (作为对话文本)
+    send(opt.id.startsWith('__') ? opt.id : opt.label)
   }, [store, send])
 
   const stop = useCallback(() => {

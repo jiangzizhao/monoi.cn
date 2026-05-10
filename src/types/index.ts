@@ -62,6 +62,13 @@ export interface AudioResult {
   engine?: string
 }
 
+export interface KeptSegmentLite {
+  start: number
+  end: number
+  text: string
+  words?: { start: number; end: number; word: string }[]
+}
+
 export interface VideoResult {
   video_url: string         // 完整 URL 或形如 /api/digital-human/video/xxx
   duration_ms?: number
@@ -70,6 +77,7 @@ export interface VideoResult {
   audio_label?: string      // 用了什么音频(如"莫小本 1.0x")
   source?: 'digital_human' | 'upload' | 'ai_generated'
   text_preview?: string
+  kept_segments?: KeptSegmentLite[]   // 剪辑后视频的 segments (口播视频专用, 用于自动匹配素材)
 }
 
 export type MessageBlock =

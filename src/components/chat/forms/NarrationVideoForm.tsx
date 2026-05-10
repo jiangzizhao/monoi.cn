@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Loader2, Upload, X } from 'lucide-react'
-import { NarrationVideoEditor } from '../NarrationVideoEditor'
+import { NarrationVideoEditor, type KeptSegment } from '../NarrationVideoEditor'
 
 interface Props {
   onSubmit: (message: string) => void
@@ -164,11 +164,12 @@ export function NarrationVideoForm({ onSubmit, onClose }: Props) {
     xhr.send(fd)
   }
 
-  const handleDone = (videoUrl: string, duration: number, transcription: string) => {
+  const handleDone = (videoUrl: string, duration: number, transcription: string, keptSegments: KeptSegment[]) => {
     onSubmit('__narration_video_done__' + JSON.stringify({
       video_url: videoUrl,
       duration_ms: Math.round(duration * 1000),
       transcription,
+      kept_segments: keptSegments,
     }))
   }
 
