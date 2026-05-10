@@ -1124,6 +1124,187 @@ def compose_footage(req: ComposeRequest):
         except: pass
 
 
+# ============== 视频封面生成 (截帧 + drawtext 叠标题, 5 个内置模板, 4 种比例) ==============
+
+
+class CoverRequest(BaseModel):
+    source_oss_key: str            # 视频 OSS key (合成后或原口播)
+    frame_time: float = 1.0        # 第几秒截帧
+    title: str                     # 主标题
+    subtitle: str = ''             # 副标题 (可选)
+    template: str = 'youtube'      # 'youtube' / 'douyin' / 'xhs' / 'bilibili' / 'minimal'
+    output_ratios: list[str] = ['9:16', '16:9', '3:4', '1:1']
+
+
+# 各模板按比例输出尺寸 (短边 1080)
+_COVER_DIMS = {
+    '9:16': (1080, 1920),
+    '16:9': (1920, 1080),
+    '3:4':  (1080, 1440),
+    '1:1':  (1080, 1080),
+}
+
+# Windows 系统中文字体路径
+_WIN_FONTS = {
+    'msyh':   'C:/Windows/Fonts/msyh.ttc',     # 微软雅黑
+    'msyhbd': 'C:/Windows/Fonts/msyhbd.ttc',   # 微软雅黑 Bold
+    'simhei': 'C:/Windows/Fonts/simhei.ttf',   # 黑体
+    'simsun': 'C:/Windows/Fonts/simsun.ttc',   # 宋体
+}
+
+
+def _escape_drawtext(s: str) -> str:
+    """ffmpeg drawtext 参数特殊字符转义"""
+    return s.replace('\\', '\\\\').replace(':', '\\:').replace("'", "\\'").replace('%', '\\%')
+
+
+def _build_template_filter(template: str, title: str, subtitle: str, W: int, H: int) -> str:
+    """按模板生成 ffmpeg 滤镜片段 (在 scale+crop 之后追加)"""
+    title = _escape_drawtext(title)
+    subtitle = _escape_drawtext(subtitle) if subtitle else ''
+    bd = _WIN_FONTS['msyhbd'].replace(':', r'\:')
+    rg = _WIN_FONTS['msyh'].replace(':', r'\:')
+
+    # 字号按短边算 (短边 1080, 大标题 ~120px, 副标题 ~60px)
+    base = min(W, H)
+    title_size = int(base * 0.10)
+    sub_size = int(base * 0.05)
+
+    parts = []
+
+    if template == 'youtube':
+        # 大粗黄字 + 红描边, 上方 1/4
+        parts.append(
+            f"drawtext=fontfile='{bd}':text='{title}':fontsize={title_size}:fontcolor=yellow:"
+            f"bordercolor=red:borderw=8:x=(w-text_w)/2:y=h*0.12"
+        )
+        if subtitle:
+            parts.append(
+                f"drawtext=fontfile='{bd}':text='{subtitle}':fontsize={sub_size}:fontcolor=white:"
+                f"bordercolor=black:borderw=4:x=(w-text_w)/2:y=h*0.12+{title_size}*1.3"
+            )
+
+    elif template == 'douyin':
+        # 上下黑底 padding (drawbox), 中间画面, 黑底上写白字
+        bar_h = int(H * 0.18)
+        parts.append(f"drawbox=x=0:y=0:w=iw:h={bar_h}:color=black@1:t=fill")
+        parts.append(f"drawbox=x=0:y=ih-{bar_h}:w=iw:h={bar_h}:color=black@1:t=fill")
+        parts.append(
+            f"drawtext=fontfile='{bd}':text='{title}':fontsize={int(title_size*0.9)}:fontcolor=white:"
+            f"x=(w-text_w)/2:y={(bar_h - int(title_size*0.9))//2}"
+        )
+        if subtitle:
+            parts.append(
+                f"drawtext=fontfile='{rg}':text='{subtitle}':fontsize={sub_size}:fontcolor=white:"
+                f"x=(w-text_w)/2:y=ih-{bar_h}+{(bar_h - sub_size)//2}"
+            )
+
+    elif template == 'xhs':
+        # 顶部亮色色块 + 主副两行
+        block_h = int(H * 0.22)
+        parts.append(f"drawbox=x=0:y=0:w=iw:h={block_h}:color=0xFF6B6B@0.92:t=fill")
+        parts.append(
+            f"drawtext=fontfile='{bd}':text='{title}':fontsize={int(title_size*0.85)}:fontcolor=white:"
+            f"x=40:y=40"
+        )
+        if subtitle:
+            parts.append(
+                f"drawtext=fontfile='{rg}':text='{subtitle}':fontsize={sub_size}:fontcolor=white:"
+                f"x=40:y=40+{int(title_size*0.85)}*1.2"
+            )
+
+    elif template == 'bilibili':
+        # 左下角浅色半透明卡片 + 标题
+        card_h = int(H * 0.16)
+        card_w = int(W * 0.8)
+        parts.append(f"drawbox=x=40:y=ih-{card_h}-40:w={card_w}:h={card_h}:color=white@0.85:t=fill")
+        parts.append(
+            f"drawtext=fontfile='{bd}':text='{title}':fontsize={int(title_size*0.7)}:fontcolor=black:"
+            f"x=70:y=ih-{card_h}-40+30"
+        )
+        if subtitle:
+            parts.append(
+                f"drawtext=fontfile='{rg}':text='{subtitle}':fontsize={int(sub_size*0.9)}:fontcolor=0x666666:"
+                f"x=70:y=ih-{card_h}-40+30+{int(title_size*0.7)}*1.2"
+            )
+
+    else:  # minimal
+        # 底部一行小字, 半透明黑底
+        parts.append(f"drawbox=x=0:y=ih-{int(sub_size*2.5)}:w=iw:h={int(sub_size*2.5)}:color=black@0.6:t=fill")
+        parts.append(
+            f"drawtext=fontfile='{rg}':text='{title}':fontsize={int(sub_size*1.2)}:fontcolor=white:"
+            f"x=(w-text_w)/2:y=ih-{int(sub_size*2.5)}+{int(sub_size*0.6)}"
+        )
+
+    return ','.join(parts)
+
+
+@app.post("/generate-cover")
+def generate_cover(req: CoverRequest):
+    """从源视频截帧 + drawtext 叠标题 + 输出多比例封面到 OSS"""
+    import shutil
+    import subprocess
+    import tempfile
+    from oss_helper import oss_download, oss_upload, oss_sign_get
+
+    if not req.title.strip():
+        raise HTTPException(400, '标题不能为空')
+    if req.template not in {'youtube', 'douyin', 'xhs', 'bilibili', 'minimal'}:
+        raise HTTPException(400, f'未知模板: {req.template}')
+
+    job_id = f"cover_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}"
+    work_dir = os.path.join(tempfile.gettempdir(), job_id)
+    os.makedirs(work_dir, exist_ok=True)
+
+    try:
+        # 1. 从 OSS 下载源视频
+        src_path = os.path.join(work_dir, 'source.mp4')
+        try:
+            oss_download(req.source_oss_key, src_path)
+        except Exception as e:
+            err = str(e)
+            if 'NoSuchKey' in err or '404' in err:
+                raise HTTPException(410, '源视频已过期 (>1 天 OSS 自动清理), 重新合成一遍.')
+            raise HTTPException(400, f'OSS 下载失败: {err[:200]}')
+
+        # 2. 每个比例输出一张
+        results = []
+        for ratio in req.output_ratios:
+            if ratio not in _COVER_DIMS:
+                continue
+            W, H = _COVER_DIMS[ratio]
+            out_jpg = os.path.join(work_dir, f"cover_{ratio.replace(':', 'x')}.jpg")
+
+            # 滤镜: 截帧 → scale+crop 到目标尺寸 → 模板叠字
+            template_filter = _build_template_filter(req.template, req.title, req.subtitle, W, H)
+            vf = (
+                f"scale={W}:{H}:force_original_aspect_ratio=increase,"
+                f"crop={W}:{H},"
+                f"{template_filter}"
+            )
+            cmd = ["ffmpeg", "-y", "-ss", f"{req.frame_time:.3f}", "-i", src_path,
+                   "-frames:v", "1", "-vf", vf, "-q:v", "2", out_jpg]
+            proc = subprocess.run(cmd, capture_output=True, timeout=60)
+            if proc.returncode != 0 or not os.path.exists(out_jpg):
+                err = proc.stderr.decode("utf-8", errors="ignore")[-400:]
+                print(f"[cover] ratio {ratio} 失败: {err}", flush=True)
+                continue
+
+            # 上传 OSS
+            oss_key = f"covers/{job_id}_{ratio.replace(':', 'x')}.jpg"
+            oss_upload(oss_key, out_jpg, content_type='image/jpeg')
+            url = oss_sign_get(oss_key, expires=24 * 3600)
+            results.append({'ratio': ratio, 'oss_key': oss_key, 'url': url})
+
+        if not results:
+            raise HTTPException(500, '所有比例封面生成都失败, 看 voice-server 窗口 stderr')
+
+        return {'success': True, 'covers': results}
+    finally:
+        try: shutil.rmtree(work_dir, ignore_errors=True)
+        except: pass
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=9001)

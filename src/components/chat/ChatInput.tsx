@@ -8,6 +8,7 @@ import { VoiceForm } from './forms/VoiceForm'
 import { DigitalHumanForm } from './forms/DigitalHumanForm'
 import { NarrationVideoForm } from './forms/NarrationVideoForm'
 import { FootageMatchForm } from './forms/FootageMatchForm'
+import { CoverGeneratorForm } from './forms/CoverGeneratorForm'
 
 const MODULES: { label: string; Icon: LucideIcon }[] = [
   { label: '文案',  Icon: FileText  },
@@ -43,7 +44,7 @@ const MODULE_OPTIONS: Record<string, { id: string; label: string; desc: string }
     { id: '帮我生成剪辑分镜表', label: '生成分镜表', desc: '小林风格节奏分镜' },
   ],
   '封面': [
-    { id: '帮我用AI生成封面图', label: 'AI生成封面', desc: '根据文案生成封面' },
+    { id: '__form_cover__', label: '生成封面', desc: '截帧 + 5 个模板, 输出多比例; 也能上传自传' },
   ],
   '发布': [
     { id: '帮我生成各平台的发布文案', label: '生成发布文案', desc: '抖音/小红书/视频号/B站' },
@@ -66,6 +67,7 @@ export function ChatInput({ moduleMenu, onModuleClick, onModuleMenuClose }: Prop
   const [digitalHumanForm, setDigitalHumanForm] = useState(false)
   const [narrationVideoForm, setNarrationVideoForm] = useState(false)
   const [footageForm, setFootageForm] = useState(false)
+  const [coverForm, setCoverForm] = useState(false)
   const textRef = useRef<HTMLTextAreaElement>(null)
   const { isGenerating, conversations, activeId } = useChatStore()
   const { send, stop } = useChat()
@@ -106,9 +108,30 @@ export function ChatInput({ moduleMenu, onModuleClick, onModuleMenuClose }: Prop
       setNarrationVideoForm(true)
     } else if (optId === '__form_footage__') {
       setFootageForm(true)
+    } else if (optId === '__form_cover__') {
+      setCoverForm(true)
     } else {
       send(optId)
     }
+  }
+
+  // 从对话里找最近的视频 (video_player), 给封面弹窗用 — 优先 narration_oss_key (口播), 兜底 video_url
+  const findLastVideo = (): { ossKey?: string; url?: string } => {
+    const conv = conversations.find(c => c.id === activeId)
+    if (!conv) return {}
+    for (let i = conv.messages.length - 1; i >= 0; i--) {
+      const msg = conv.messages[i]
+      if (msg.role !== 'assistant') continue
+      for (const block of msg.blocks) {
+        if (block.type === 'video_player') {
+          const data = (block as any).data
+          if (data?.video_url) {
+            return { ossKey: data.narration_oss_key, url: data.video_url }
+          }
+        }
+      }
+    }
+    return {}
   }
 
   // 从对话里找最近一条文案 (script_card 或口播视频转录), 给 footage 弹窗预填
@@ -191,6 +214,16 @@ export function ChatInput({ moduleMenu, onModuleClick, onModuleMenuClose }: Prop
             onClose={() => setFootageForm(false)}
           />
         )}
+        {coverForm && (() => {
+          const v = findLastVideo()
+          return (
+            <CoverGeneratorForm
+              defaultVideoOssKey={v.ossKey}
+              defaultVideoUrl={v.url}
+              onClose={() => setCoverForm(false)}
+            />
+          )
+        })()}
 
         {/* Module option popup */}
         {moduleMenu && options.length > 0 && (
