@@ -5,7 +5,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const apiKey = process.env.DEEPSEEK_API_KEY || ''
   if (!apiKey) return res.status(500).json({ error: 'DEEPSEEK_API_KEY not configured' })
 
-  const { system, messages, stream = false } = req.body
+  const { system, messages, stream = false, json_mode = false } = req.body
 
   // DeepSeek uses OpenAI-compatible format: system goes as first message
   const fullMessages = [
@@ -25,6 +25,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         messages: fullMessages,
         stream,
         max_tokens: 4096,
+        ...(json_mode ? { response_format: { type: 'json_object' } } : {}),
       }),
     })
 

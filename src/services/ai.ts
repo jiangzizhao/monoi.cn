@@ -484,47 +484,64 @@ export async function callFootageAIBySegments(
   const userMsg = `已拆好的 ${segments.length} 句:\n` +
     segments.map((s, i) => `${i + 1}. (${s.duration.toFixed(1)}s) ${s.text}`).join('\n')
 
-  const res = await fetchWithRetry('/api/chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      system: FOOTAGE_BY_SEGMENTS_PROMPT,
-      messages: [{ role: 'user', content: userMsg }],
-      stream: true,
-    }),
-    signal,
-  })
-  if (!res.ok) throw new Error(`API ${res.status}`)
-  const reader = res.body!.getReader()
-  const decoder = new TextDecoder()
-  let full = ''
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    const chunk = decoder.decode(value, { stream: true })
-    for (const line of chunk.split('\n')) {
-      if (!line.startsWith('data: ')) continue
-      const data = line.slice(6).trim()
-      if (data === '[DONE]') continue
-      try {
-        const parsed = JSON.parse(data)
-        const text = parsed.delta?.text || parsed.choices?.[0]?.delta?.content || ''
-        if (text) full += text
-      } catch {}
-    }
+  // 用 json_mode (DeepSeek response_format) + 非流式, 大幅降低 JSON 解析失败概率
+  // 失败时用 jsonrepair 兜底再 parse 一次, 还失败就重试 1 次
+  const callOnce = async (): Promise<any> => {
+    const r = await fetchWithRetry('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        system: FOOTAGE_BY_SEGMENTS_PROMPT,
+        messages: [{ role: 'user', content: userMsg }],
+        stream: false,
+        json_mode: true,
+      }),
+      signal,
+    })
+    if (!r.ok) throw new Error(`API ${r.status}`)
+    const data = await r.json()
+    const content = data?.choices?.[0]?.message?.content || ''
+    return tryParseJsonLoose(content)
   }
-  const cleaned = full.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim()
-  const match = cleaned.match(/\{[\s\S]*\}/)
-  if (!match) throw new Error('AI 没返回有效 JSON')
-  const obj = JSON.parse(match[0])
+
+  let obj: any
+  try {
+    obj = await callOnce()
+  } catch (e) {
+    // 重试 1 次
+    obj = await callOnce()
+  }
   if (!Array.isArray(obj?.keywords) || obj.keywords.length === 0) {
     throw new Error('AI 返回的 keywords 为空')
   }
-  // 长度对齐: AI 偶尔少返一两条, 用空对象补齐避免崩
   while (obj.keywords.length < segments.length) {
     obj.keywords.push({ scene: '', search_en: [], search_cn: [] })
   }
   return obj.keywords.slice(0, segments.length) as FootageKeywords[]
+}
+
+// 宽松 JSON 解析: 先去掉 markdown fence, 再 parse, 失败再用启发式修复 (常见: 末尾被截断 / 多余逗号)
+function tryParseJsonLoose(raw: string): any {
+  const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim()
+  try {
+    return JSON.parse(cleaned)
+  } catch {}
+  // 尝试取最外层 {...}
+  const match = cleaned.match(/\{[\s\S]*\}/)
+  if (match) {
+    try { return JSON.parse(match[0]) } catch {}
+    // 修复 1: 去掉末尾多余逗号 (e.g. "...,]" "...,}")
+    const fixed = match[0].replace(/,\s*([}\]])/g, '$1')
+    try { return JSON.parse(fixed) } catch {}
+    // 修复 2: AI 可能在最后一个数组项截断, 找最后一个完整 } 截到那
+    const lastBrace = match[0].lastIndexOf('}')
+    if (lastBrace > 0) {
+      // 往前找完整的 keywords 数组结束
+      const truncated = match[0].slice(0, lastBrace + 1) + ']}'
+      try { return JSON.parse(truncated) } catch {}
+    }
+  }
+  throw new Error(`AI 返回的 JSON 解析失败: ${cleaned.slice(0, 200)}...`)
 }
 
 export async function callFootageAI(
