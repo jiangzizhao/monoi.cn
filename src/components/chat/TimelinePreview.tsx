@@ -12,7 +12,7 @@ interface Props {
 }
 
 // PIP 配置 (V1: 全局, 全片统一)
-type PipShape = 'circle' | 'rounded'
+type PipShape = 'none' | 'circle' | 'rounded'
 type PipPos = 'tl' | 'tr' | 'bl' | 'br' | 'center'
 type PipSize = 'S' | 'M' | 'L'
 type FaceY = 'top' | 'center' | 'bottom'  // 人物在 PIP 内的纵向位置
@@ -122,23 +122,24 @@ export function TimelinePreview({ videoUrl, segmentTimes, items, selected, onClo
               {currentBroll && (
                 <img src={currentBroll.thumbnail} alt="" className="absolute inset-0 w-full h-full object-cover" />
               )}
-              {/* 口播 video 元素 — 始终在 DOM 里, 通过 className/style 切换全屏 vs PIP */}
+              {/* 口播 video 元素 — 始终在 DOM 里; shape='none' 时变全屏看不见 (但音轨在播) */}
               <video
                 ref={videoRef}
                 src={videoUrl}
                 playsInline
-                style={currentBroll ? {
+                style={!currentBroll ? {
+                  // 没素材的镜头: video 全屏
+                  position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover',
+                } : shape === 'none' ? {
+                  // 无 PIP 模式: video 缩到 1px 隐藏 (保留音频), b-roll 全屏
+                  position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none',
+                } : {
+                  // PIP 模式
                   ...pipStyle,
                   width: `${SIZE_RATIO[size] * 100}%`,
                   aspectRatio: shape === 'circle' ? '1/1' : '16/9',
                   objectFit: 'cover',
                   objectPosition: `center ${FACE_Y_POS[faceY]}`,
-                } : {
-                  position: 'absolute',
-                  inset: 0,
-                  width: '100%',
-                  height: '100%',
-                  objectFit: 'cover',
                 }}
               />
             </div>
@@ -243,14 +244,14 @@ export function TimelinePreview({ videoUrl, segmentTimes, items, selected, onClo
 
             <div className="flex items-center gap-3">
               <span className="text-xs text-[var(--text-3)] w-16">形状</span>
-              <div className="flex gap-2">
-                {(['rounded', 'circle'] as PipShape[]).map(s => (
+              <div className="flex gap-2 flex-wrap">
+                {(['none', 'rounded', 'circle'] as PipShape[]).map(s => (
                   <button
                     key={s}
                     onClick={() => setShape(s)}
                     className={`px-3 py-1.5 rounded-lg text-xs border transition-all cursor-pointer ${shape === s ? 'bg-[var(--text)] text-[var(--bg)] border-[var(--text)]' : 'bg-[var(--bg-card)] text-[var(--text-2)] border-[var(--border)] hover:border-[var(--text-3)]'}`}
                   >
-                    {s === 'circle' ? '○ 圆形' : '▢ 圆角矩形'}
+                    {s === 'none' ? '× 无小窗' : s === 'circle' ? '○ 圆形' : '▢ 圆角矩形'}
                   </button>
                 ))}
               </div>

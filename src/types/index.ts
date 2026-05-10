@@ -30,7 +30,7 @@ export interface VideoAsset {
   thumbnail: string
   preview_url?: string
   source_url: string
-  source: 'pexels' | 'pixabay'
+  source: 'pexels' | 'pixabay' | 'upload'   // upload = 用户自传
   duration: number
   selected?: boolean
 }

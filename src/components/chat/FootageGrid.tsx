@@ -1,20 +1,66 @@
-import { useState } from 'react'
-import { RefreshCw, Pencil, Download, Check, ExternalLink, Play } from 'lucide-react'
+import { useRef, useState } from 'react'
+import { RefreshCw, Pencil, Download, Check, ExternalLink, Play, Upload, Loader2 } from 'lucide-react'
 import { Badge } from '../ui/Badge'
 import { searchPexels } from '../../services/pexels'
 import { searchPixabay } from '../../services/pixabay'
 import type { FootageSentenceItem, VideoAsset } from '../../types'
 import { TimelinePreview } from './TimelinePreview'
 
+// 浏览器侧截视频首帧做缩略图 (avoid 上传服务器再下回来)
+function captureFirstFrame(videoUrl: string): Promise<string> {
+  return new Promise((resolve) => {
+    const v = document.createElement('video')
+    v.src = videoUrl
+    v.crossOrigin = 'anonymous'
+    v.muted = true
+    v.playsInline = true
+    v.preload = 'metadata'
+    v.onloadeddata = () => {
+      v.currentTime = Math.min(0.5, (v.duration || 1) / 2)
+    }
+    v.onseeked = () => {
+      const canvas = document.createElement('canvas')
+      canvas.width = v.videoWidth || 320
+      canvas.height = v.videoHeight || 180
+      const ctx = canvas.getContext('2d')
+      if (ctx) {
+        ctx.drawImage(v, 0, 0, canvas.width, canvas.height)
+        try {
+          resolve(canvas.toDataURL('image/jpeg', 0.7))
+        } catch {
+          resolve('')   // CORS 等情况不出 base64, 用空 (前端会显示占位)
+        }
+      } else resolve('')
+    }
+    v.onerror = () => resolve('')
+  })
+}
+
+function probeDuration(videoUrl: string): Promise<number> {
+  return new Promise((resolve) => {
+    const v = document.createElement('video')
+    v.src = videoUrl
+    v.preload = 'metadata'
+    v.onloadedmetadata = () => resolve(v.duration || 0)
+    v.onerror = () => resolve(0)
+  })
+}
+
 function AssetThumb({ asset, selected, onSelect }: { asset: VideoAsset; selected: boolean; onSelect: () => void }) {
   return (
     <div onClick={onSelect}
       className={`relative aspect-video rounded-lg overflow-hidden cursor-pointer border-2 transition-all duration-150 group ${selected ? 'border-[var(--text)]' : 'border-transparent hover:border-[var(--text-3)]'}`}>
-      <img src={asset.thumbnail} alt="" className="w-full h-full object-cover"/>
+      {asset.thumbnail ? (
+        <img src={asset.thumbnail} alt="" className="w-full h-full object-cover"/>
+      ) : (
+        <div className="w-full h-full bg-[var(--bg-hover)] flex items-center justify-center text-[var(--text-3)]">
+          <Play size={20}/>
+        </div>
+      )}
       {selected && <div className="absolute inset-0 bg-[var(--text)]/20 flex items-center justify-center"><Check size={20} className="text-white drop-shadow"/></div>}
       <div className="absolute top-1 left-1">
-        <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium text-white ${asset.source === 'pexels' ? 'bg-black/60' : 'bg-black/40'}`}>
-          {asset.source === 'pexels' ? 'P' : 'Px'}
+        <span className="text-[10px] px-1.5 py-0.5 rounded font-medium text-white bg-black/60">
+          {asset.source === 'pexels' ? 'P' : asset.source === 'pixabay' ? 'Px' : '自传'}
         </span>
       </div>
       <a href={asset.source_url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
@@ -30,14 +76,72 @@ function AssetThumb({ asset, selected, onSelect }: { asset: VideoAsset; selected
   )
 }
 
-function SentenceRow({ item, index, selected, onToggle, onRefresh }: {
+function SentenceRow({ item, index, selected, onToggle, onRefresh, onAddAsset }: {
   item: FootageSentenceItem; index: number; selected: VideoAsset[]
   onToggle: (a: VideoAsset) => void; onRefresh: (kw: string) => void
+  onAddAsset: (asset: VideoAsset) => void
 }) {
   const isSelected = (a: VideoAsset) => selected.some(s => s.id === a.id && s.source === a.source)
   const [expanded, setExpanded] = useState(true)
   const [editing, setEditing] = useState(false)
   const [kw, setKw] = useState(item.search_en[0] || '')
+  const [uploading, setUploading] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
+  const directBase = import.meta.env.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'
+
+  const handleUploadFile = async (file: File) => {
+    if (file.size > 200 * 1024 * 1024) {
+      alert('视频太大 (>200MB), 建议先压缩')
+      return
+    }
+    setUploading(true)
+    try {
+      // 1. 拿 OSS 签名
+      const signRes = await fetch(directBase + '/api/oss/sign-upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: file.name, content_type: file.type || 'video/mp4' }),
+      })
+      if (!signRes.ok) throw new Error(`签名失败 (${signRes.status})`)
+      const { put_url, oss_key, content_type } = await signRes.json()
+
+      // 2. PUT 直传 OSS
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest()
+        xhr.onload = () => { (xhr.status >= 200 && xhr.status < 300) ? resolve() : reject(new Error(`PUT ${xhr.status}`)) }
+        xhr.onerror = () => reject(new Error('网络错误'))
+        xhr.open('PUT', put_url)
+        xhr.setRequestHeader('Content-Type', content_type)
+        xhr.send(file)
+      })
+
+      // 3. 截首帧做缩略图 (浏览器 video + canvas)
+      const previewUrl = URL.createObjectURL(file)
+      const thumbnail = await captureFirstFrame(previewUrl)
+      // 探测 duration
+      const duration = await probeDuration(previewUrl)
+      URL.revokeObjectURL(previewUrl)
+
+      // 4. 拼出 OSS 公开下载 URL (需要后端签 GET URL, 这里用 sign-upload 的桶推测)
+      // 简化: 让后端在 sign-upload 也返回签名 GET URL. 现在先用 oss_key 做 placeholder
+      const ossPublicUrl = `https://monoi-temp.oss-cn-shenzhen.aliyuncs.com/${oss_key}`
+
+      // 5. 加到 assets
+      const asset: VideoAsset = {
+        id: `upload_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        thumbnail,
+        preview_url: ossPublicUrl,
+        source_url: ossPublicUrl,
+        source: 'upload',
+        duration,
+      }
+      onAddAsset(asset)
+    } catch (e: any) {
+      alert(`上传失败: ${e.message}`)
+    } finally {
+      setUploading(false)
+    }
+  }
 
   return (
     <div className="border border-[var(--border)] rounded-xl overflow-hidden">
@@ -52,6 +156,25 @@ function SentenceRow({ item, index, selected, onToggle, onRefresh }: {
           </div>
         </div>
         <div className="flex gap-1 flex-shrink-0" onClick={e => e.stopPropagation()}>
+          <button
+            onClick={() => fileRef.current?.click()}
+            disabled={uploading}
+            className="p-1.5 rounded-lg text-[var(--text-3)] hover:text-[var(--text-2)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer disabled:opacity-50"
+            title="上传你自己的视频"
+          >
+            {uploading ? <Loader2 size={13} className="animate-spin"/> : <Upload size={13}/>}
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="video/*"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              if (f) handleUploadFile(f)
+              if (fileRef.current) fileRef.current.value = ''
+            }}
+          />
           <button onClick={() => onRefresh(kw)} className="p-1.5 rounded-lg text-[var(--text-3)] hover:text-[var(--text-2)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer" title="换一批">
             <RefreshCw size={13}/>
           </button>
@@ -142,7 +265,13 @@ export function FootageGrid({ data, videoUrl, segmentTimes, onUpdate }: {
         <SentenceRow key={i} item={item} index={i}
           selected={selected[i] || []}
           onToggle={a => toggle(i, a)}
-          onRefresh={kw => refresh(i, kw)}/>
+          onRefresh={kw => refresh(i, kw)}
+          onAddAsset={a => {
+            // 加到这一句的 assets 顶部, 同时自动选上 (用户多半上传完就要用)
+            const newData = data.map((it, j) => j === i ? { ...it, assets: [a, ...(it.assets || [])] } : it)
+            onUpdate(newData)
+            toggle(i, a)
+          }}/>
       ))}
       {selTotal > 0 && (
         <div className="flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-[var(--bg-hover)] border border-[var(--border)]">
