@@ -56,7 +56,12 @@ function normalizeBlock(block: unknown): MessageBlock | null {
     }
 
     case 'footage_grid':
-      return { type: 'footage_grid', data: Array.isArray(block.data) ? block.data as any : [] }
+      return {
+        type: 'footage_grid',
+        data: Array.isArray(block.data) ? block.data as any : [],
+        video_url: asString((block as any).video_url) || undefined,
+        segment_times: Array.isArray((block as any).segment_times) ? (block as any).segment_times : undefined,
+      }
 
     case 'storyboard':
       return { type: 'storyboard', data: Array.isArray(block.data) ? block.data as any : [] }
@@ -101,6 +106,7 @@ function normalizeBlock(block: unknown): MessageBlock | null {
             ? data.source
             : undefined,
           text_preview: asString(data.text_preview) || undefined,
+          kept_segments: Array.isArray(data.kept_segments) ? data.kept_segments as any : undefined,
         },
       }
     }
