@@ -416,17 +416,25 @@ async def clean_narration_video(file: UploadFile = File(...)):
     with open(raw_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
 
-    # 2. 转 mp4 (高质量 + 密集关键帧, 让 finalize 阶段能 stream copy 不重编码)
-    # -g 30 + -force_key_frames "expr:gte(t,n_forced)": 每秒一个 keyframe (30fps), finalize 切片精度 ≤1s 误差
-    # -cq 18 + preset p4: 高质量 (跟原视频接近)
+    # 2. 转 mp4 (高质量 + 密集关键帧 + HDR→SDR tonemap)
+    # iPhone HLG/HDR (bt2020) 直接转 SDR 会让肤色发白过曝, 必须 tonemap (zscale + hable)
+    # -g 30 + -force_key_frames: 每秒一个 keyframe, finalize 切片精度 ≤1s
+    # 注意: 加 zscale 后必须放弃 -hwaccel cuda (GPU/CPU memory 冲突)
+    tonemap_filter = (
+        "zscale=t=linear:npl=100,"
+        "tonemap=tonemap=hable:desat=0,"
+        "zscale=p=bt709:t=bt709:m=bt709:r=tv,"
+        "format=yuv420p"
+    )
     proc = subprocess.run(
-        ["ffmpeg", "-y", "-hwaccel", "cuda", "-i", raw_path,
+        ["ffmpeg", "-y", "-i", raw_path,
+         "-vf", tonemap_filter,
          "-c:v", "h264_nvenc", "-preset", "p4", "-cq", "18",
          "-g", "30", "-force_key_frames", "expr:gte(t,n_forced)",
-         "-c:a", "aac", "-b:a", "192k", "-pix_fmt", "yuv420p",
+         "-c:a", "aac", "-b:a", "192k",
          "-movflags", "+faststart",
          video_path],
-        capture_output=True, timeout=600,
+        capture_output=True, timeout=900,
     )
     if proc.returncode != 0:
         try: os.unlink(raw_path)
@@ -601,15 +609,22 @@ def clean_narration_video_oss(req: CleanVideoOssRequest):
     except Exception as e:
         raise HTTPException(400, f"OSS 下载失败: {e}")
 
-    # 2. 转 mp4 (高质量 + 密集关键帧, finalize 阶段能 stream copy 不重编码)
+    # 2. 转 mp4 (高质量 + 密集关键帧 + HDR→SDR tonemap; iPhone HLG 不 tonemap 会过曝白)
+    tonemap_filter = (
+        "zscale=t=linear:npl=100,"
+        "tonemap=tonemap=hable:desat=0,"
+        "zscale=p=bt709:t=bt709:m=bt709:r=tv,"
+        "format=yuv420p"
+    )
     proc = subprocess.run(
-        ["ffmpeg", "-y", "-hwaccel", "cuda", "-i", raw_path,
+        ["ffmpeg", "-y", "-i", raw_path,
+         "-vf", tonemap_filter,
          "-c:v", "h264_nvenc", "-preset", "p4", "-cq", "18",
          "-g", "30", "-force_key_frames", "expr:gte(t,n_forced)",
-         "-c:a", "aac", "-b:a", "192k", "-pix_fmt", "yuv420p",
+         "-c:a", "aac", "-b:a", "192k",
          "-movflags", "+faststart",
          video_path],
-        capture_output=True, timeout=600,
+        capture_output=True, timeout=900,
     )
     if proc.returncode != 0:
         try: os.unlink(raw_path)
