@@ -815,7 +815,10 @@ def compose_footage(req: ComposeRequest):
         try:
             oss_download(req.narration_oss_key, narration_path)
         except Exception as e:
-            raise HTTPException(400, f'OSS 下载口播失败: {e}')
+            err_str = str(e)
+            if 'NoSuchKey' in err_str or '404' in err_str:
+                raise HTTPException(410, '口播视频文件已过期 (超过 1 天 OSS 自动清理), 请回到口播剪辑重新生成一遍.')
+            raise HTTPException(400, f'OSS 下载口播失败: {err_str[:200]}')
 
         # 2. 收集所有素材 + 下载. 用 (asset_idx, sub_idx) 去重 (同一素材多镜共用)
         # 简化: 每镜每素材独立下载 (即使 URL 重复, 占用一点空间, 但 ffmpeg 命令构造简单)
@@ -949,12 +952,8 @@ def compose_footage(req: ComposeRequest):
         except Exception as e:
             raise HTTPException(500, f"OSS 上传失败: {e}")
 
-        # 6. 删 OSS 上的 b-roll asset (上传的部分; pexels/pixabay 不在 OSS), 删源口播 (用完即弃)
-        for asset_list in [shot.assets for shot in req.shots]:
-            for asset in asset_list:
-                if asset.oss_key:
-                    oss_delete(asset.oss_key)
-        oss_delete(req.narration_oss_key)
+        # 注意: 不在这里删 narration_oss_key / b-roll uploads, 让用户能多次合成 (调 PIP / 比例).
+        # OSS lifecycle 规则会在 1 天后自动清掉 sources/ outputs/ uploads/, 不会积成本.
 
         # ffprobe 取时长
         probe = subprocess.run(
