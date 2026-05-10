@@ -933,17 +933,14 @@ def compose_footage(req: ComposeRequest):
             bgm_path = os.path.join(work_dir, 'bgm.audio')
             try:
                 oss_download(req.bgm_oss_key, bgm_path)
-                ff_inputs.extend(['-i', bgm_path])
+                # 用 -stream_loop -1 让 BGM 输入级别无限循环 (比 aloop 滤镜稳, 不会内存爆)
+                ff_inputs.extend(['-stream_loop', '-1', '-i', bgm_path])
                 bgm_input_idx = next_input
                 next_input += 1
-                # BGM 循环播放 (aloop) + 调音量 + atrim 截到视频长度 + 用 amix 跟口播混
-                # aloop 用 -1 + 大 size 实现近似无限循环; atrim 兜底防止 BGM 比视频长太多
                 bgm_vol = max(0.0, min(1.0, req.bgm_volume))
-                filter_parts.append(
-                    f"[{bgm_input_idx}:a]aloop=loop=-1:size=2e9,volume={bgm_vol:.2f}[bgm_a]"
-                )
-                # amix duration=first 用第一个输入(口播)的时长截断; 用 weights 让两个输入按 1:1 权重 (volume 已经调过)
-                filter_parts.append("[0:a][bgm_a]amix=inputs=2:duration=first:dropout_transition=0[final_a]")
+                filter_parts.append(f"[{bgm_input_idx}:a]volume={bgm_vol:.2f},aresample=44100[bgm_a]")
+                # amix: duration=first 用第一个输入(口播)的时长截断; normalize=0 避免自动衰减改变音量
+                filter_parts.append("[0:a]aresample=44100[narr_a];[narr_a][bgm_a]amix=inputs=2:duration=first:normalize=0[final_a]")
             except Exception as e:
                 print(f"[compose] BGM 下载失败, 跳过 BGM: {e}", flush=True)
                 filter_parts.append("[0:a]anull[final_a]")
