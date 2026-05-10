@@ -16,12 +16,14 @@ type PipShape = 'circle' | 'rounded'
 type PipPos = 'tl' | 'tr' | 'bl' | 'br' | 'center'
 type PipSize = 'S' | 'M' | 'L'
 type FaceY = 'top' | 'center' | 'bottom'  // 人物在 PIP 内的纵向位置
+type OutputRatio = '9:16' | '16:9' | '1:1'  // 最终成品比例
 
 const POS_LABEL: Record<PipPos, string> = { tl: '左上', tr: '右上', bl: '左下', br: '右下', center: '居中' }
 const SIZE_RATIO: Record<PipSize, number> = { S: 0.20, M: 0.25, L: 0.33 }
 const FACE_Y_LABEL: Record<FaceY, string> = { top: '人物靠上', center: '居中', bottom: '人物靠下' }
-// CSS object-position 的 y 值 (0% = 顶部, 100% = 底部)
 const FACE_Y_POS: Record<FaceY, string> = { top: '20%', center: '50%', bottom: '80%' }
+const RATIO_LABEL: Record<OutputRatio, string> = { '9:16': '竖屏 9:16 (抖音)', '16:9': '横屏 16:9 (B站/YouTube)', '1:1': '方形 1:1' }
+const RATIO_CSS: Record<OutputRatio, string> = { '9:16': '9/16', '16:9': '16/9', '1:1': '1/1' }
 
 export function TimelinePreview({ videoUrl, segmentTimes, items, selected, onClose }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -32,6 +34,7 @@ export function TimelinePreview({ videoUrl, segmentTimes, items, selected, onClo
   const [pos, setPos] = useState<PipPos>('bl')
   const [size, setSize] = useState<PipSize>('M')
   const [faceY, setFaceY] = useState<FaceY>('top')
+  const [outputRatio, setOutputRatio] = useState<OutputRatio>('9:16')
 
   // 当前镜头索引: currentTime 落在哪个 segment 时间段
   const currentShotIdx = segmentTimes.findIndex(s => currentTime >= s.start && currentTime < s.end)
@@ -109,35 +112,36 @@ export function TimelinePreview({ videoUrl, segmentTimes, items, selected, onClo
         </div>
 
         <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-4">
-          {/* 预览画面: 没选素材时 video 全屏, 选了 b-roll 全屏 + 口播 PIP 小窗 */}
-          <div className="relative w-full aspect-video bg-black rounded-xl overflow-hidden" style={{ maxHeight: '50vh' }}>
-            {currentBroll ? (
-              <>
-                {/* 上层 b-roll 缩略图 (实际合成会播视频) */}
+          {/* 预览画面: 按最终成品比例展示 (默认 9:16 抖音). video 元素始终存在 (避免切换时重新加载) */}
+          <div className="flex items-center justify-center bg-black/40 rounded-xl p-2" style={{ maxHeight: '50vh' }}>
+            <div
+              className="relative bg-black rounded-lg overflow-hidden mx-auto"
+              style={{ aspectRatio: RATIO_CSS[outputRatio], height: '46vh', maxWidth: '100%' }}
+            >
+              {/* 底层 b-roll 缩略图 (有素材时显示), 实际合成会播视频 */}
+              {currentBroll && (
                 <img src={currentBroll.thumbnail} alt="" className="absolute inset-0 w-full h-full object-cover" />
-                {/* 口播 PIP 小窗 */}
-                <video
-                  ref={videoRef}
-                  src={videoUrl}
-                  playsInline
-                  style={{
-                    ...pipStyle,
-                    width: `${SIZE_RATIO[size] * 100}%`,
-                    aspectRatio: shape === 'circle' ? '1/1' : '16/9',
-                    objectFit: 'cover',
-                    objectPosition: `center ${FACE_Y_POS[faceY]}`,
-                  }}
-                />
-              </>
-            ) : (
-              // 没素材的镜头: video 全屏 (跟最终合成一致)
+              )}
+              {/* 口播 video 元素 — 始终在 DOM 里, 通过 className/style 切换全屏 vs PIP */}
               <video
                 ref={videoRef}
                 src={videoUrl}
                 playsInline
-                className="absolute inset-0 w-full h-full object-cover"
+                style={currentBroll ? {
+                  ...pipStyle,
+                  width: `${SIZE_RATIO[size] * 100}%`,
+                  aspectRatio: shape === 'circle' ? '1/1' : '16/9',
+                  objectFit: 'cover',
+                  objectPosition: `center ${FACE_Y_POS[faceY]}`,
+                } : {
+                  position: 'absolute',
+                  inset: 0,
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'cover',
+                }}
               />
-            )}
+            </div>
           </div>
 
           {/* 控制栏 */}
@@ -223,7 +227,22 @@ export function TimelinePreview({ videoUrl, segmentTimes, items, selected, onClo
             <div className="text-xs font-medium text-[var(--text-2)]">画中画样式 (口播小窗)</div>
 
             <div className="flex items-center gap-3">
-              <span className="text-xs text-[var(--text-3)] w-12">形状</span>
+              <span className="text-xs text-[var(--text-3)] w-16">输出比例</span>
+              <div className="flex gap-2 flex-wrap">
+                {(['9:16', '16:9', '1:1'] as OutputRatio[]).map(r => (
+                  <button
+                    key={r}
+                    onClick={() => setOutputRatio(r)}
+                    className={`px-3 py-1.5 rounded-lg text-xs border transition-all cursor-pointer ${outputRatio === r ? 'bg-[var(--text)] text-[var(--bg)] border-[var(--text)]' : 'bg-[var(--bg-card)] text-[var(--text-2)] border-[var(--border)] hover:border-[var(--text-3)]'}`}
+                  >
+                    {RATIO_LABEL[r]}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-[var(--text-3)] w-16">形状</span>
               <div className="flex gap-2">
                 {(['rounded', 'circle'] as PipShape[]).map(s => (
                   <button
@@ -238,7 +257,7 @@ export function TimelinePreview({ videoUrl, segmentTimes, items, selected, onClo
             </div>
 
             <div className="flex items-center gap-3">
-              <span className="text-xs text-[var(--text-3)] w-12">位置</span>
+              <span className="text-xs text-[var(--text-3)] w-16">位置</span>
               <div className="flex gap-2">
                 {(['tl', 'tr', 'bl', 'br', 'center'] as PipPos[]).map(p => (
                   <button
@@ -253,7 +272,7 @@ export function TimelinePreview({ videoUrl, segmentTimes, items, selected, onClo
             </div>
 
             <div className="flex items-center gap-3">
-              <span className="text-xs text-[var(--text-3)] w-12">大小</span>
+              <span className="text-xs text-[var(--text-3)] w-16">大小</span>
               <div className="flex gap-2">
                 {(['S', 'M', 'L'] as PipSize[]).map(sz => (
                   <button
@@ -268,7 +287,7 @@ export function TimelinePreview({ videoUrl, segmentTimes, items, selected, onClo
             </div>
 
             <div className="flex items-center gap-3">
-              <span className="text-xs text-[var(--text-3)] w-12">人物位置</span>
+              <span className="text-xs text-[var(--text-3)] w-16">人物位置</span>
               <div className="flex gap-2">
                 {(['top', 'center', 'bottom'] as FaceY[]).map(y => (
                   <button
