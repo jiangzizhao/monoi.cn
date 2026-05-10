@@ -120,7 +120,7 @@ export function CoverGeneratorForm({ defaultVideoOssKey, defaultVideoUrl, onClos
         body: JSON.stringify({ filename: file.name, content_type: file.type }),
       })
       if (!signRes.ok) throw new Error('签名失败')
-      const { put_url, oss_key, content_type } = await signRes.json()
+      const { put_url, content_type } = await signRes.json()
       await new Promise<void>((resolve, reject) => {
         const xhr = new XMLHttpRequest()
         xhr.onload = () => { (xhr.status >= 200 && xhr.status < 300) ? resolve() : reject(new Error(`PUT ${xhr.status}`)) }
