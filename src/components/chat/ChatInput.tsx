@@ -7,6 +7,7 @@ import { CopywritingForm } from './forms/CopywritingForm'
 import { VoiceForm } from './forms/VoiceForm'
 import { DigitalHumanForm } from './forms/DigitalHumanForm'
 import { NarrationVideoForm } from './forms/NarrationVideoForm'
+import { FootageMatchForm } from './forms/FootageMatchForm'
 
 const MODULES: { label: string; Icon: LucideIcon }[] = [
   { label: '文案',  Icon: FileText  },
@@ -36,7 +37,7 @@ const MODULE_OPTIONS: Record<string, { id: string; label: string; desc: string }
     { id: '我想用AI生成口播视频', label: 'AI生成', desc: '根据文案自动生成' },
   ],
   '素材': [
-    { id: '帮我根据文案找匹配的视频素材', label: '开始匹配素材', desc: '文案拆词匹配视频片段' },
+    { id: '__form_footage__', label: '智能匹配素材', desc: '粘贴文案, AI 拆句生成画面词搜素材' },
   ],
   '剪辑': [
     { id: '帮我生成剪辑分镜表', label: '生成分镜表', desc: '小林风格节奏分镜' },
@@ -64,8 +65,9 @@ export function ChatInput({ moduleMenu, onModuleClick, onModuleMenuClose }: Prop
   const [voiceForm, setVoiceForm] = useState<'preset' | 'upload' | 'clone' | null>(null)
   const [digitalHumanForm, setDigitalHumanForm] = useState(false)
   const [narrationVideoForm, setNarrationVideoForm] = useState(false)
+  const [footageForm, setFootageForm] = useState(false)
   const textRef = useRef<HTMLTextAreaElement>(null)
-  const { isGenerating } = useChatStore()
+  const { isGenerating, conversations, activeId } = useChatStore()
   const { send, stop } = useChat()
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -102,9 +104,30 @@ export function ChatInput({ moduleMenu, onModuleClick, onModuleMenuClose }: Prop
       setDigitalHumanForm(true)
     } else if (optId === '__narration_video__') {
       setNarrationVideoForm(true)
+    } else if (optId === '__form_footage__') {
+      setFootageForm(true)
     } else {
       send(optId)
     }
+  }
+
+  // 从对话里找最近一条文案 (script_card 或口播视频转录), 给 footage 弹窗预填
+  const findLastScriptForFootage = (): string => {
+    const conv = conversations.find(c => c.id === activeId)
+    if (!conv) return ''
+    for (let i = conv.messages.length - 1; i >= 0; i--) {
+      const msg = conv.messages[i]
+      if (msg.role !== 'assistant') continue
+      for (const block of msg.blocks) {
+        if (block.type === 'script_card' && (block as any).data?.script) {
+          return (block as any).data.script as string
+        }
+        if (block.type === 'video_player' && (block as any).data?.text_preview) {
+          return (block as any).data.text_preview as string
+        }
+      }
+    }
+    return ''
   }
 
   const handleModuleClick = (label: string) => {
@@ -159,6 +182,13 @@ export function ChatInput({ moduleMenu, onModuleClick, onModuleMenuClose }: Prop
           <NarrationVideoForm
             onSubmit={(msg) => { setNarrationVideoForm(false); send(msg) }}
             onClose={() => setNarrationVideoForm(false)}
+          />
+        )}
+        {footageForm && (
+          <FootageMatchForm
+            defaultScript={findLastScriptForFootage()}
+            onSubmit={(script) => { setFootageForm(false); send('__match_footage__' + script) }}
+            onClose={() => setFootageForm(false)}
           />
         )}
 

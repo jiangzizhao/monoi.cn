@@ -1,6 +1,6 @@
 import { useRef, useCallback } from 'react'
 import { useChatStore, makeUserMsg, makeAssistantMsg } from '../store/chatStore'
-import { callAI, callScriptAI, isScriptPrompt, parseBlocks } from '../services/ai'
+import { callAI, callScriptAI, callFootageAI, isScriptPrompt, parseBlocks } from '../services/ai'
 import { searchPexels } from '../services/pexels'
 import { searchPixabay } from '../services/pixabay'
 import type { ChoiceOption, FootageSentenceItem, MessageBlock } from '../types'
@@ -319,6 +319,11 @@ export function useChat() {
       const charCount = script.replace(/\s/g, '').length
       displayText = `我有现成文案 · ${charCount} 字`
     }
+    if (text.startsWith('__match_footage__')) {
+      const script = text.slice('__match_footage__'.length)
+      const charCount = script.replace(/\s/g, '').length
+      displayText = `智能匹配素材 · ${charCount} 字文案`
+    }
     if (text.startsWith('__dialect__')) {
       const m = text.match(/^__dialect__(\w+)__/)
       const labelMap: Record<string, string> = {
@@ -354,6 +359,50 @@ export function useChat() {
       if (text.startsWith('__paste_script__')) {
         const script = text.slice('__paste_script__'.length).trim()
         store.updateLastAssistantBlocks(convId, [makeScriptCard(script)])
+        return
+      }
+
+      // 智能匹配素材: 调 DeepSeek 按句拆 + 出画面词, 转 footage_grid 走现有拉素材逻辑
+      if (text.startsWith('__match_footage__')) {
+        const script = text.slice('__match_footage__'.length).trim()
+        store.updateLastAssistantBlocks(convId, [{ type: 'loading', label: 'AI 正在拆句 + 提取画面词...' }])
+        try {
+          const sentences = await callFootageAI(script, ctrl.signal)
+          const items: FootageSentenceItem[] = sentences.map(s => ({
+            text: s.text,
+            scene: s.scene,
+            search_en: s.search_en || [],
+            search_cn: s.search_cn || [],
+            duration: s.duration || 3,
+            assets: [],
+            loadingAssets: true,
+          }))
+          const gridBlock: MessageBlock = { type: 'footage_grid', data: items }
+          store.updateLastAssistantBlocks(convId, [
+            { type: 'text', content: `已拆成 ${items.length} 镜, 正在并发去 Pexels + Pixabay 拉素材...` },
+            gridBlock,
+          ])
+
+          // 后台并发拉素材 (跟现有 footage_request 路径同样的逻辑)
+          const updated = [...items]
+          for (let i = 0; i < updated.length; i++) {
+            if (ctrl.signal.aborted) return
+            const kw = updated[i].search_en[0] || updated[i].search_cn[0] || updated[i].text
+            const [p, px] = await Promise.all([searchPexels(kw, 5), searchPixabay(kw, 3)])
+            updated[i] = { ...updated[i], assets: [...p, ...px], loadingAssets: false }
+            store.updateLastAssistantBlocks(convId, [
+              { type: 'text', content: `已拆成 ${items.length} 镜, 正在并发去 Pexels + Pixabay 拉素材... (${i + 1}/${items.length})` },
+              { type: 'footage_grid', data: [...updated] },
+            ])
+            await new Promise(r => setTimeout(r, 200))
+          }
+          store.updateLastAssistantBlocks(convId, [
+            { type: 'text', content: `✓ 匹配完成 ${items.length} 镜. 每镜挑你喜欢的, 可拖删/换关键词重搜.` },
+            { type: 'footage_grid', data: [...updated] },
+          ])
+        } catch (e: any) {
+          store.updateLastAssistantBlocks(convId, [{ type: 'error', message: e.message || '匹配失败' }])
+        }
         return
       }
 

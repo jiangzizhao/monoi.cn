@@ -417,6 +417,84 @@ export async function callScriptAI(
   return cleanScriptText(full)
 }
 
+export interface FootageSentence {
+  text: string
+  scene: string
+  search_en: string[]
+  search_cn: string[]
+  duration: number
+}
+
+const FOOTAGE_SYSTEM_PROMPT = `你是短视频素材匹配助手. 用户给你一段口播文案, 你按句子拆开, 每句生成视频素材搜索关键词.
+
+【输出格式严格遵守】
+只输出 JSON, 不要任何解释 / markdown / 代码块包裹. 格式:
+{"sentences":[{"text":"原句子","scene":"画面描述","search_en":["keyword1","keyword2","keyword3"],"search_cn":["关键词1","关键词2"],"duration":3}]}
+
+【关键: search_en 必须是"画面化英文搜索词"】
+不是字面翻译, 而是"这句话拍出来画面里有什么". 优先 (主体 + 动作 + 场景):
+- "减肥失败不是没毅力" → ["frustrated woman gym", "tired exercise", "exhausted workout"]
+  (不要写 "weight loss failure willpower" — 太抽象, Pexels 搜不到)
+- "其实这才是减脂最牛的信号" → ["body transformation", "fit body mirror", "weight loss progress"]
+- "每天少吃 300 大卡" → ["healthy meal portion", "calorie counting food", "diet plate"]
+
+【规则】
+1. 一个 segment 的 sentence: 按完整语义拆 (不要按逗号拆得太碎). 大约 8-25 字一句.
+2. search_en 给 2-4 个候选 (Pexels/Pixabay 多次搜)
+3. search_cn 给 1-2 个 (兜底, 中文搜命中率低但偶尔命中本土素材)
+4. duration: 这句话朗读估算秒数 (中文按 4 字/秒)
+5. scene: 一句话中文描述画面, 帮用户理解
+6. 不要输出空的 sentences[]
+
+【画面词技巧】
+- 抽象概念 → 具象画面 ("成功" → "winner trophy celebration")
+- 主语别忘了 (人/物/场景)
+- 用通用词 (woman / man / business / nature), 别用太专业的`
+
+export async function callFootageAI(
+  script: string,
+  signal?: AbortSignal
+): Promise<FootageSentence[]> {
+  const res = await fetchWithRetry('/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      system: FOOTAGE_SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: script }],
+      stream: true,
+    }),
+    signal,
+  })
+  if (!res.ok) throw new Error(`API ${res.status}`)
+  const reader = res.body!.getReader()
+  const decoder = new TextDecoder()
+  let full = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    const chunk = decoder.decode(value, { stream: true })
+    for (const line of chunk.split('\n')) {
+      if (!line.startsWith('data: ')) continue
+      const data = line.slice(6).trim()
+      if (data === '[DONE]') continue
+      try {
+        const parsed = JSON.parse(data)
+        const text = parsed.delta?.text || parsed.choices?.[0]?.delta?.content || ''
+        if (text) full += text
+      } catch {}
+    }
+  }
+  // 解析 JSON
+  const cleaned = full.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim()
+  const match = cleaned.match(/\{[\s\S]*\}/)
+  if (!match) throw new Error('AI 没返回有效 JSON')
+  const obj = JSON.parse(match[0])
+  if (!Array.isArray(obj?.sentences) || obj.sentences.length === 0) {
+    throw new Error('AI 返回的 sentences 为空')
+  }
+  return obj.sentences as FootageSentence[]
+}
+
 export function parseBlocks(raw: string): MessageBlock[] {
   // 去掉 markdown 代码块包裹（```json ... ``` 或 ``` ... ```）
   let cleaned = raw.trim()
