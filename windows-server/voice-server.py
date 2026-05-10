@@ -908,7 +908,7 @@ def compose_footage(req: ComposeRequest):
                 src = take_narration_v()
                 filter_parts.append(
                     f"[{src}]trim={shot.start}:{shot.end},setpts=PTS-STARTPTS,"
-                    f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}[{lbl}]"
+                    f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1,fps=30,format=yuv420p[{lbl}]"
                 )
                 main_segments.append(lbl)
                 seg_label_idx += 1
@@ -920,7 +920,7 @@ def compose_footage(req: ComposeRequest):
                     lbl = f'mseg{seg_label_idx}'
                     filter_parts.append(
                         f"[{inp}:v]trim=0:{take_dur:.3f},setpts=PTS-STARTPTS,"
-                        f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}[{lbl}]"
+                        f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1,fps=30,format=yuv420p[{lbl}]"
                     )
                     main_segments.append(lbl)
                     seg_label_idx += 1
