@@ -401,14 +401,16 @@ export function useChat() {
             assets: [],
             loadingAssets: true,
           }))
-          // 找最近的 video_url (来自 video_player block)
+          // 找最近的 video_url + narration_oss_key (来自 video_player block)
           let videoUrl = ''
+          let narrationOssKey = ''
           for (let i = conv.messages.length - 1; i >= 0; i--) {
             const msg = conv.messages[i]
             if (msg.role !== 'assistant') continue
             for (const block of msg.blocks) {
               if (block.type === 'video_player' && (block as any).data?.video_url) {
                 videoUrl = (block as any).data.video_url
+                narrationOssKey = (block as any).data?.narration_oss_key || ''
                 break
               }
             }
@@ -418,7 +420,7 @@ export function useChat() {
 
           store.updateLastAssistantBlocks(convId, [
             { type: 'text', content: `✓ 拆出 ${items.length} 镜, 正在并发拉素材...` },
-            { type: 'footage_grid', data: items, video_url: videoUrl, segment_times: segmentTimes },
+            { type: 'footage_grid', data: items, video_url: videoUrl, segment_times: segmentTimes, narration_oss_key: narrationOssKey },
           ])
           const updated = [...items]
           for (let i = 0; i < updated.length; i++) {
@@ -428,13 +430,13 @@ export function useChat() {
             updated[i] = { ...updated[i], assets: [...p, ...px], loadingAssets: false }
             store.updateLastAssistantBlocks(convId, [
               { type: 'text', content: `拉素材中... (${i + 1}/${items.length})` },
-              { type: 'footage_grid', data: [...updated], video_url: videoUrl, segment_times: segmentTimes },
+              { type: 'footage_grid', data: [...updated], video_url: videoUrl, segment_times: segmentTimes, narration_oss_key: narrationOssKey },
             ])
             await new Promise(r => setTimeout(r, 200))
           }
           store.updateLastAssistantBlocks(convId, [
             { type: 'text', content: `✓ 匹配完成 ${items.length} 镜. 每镜挑你喜欢的, 点底部"预览效果"看双轨道.` },
-            { type: 'footage_grid', data: [...updated], video_url: videoUrl, segment_times: segmentTimes },
+            { type: 'footage_grid', data: [...updated], video_url: videoUrl, segment_times: segmentTimes, narration_oss_key: narrationOssKey },
           ])
         } catch (e: any) {
           store.updateLastAssistantBlocks(convId, [{ type: 'error', message: e.message || '匹配失败' }])
@@ -516,6 +518,7 @@ export function useChat() {
               source: 'upload',
               text_preview: p.transcription?.slice(0, 80),
               kept_segments: p.kept_segments,    // 给后续 footage 匹配用
+              narration_oss_key: p.narration_oss_key,  // 合成时后端用
             },
           },
           {

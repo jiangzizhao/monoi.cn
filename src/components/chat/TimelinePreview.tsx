@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Pause, Play, X } from 'lucide-react'
+import { Pause, Play, X, Loader2, Download as DownloadIcon } from 'lucide-react'
 import type { FootageSentenceItem, VideoAsset } from '../../types'
 
 interface Props {
   videoUrl: string
   segmentTimes: { start: number; end: number }[]
+  narrationOssKey?: string         // 没传则不能合成
   items: FootageSentenceItem[]
   selected: Record<number, VideoAsset[]>
   onClose: () => void
@@ -25,7 +26,7 @@ const FACE_Y_POS: Record<FaceY, string> = { top: '20%', center: '50%', bottom: '
 const RATIO_LABEL: Record<OutputRatio, string> = { '9:16': '竖屏 9:16 (抖音)', '16:9': '横屏 16:9 (B站/YouTube)', '1:1': '方形 1:1' }
 const RATIO_CSS: Record<OutputRatio, string> = { '9:16': '9/16', '16:9': '16/9', '1:1': '1/1' }
 
-export function TimelinePreview({ videoUrl, segmentTimes, items, selected, onClose }: Props) {
+export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items, selected, onClose }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
@@ -35,6 +36,55 @@ export function TimelinePreview({ videoUrl, segmentTimes, items, selected, onClo
   const [size, setSize] = useState<PipSize>('M')
   const [faceY, setFaceY] = useState<FaceY>('top')
   const [outputRatio, setOutputRatio] = useState<OutputRatio>('9:16')
+  const [composing, setComposing] = useState(false)
+  const [composedUrl, setComposedUrl] = useState<string | null>(null)
+  const [composeError, setComposeError] = useState('')
+
+  const directBase = (import.meta as any).env?.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'
+
+  const handleCompose = async () => {
+    if (!narrationOssKey) {
+      setComposeError('缺少口播视频信息, 无法合成. 请重新走口播剪辑流程.')
+      return
+    }
+    setComposing(true)
+    setComposeError('')
+    try {
+      const shots = segmentTimes.map((seg, i) => ({
+        start: seg.start,
+        end: seg.end,
+        assets: (selected[i] || []).map(a => ({
+          url: a.preview_url || a.source_url,
+          oss_key: a.oss_key,
+          duration: a.duration || 0,
+        })),
+      }))
+      const body = {
+        narration_oss_key: narrationOssKey,
+        shots,
+        pip: {
+          enabled: shape !== 'none',
+          shape: shape === 'none' ? 'rounded' : shape,
+          pos, size, face_y: faceY,
+        },
+        output_ratio: outputRatio,
+      }
+      const res = await fetch(directBase + '/api/voice/compose-footage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const data = await res.json()
+      if (!res.ok || !data.success) {
+        throw new Error(data.detail || data.error || `合成失败 (${res.status})`)
+      }
+      setComposedUrl(data.video_url)
+    } catch (e: any) {
+      setComposeError(e.message || '合成失败')
+    } finally {
+      setComposing(false)
+    }
+  }
 
   // 当前镜头索引: currentTime 落在哪个 segment 时间段
   const currentShotIdx = segmentTimes.findIndex(s => currentTime >= s.start && currentTime < s.end)
@@ -309,6 +359,31 @@ export function TimelinePreview({ videoUrl, segmentTimes, items, selected, onClo
           </p>
         </div>
 
+        {/* 合成结果区 (合成完显示) */}
+        {(composedUrl || composeError) && (
+          <div className="px-5 pb-2">
+            {composeError && (
+              <div className="text-xs text-red-400 bg-red-950/20 border border-red-900/30 rounded-lg px-3 py-2">
+                {composeError}
+              </div>
+            )}
+            {composedUrl && (
+              <div className="flex flex-col gap-2">
+                <video src={composedUrl} controls className="w-full rounded-lg max-h-[40vh] bg-black"/>
+                <a
+                  href={composedUrl}
+                  download="monoi-composed.mp4"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-[var(--text)] text-[var(--bg)] text-sm rounded-lg hover:opacity-80 cursor-pointer self-start"
+                >
+                  <DownloadIcon size={14}/> 下载成品 mp4
+                </a>
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-[var(--border)]">
           <button
             onClick={onClose}
@@ -317,11 +392,16 @@ export function TimelinePreview({ videoUrl, segmentTimes, items, selected, onClo
             关闭
           </button>
           <button
-            disabled
-            title="下一步要做的, 等"
-            className="px-4 py-2 text-sm bg-[var(--bg-hover)] text-[var(--text-3)] rounded-lg cursor-not-allowed"
+            onClick={handleCompose}
+            disabled={composing || !narrationOssKey}
+            title={!narrationOssKey ? '缺少口播视频, 走口播剪辑流程后再试' : '后端 ffmpeg 合成, 5-30 秒'}
+            className={`px-4 py-2 text-sm rounded-lg transition-all inline-flex items-center gap-2 ${
+              composing || !narrationOssKey
+                ? 'bg-[var(--bg-hover)] text-[var(--text-3)] cursor-not-allowed'
+                : 'bg-[var(--text)] text-[var(--bg)] hover:opacity-80 cursor-pointer'
+            }`}
           >
-            一键合成 (下一步)
+            {composing ? <><Loader2 size={14} className="animate-spin"/> 合成中...</> : (composedUrl ? '重新合成' : '一键合成')}
           </button>
         </div>
       </div>

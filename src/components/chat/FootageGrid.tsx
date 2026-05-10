@@ -126,7 +126,7 @@ function SentenceRow({ item, index, selected, onToggle, onRefresh, onAddAsset }:
       // 简化: 让后端在 sign-upload 也返回签名 GET URL. 现在先用 oss_key 做 placeholder
       const ossPublicUrl = `https://monoi-temp.oss-cn-shenzhen.aliyuncs.com/${oss_key}`
 
-      // 5. 加到 assets
+      // 5. 加到 assets (存 oss_key, 后端合成时从这个 key 拉)
       const asset: VideoAsset = {
         id: `upload_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
         thumbnail,
@@ -134,6 +134,7 @@ function SentenceRow({ item, index, selected, onToggle, onRefresh, onAddAsset }:
         source_url: ossPublicUrl,
         source: 'upload',
         duration,
+        oss_key,
       }
       onAddAsset(asset)
     } catch (e: any) {
@@ -216,10 +217,11 @@ function SentenceRow({ item, index, selected, onToggle, onRefresh, onAddAsset }:
   )
 }
 
-export function FootageGrid({ data, videoUrl, segmentTimes, onUpdate }: {
+export function FootageGrid({ data, videoUrl, segmentTimes, narrationOssKey, onUpdate }: {
   data: FootageSentenceItem[]
   videoUrl?: string
   segmentTimes?: { start: number; end: number }[]
+  narrationOssKey?: string
   msgId?: string; blockIndex?: number
   onUpdate: (newData: FootageSentenceItem[]) => void
 }) {
@@ -296,6 +298,7 @@ export function FootageGrid({ data, videoUrl, segmentTimes, onUpdate }: {
         <TimelinePreview
           videoUrl={videoUrl}
           segmentTimes={segmentTimes}
+          narrationOssKey={narrationOssKey}
           items={data}
           selected={selected}
           onClose={() => setPreviewOpen(false)}

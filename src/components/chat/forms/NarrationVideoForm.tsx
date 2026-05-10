@@ -164,12 +164,13 @@ export function NarrationVideoForm({ onSubmit, onClose }: Props) {
     xhr.send(fd)
   }
 
-  const handleDone = (videoUrl: string, duration: number, transcription: string, keptSegments: KeptSegment[]) => {
+  const handleDone = (videoUrl: string, duration: number, transcription: string, keptSegments: KeptSegment[], narrationOssKey?: string) => {
     onSubmit('__narration_video_done__' + JSON.stringify({
       video_url: videoUrl,
       duration_ms: Math.round(duration * 1000),
       transcription,
       kept_segments: keptSegments,
+      narration_oss_key: narrationOssKey,
     }))
   }
 

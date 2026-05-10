@@ -1808,6 +1808,23 @@ def finalize_narration_video_proxy(req: FinalizeNarrationVideoRequest):
         raise HTTPException(503, "voice-server (9001) 未启动")
 
 
+@app.post("/api/voice/compose-footage")
+def compose_footage_proxy(req: dict):
+    """转发到 voice-server: 合成 口播 + b-roll + PIP overlay → 成品 mp4"""
+    import requests as _req
+    try:
+        resp = _req.post(
+            f"{VOICE_SERVER_URL}/compose-footage",
+            json=req,
+            timeout=1800,
+        )
+        if resp.status_code != 200:
+            raise HTTPException(resp.status_code, f"voice-server 错误: {resp.text[:300]}")
+        return resp.json()
+    except _req.exceptions.ConnectionError:
+        raise HTTPException(503, "voice-server (9001) 未启动")
+
+
 @app.get("/api/voice/narration-video/{name}")
 def proxy_narration_video(name: str):
     """剪辑后的视频文件 (直接读 voice-server 输出目录, FileResponse 自动支持 HTTP Range,

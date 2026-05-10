@@ -33,6 +33,7 @@ export interface VideoAsset {
   source: 'pexels' | 'pixabay' | 'upload'   // upload = 用户自传
   duration: number
   selected?: boolean
+  oss_key?: string                          // upload 类型必有, 后端用这个从 OSS 拉
 }
 
 export interface StoryboardRowItem {
@@ -78,13 +79,14 @@ export interface VideoResult {
   source?: 'digital_human' | 'upload' | 'ai_generated'
   text_preview?: string
   kept_segments?: KeptSegmentLite[]   // 剪辑后视频的 segments (口播视频专用, 用于自动匹配素材)
+  narration_oss_key?: string          // 剪辑后口播视频的 OSS key (合成时后端用)
 }
 
 export type MessageBlock =
   | { type: 'text';           content: string; streaming?: boolean }
   | { type: 'choices';        question?: string; options: ChoiceOption[]; chosen?: string }
   | { type: 'script_card';    data: ScriptResult }
-  | { type: 'footage_grid';   data: FootageSentenceItem[]; video_url?: string; segment_times?: { start: number; end: number }[] }
+  | { type: 'footage_grid';   data: FootageSentenceItem[]; video_url?: string; segment_times?: { start: number; end: number }[]; narration_oss_key?: string }
   | { type: 'storyboard';     data: StoryboardRowItem[] }
   | { type: 'teleprompter';   data: string }
   | { type: 'platform_copy';  data: PlatformCopyResult }

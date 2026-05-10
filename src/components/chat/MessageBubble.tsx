@@ -61,6 +61,7 @@ function Block({ block, msgId, blockIdx, props }: { block: MessageBlock; msgId: 
           data={block.data}
           videoUrl={(block as any).video_url}
           segmentTimes={(block as any).segment_times}
+          narrationOssKey={(block as any).narration_oss_key}
           msgId={msgId}
           blockIndex={blockIdx}
           onUpdate={d => props.onFootageUpdate?.(msgId, blockIdx, d)}

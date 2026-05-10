@@ -126,7 +126,7 @@ interface Props {
   data: CleanResponse
   apiBase: string
   onCancel: () => void
-  onDone: (videoUrlFull: string, duration: number, transcription: string, keptSegments: KeptSegment[]) => void
+  onDone: (videoUrlFull: string, duration: number, transcription: string, keptSegments: KeptSegment[], narrationOssKey?: string) => void
 }
 
 interface WordToken {
@@ -404,7 +404,7 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
       const finalUrl = result.video_url || (apiBase + result.video_url_path)
       const finalText = allWords.filter(t => !deletedKeys.has(wordKey(t))).map(t => t.word).join('')
       const keptSegments = computeKeptSegments(data.segments, keepRanges)
-      onDone(finalUrl, result.duration, finalText, keptSegments)
+      onDone(finalUrl, result.duration, finalText, keptSegments, result.output_oss_key)
     } catch (e: any) {
       setError(e.message || '导出失败')
     } finally {

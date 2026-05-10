@@ -754,6 +754,232 @@ def get_audio(name: str):
     return FileResponse(path, media_type="audio/wav", filename=safe)
 
 
+# ============== 一键合成: 口播 + 多镜 b-roll + PIP overlay → 成品 mp4 ==============
+
+
+class ComposeAsset(BaseModel):
+    url: str                       # 公网 URL (Pexels/Pixabay) 或拼出来的标识 (upload 用 oss_key 走另一条路)
+    oss_key: Optional[str] = None  # upload 类型走 OSS 下载
+    duration: float                # 素材原长
+
+
+class ComposeShot(BaseModel):
+    start: float                   # 在剪辑后口播视频里的时间 (秒)
+    end: float
+    assets: list[ComposeAsset]     # 这镜选的素材 (按显示顺序), 时长平均切; 空列表 = 用原口播画面
+
+
+class ComposePipConfig(BaseModel):
+    enabled: bool                  # shape == 'none' 时为 False
+    shape: str = 'rounded'         # 'circle' / 'rounded'
+    pos: str = 'bl'                # 'tl' / 'tr' / 'bl' / 'br' / 'center'
+    size: str = 'M'                # 'S' / 'M' / 'L'
+    face_y: str = 'top'            # 'top' / 'center' / 'bottom'
+
+
+class ComposeRequest(BaseModel):
+    narration_oss_key: str         # 剪辑后口播视频 OSS key (sources/...)
+    shots: list[ComposeShot]
+    pip: ComposePipConfig
+    output_ratio: str = '9:16'     # '9:16' / '16:9' / '1:1'
+
+
+# 输出尺寸映射 (1080p 等级)
+_OUTPUT_DIMS = {'9:16': (1080, 1920), '16:9': (1920, 1080), '1:1': (1080, 1080)}
+_PIP_SIZE_RATIO = {'S': 0.20, 'M': 0.25, 'L': 0.33}
+_FACE_Y_FRAC = {'top': 0.2, 'center': 0.5, 'bottom': 0.8}
+
+
+@app.post("/compose-footage")
+def compose_footage(req: ComposeRequest):
+    """合成: 拉口播 + 所有 b-roll → ffmpeg 拼接 + PIP overlay → 上传输出 → 返签名 URL"""
+    import shutil
+    import subprocess
+    import tempfile
+    import urllib.request
+    from oss_helper import oss_download, oss_upload, oss_sign_get, oss_delete
+
+    if not req.shots:
+        raise HTTPException(400, 'shots 不能为空')
+    if req.output_ratio not in _OUTPUT_DIMS:
+        raise HTTPException(400, f'无效 output_ratio: {req.output_ratio}')
+
+    W, H = _OUTPUT_DIMS[req.output_ratio]
+    job_id = f"compose_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}"
+    work_dir = os.path.join(tempfile.gettempdir(), job_id)
+    os.makedirs(work_dir, exist_ok=True)
+
+    try:
+        # 1. 下载口播视频 (从 OSS)
+        narration_path = os.path.join(work_dir, 'narration.mp4')
+        try:
+            oss_download(req.narration_oss_key, narration_path)
+        except Exception as e:
+            raise HTTPException(400, f'OSS 下载口播失败: {e}')
+
+        # 2. 收集所有素材 + 下载. 用 (asset_idx, sub_idx) 去重 (同一素材多镜共用)
+        # 简化: 每镜每素材独立下载 (即使 URL 重复, 占用一点空间, 但 ffmpeg 命令构造简单)
+        asset_files: dict[tuple[int, int], str] = {}  # (shot_idx, asset_idx_in_shot) -> local path
+        for si, shot in enumerate(req.shots):
+            for ai, asset in enumerate(shot.assets):
+                local = os.path.join(work_dir, f'asset_{si}_{ai}.mp4')
+                try:
+                    if asset.oss_key:
+                        oss_download(asset.oss_key, local)
+                    else:
+                        # 公网 URL (Pexels/Pixabay)
+                        urllib.request.urlretrieve(asset.url, local)
+                    asset_files[(si, ai)] = local
+                except Exception as e:
+                    print(f"[compose] asset {si}/{ai} 下载失败: {e}", flush=True)
+                    # 失败的镜头让 ffmpeg fallback 用口播画面 (跟"没素材"一样处理)
+
+        # 3. 构造 ffmpeg filter_complex
+        # 输入: 0=narration, 1..N = 所有素材 (按出现顺序)
+        ff_inputs = ['-i', narration_path]
+        input_idx_map: dict[tuple[int, int], int] = {}
+        next_input = 1
+        for si, shot in enumerate(req.shots):
+            for ai in range(len(shot.assets)):
+                if (si, ai) in asset_files:
+                    ff_inputs.extend(['-i', asset_files[(si, ai)]])
+                    input_idx_map[(si, ai)] = next_input
+                    next_input += 1
+
+        # 主轨: 每镜按顺序拼 (有素材用素材, 没素材或失败用口播原画面那段)
+        main_segments: list[str] = []  # 每段 ffmpeg label
+        filter_parts: list[str] = []
+        seg_label_idx = 0
+
+        for si, shot in enumerate(req.shots):
+            shot_dur = max(0.1, shot.end - shot.start)
+            # 该镜实际可用素材
+            usable_assets = [(ai, shot.assets[ai]) for ai in range(len(shot.assets)) if (si, ai) in asset_files]
+
+            if not usable_assets:
+                # 没素材: 从口播视频截取这段, 缩放到输出尺寸
+                lbl = f'mseg{seg_label_idx}'
+                filter_parts.append(
+                    f"[0:v]trim={shot.start}:{shot.end},setpts=PTS-STARTPTS,"
+                    f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}[{lbl}]"
+                )
+                main_segments.append(lbl)
+                seg_label_idx += 1
+            else:
+                # 有素材: 时长平均切给每个素材
+                slice_dur = shot_dur / len(usable_assets)
+                for ai, asset in usable_assets:
+                    inp = input_idx_map[(si, ai)]
+                    # 取素材前 slice_dur 秒 (素材短就 trim 到 min(slice_dur, asset.duration))
+                    take_dur = min(slice_dur, max(0.5, asset.duration))
+                    lbl = f'mseg{seg_label_idx}'
+                    filter_parts.append(
+                        f"[{inp}:v]trim=0:{take_dur:.3f},setpts=PTS-STARTPTS,"
+                        f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}[{lbl}]"
+                    )
+                    main_segments.append(lbl)
+                    seg_label_idx += 1
+
+        # concat 所有主段
+        concat_inputs = ''.join(f'[{l}]' for l in main_segments)
+        filter_parts.append(f"{concat_inputs}concat=n={len(main_segments)}:v=1:a=0[main]")
+
+        # PIP overlay (如果开启 + 有 b-roll 段)
+        # V1 处理: PIP 一次性 overlay 到整个 main 上 (PIP 在没素材的镜头会重叠到 narration 自己的画面上, 但
+        # 没素材的镜头 main 本来就是 narration 截段, 重复叠效果一致, 视觉上感知不到)
+        final_v_label = 'main'
+        if req.pip.enabled and main_segments:
+            pip_size = _PIP_SIZE_RATIO.get(req.pip.size, 0.25)
+            pip_w = int(W * pip_size)
+            pip_h = pip_w if req.pip.shape == 'circle' else int(pip_w * 9 / 16)
+            face_frac = _FACE_Y_FRAC.get(req.pip.face_y, 0.2)
+            # PIP 内容: 缩放 narration 后从对应 face_y 截
+            pip_filter = (
+                f"[0:v]scale={pip_w}:-2:force_original_aspect_ratio=increase"
+            )
+            # 圆形蒙版: geq 生成圆形 alpha, 跟 PIP 合成
+            if req.pip.shape == 'circle':
+                pip_filter += (
+                    f",crop={pip_w}:{pip_w}:0:'(in_h-{pip_w})*{face_frac}',"
+                    f"format=yuva420p,"
+                    f"geq=lum='p(X,Y)':a='if(lt(pow(X-{pip_w}/2,2)+pow(Y-{pip_w}/2,2),pow({pip_w}/2,2)),255,0)'"
+                )
+            else:
+                # 圆角矩形: crop 后再 alpha 抠圆角. ffmpeg geq 圆角公式比较丑, V1 简化为直角矩形.
+                pip_filter += (
+                    f",crop={pip_w}:{pip_h}:0:'(in_h-{pip_h})*{face_frac}'"
+                )
+            pip_filter += '[pip]'
+            filter_parts.append(pip_filter)
+
+            # overlay 位置
+            pad = 24
+            if req.pip.pos == 'tl': overlay_xy = f"{pad}:{pad}"
+            elif req.pip.pos == 'tr': overlay_xy = f"W-w-{pad}:{pad}"
+            elif req.pip.pos == 'bl': overlay_xy = f"{pad}:H-h-{pad}"
+            elif req.pip.pos == 'br': overlay_xy = f"W-w-{pad}:H-h-{pad}"
+            else: overlay_xy = f"(W-w)/2:(H-h)/2"
+            filter_parts.append(f"[main][pip]overlay={overlay_xy}:format=auto[final_v]")
+            final_v_label = 'final_v'
+
+        # 音频: 用 narration 完整音轨 (剪辑后已经对齐, 直接用就行)
+        filter_parts.append("[0:a]anull[final_a]")
+
+        filter_complex = ';'.join(filter_parts)
+
+        # 4. 跑 ffmpeg
+        out_path = os.path.join(work_dir, 'out.mp4')
+        cmd = ["ffmpeg", "-y", "-hwaccel", "cuda", *ff_inputs,
+               "-filter_complex", filter_complex,
+               "-map", f"[{final_v_label}]", "-map", "[final_a]",
+               "-c:v", "h264_nvenc", "-preset", "p2", "-cq", "26",
+               "-c:a", "aac", "-pix_fmt", "yuv420p",
+               "-movflags", "+faststart",
+               out_path]
+        print(f"[compose] ffmpeg cmd: {' '.join(cmd[:6])} ... (filter {len(filter_complex)} chars)", flush=True)
+        proc = subprocess.run(cmd, capture_output=True, timeout=1800)
+        if proc.returncode != 0:
+            err = proc.stderr.decode("utf-8", errors="ignore")[-800:]
+            raise HTTPException(500, f"ffmpeg 合成失败: {err}")
+
+        # 5. 上传输出 OSS
+        out_oss_key = f"outputs/{job_id}.mp4"
+        try:
+            oss_upload(out_oss_key, out_path, content_type="video/mp4")
+        except Exception as e:
+            raise HTTPException(500, f"OSS 上传失败: {e}")
+
+        # 6. 删 OSS 上的 b-roll asset (上传的部分; pexels/pixabay 不在 OSS), 删源口播 (用完即弃)
+        for asset_list in [shot.assets for shot in req.shots]:
+            for asset in asset_list:
+                if asset.oss_key:
+                    oss_delete(asset.oss_key)
+        oss_delete(req.narration_oss_key)
+
+        # ffprobe 取时长
+        probe = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", out_path],
+            capture_output=True, text=True,
+        )
+        new_dur = 0.0
+        if probe.returncode == 0:
+            try: new_dur = float(probe.stdout.strip())
+            except ValueError: pass
+
+        video_url = oss_sign_get(out_oss_key, expires=24 * 3600)  # 24h, 让用户有时间下载
+        return {
+            "success": True,
+            "output_oss_key": out_oss_key,
+            "video_url": video_url,
+            "duration": new_dur,
+        }
+    finally:
+        # 清本地临时文件
+        try: shutil.rmtree(work_dir, ignore_errors=True)
+        except: pass
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=9001)

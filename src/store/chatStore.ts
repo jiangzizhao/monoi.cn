@@ -61,6 +61,7 @@ function normalizeBlock(block: unknown): MessageBlock | null {
         data: Array.isArray(block.data) ? block.data as any : [],
         video_url: asString((block as any).video_url) || undefined,
         segment_times: Array.isArray((block as any).segment_times) ? (block as any).segment_times : undefined,
+        narration_oss_key: asString((block as any).narration_oss_key) || undefined,
       }
 
     case 'storyboard':
@@ -107,6 +108,7 @@ function normalizeBlock(block: unknown): MessageBlock | null {
             : undefined,
           text_preview: asString(data.text_preview) || undefined,
           kept_segments: Array.isArray(data.kept_segments) ? data.kept_segments as any : undefined,
+          narration_oss_key: asString(data.narration_oss_key) || undefined,
         },
       }
     }
