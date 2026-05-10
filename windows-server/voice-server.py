@@ -832,8 +832,13 @@ def compose_footage(req: ComposeRequest):
                     if asset.oss_key:
                         oss_download(asset.oss_key, local)
                     else:
-                        # 公网 URL (Pexels/Pixabay)
-                        urllib.request.urlretrieve(asset.url, local)
+                        # 公网 URL (Pexels/Pixabay) — 必须带浏览器 UA, 否则 403 Forbidden
+                        ureq = urllib.request.Request(asset.url, headers={
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                            'Referer': 'https://www.pexels.com/' if 'pexels' in asset.url else 'https://pixabay.com/',
+                        })
+                        with urllib.request.urlopen(ureq, timeout=120) as resp, open(local, 'wb') as f:
+                            shutil.copyfileobj(resp, f)
                     asset_files[(si, ai)] = local
                 except Exception as e:
                     print(f"[compose] asset {si}/{ai} 下载失败: {e}", flush=True)
@@ -851,31 +856,53 @@ def compose_footage(req: ComposeRequest):
                     input_idx_map[(si, ai)] = next_input
                     next_input += 1
 
-        # 主轨: 每镜按顺序拼 (有素材用素材, 没素材或失败用口播原画面那段)
-        main_segments: list[str] = []  # 每段 ffmpeg label
+        # 先算 [0:v] 被消费几次: 没素材的镜头数 + (PIP 时 +1)
+        # ffmpeg 要求同一个流多次消费时必须 split, 否则 "Filter ... has an unconnected output"
+        narration_v_uses = 0
+        for si, shot in enumerate(req.shots):
+            usable = [ai for ai in range(len(shot.assets)) if (si, ai) in asset_files]
+            if not usable:
+                narration_v_uses += 1
+        any_broll = any((si, ai) in asset_files for si in range(len(req.shots)) for ai in range(len(req.shots[si].assets)))
+        if req.pip.enabled and any_broll:
+            narration_v_uses += 1
+
         filter_parts: list[str] = []
+        # narration video 流的别名池
+        narration_v_pool: list[str] = []
+        if narration_v_uses == 0:
+            pass  # 不用 [0:v]
+        elif narration_v_uses == 1:
+            narration_v_pool = ['0:v']  # 直接用, 不 split
+        else:
+            split_labels = [f'narrv{i}' for i in range(narration_v_uses)]
+            narration_v_pool = split_labels[:]
+            filter_parts.append(f"[0:v]split={narration_v_uses}" + ''.join(f'[{l}]' for l in split_labels))
+
+        def take_narration_v():
+            return narration_v_pool.pop(0) if narration_v_pool else '0:v'
+
+        # 主轨: 每镜按顺序拼 (有素材用素材, 没素材或失败用口播原画面那段)
+        main_segments: list[str] = []
         seg_label_idx = 0
 
         for si, shot in enumerate(req.shots):
             shot_dur = max(0.1, shot.end - shot.start)
-            # 该镜实际可用素材
             usable_assets = [(ai, shot.assets[ai]) for ai in range(len(shot.assets)) if (si, ai) in asset_files]
 
             if not usable_assets:
-                # 没素材: 从口播视频截取这段, 缩放到输出尺寸
                 lbl = f'mseg{seg_label_idx}'
+                src = take_narration_v()
                 filter_parts.append(
-                    f"[0:v]trim={shot.start}:{shot.end},setpts=PTS-STARTPTS,"
+                    f"[{src}]trim={shot.start}:{shot.end},setpts=PTS-STARTPTS,"
                     f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}[{lbl}]"
                 )
                 main_segments.append(lbl)
                 seg_label_idx += 1
             else:
-                # 有素材: 时长平均切给每个素材
                 slice_dur = shot_dur / len(usable_assets)
                 for ai, asset in usable_assets:
                     inp = input_idx_map[(si, ai)]
-                    # 取素材前 slice_dur 秒 (素材短就 trim 到 min(slice_dur, asset.duration))
                     take_dur = min(slice_dur, max(0.5, asset.duration))
                     lbl = f'mseg{seg_label_idx}'
                     filter_parts.append(
@@ -889,18 +916,17 @@ def compose_footage(req: ComposeRequest):
         concat_inputs = ''.join(f'[{l}]' for l in main_segments)
         filter_parts.append(f"{concat_inputs}concat=n={len(main_segments)}:v=1:a=0[main]")
 
-        # PIP overlay (如果开启 + 有 b-roll 段)
-        # V1 处理: PIP 一次性 overlay 到整个 main 上 (PIP 在没素材的镜头会重叠到 narration 自己的画面上, 但
-        # 没素材的镜头 main 本来就是 narration 截段, 重复叠效果一致, 视觉上感知不到)
+        # PIP overlay (如果开启 + 至少 1 镜有 b-roll)
         final_v_label = 'main'
-        if req.pip.enabled and main_segments:
+        has_any_broll = any((si, ai) in asset_files for si in range(len(req.shots)) for ai in range(len(req.shots[si].assets)))
+        if req.pip.enabled and has_any_broll:
             pip_size = _PIP_SIZE_RATIO.get(req.pip.size, 0.25)
             pip_w = int(W * pip_size)
             pip_h = pip_w if req.pip.shape == 'circle' else int(pip_w * 9 / 16)
             face_frac = _FACE_Y_FRAC.get(req.pip.face_y, 0.2)
-            # PIP 内容: 缩放 narration 后从对应 face_y 截
+            pip_src = take_narration_v()
             pip_filter = (
-                f"[0:v]scale={pip_w}:-2:force_original_aspect_ratio=increase"
+                f"[{pip_src}]scale={pip_w}:-2:force_original_aspect_ratio=increase"
             )
             # 圆形蒙版: geq 生成圆形 alpha, 跟 PIP 合成
             if req.pip.shape == 'circle':
