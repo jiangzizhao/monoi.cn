@@ -987,8 +987,16 @@ def compose_footage(req: ComposeRequest):
         print(f"[compose] ffmpeg cmd: {' '.join(cmd[:6])} ... (filter {len(filter_complex)} chars)", flush=True)
         proc = subprocess.run(cmd, capture_output=True, timeout=1800)
         if proc.returncode != 0:
-            err = proc.stderr.decode("utf-8", errors="ignore")[-800:]
-            raise HTTPException(500, f"ffmpeg 合成失败: {err}")
+            full_err = proc.stderr.decode("utf-8", errors="ignore")
+            # 完整 stderr 打到 voice-server 窗口 (用户能看到)
+            print(f"[compose] ffmpeg 失败 (returncode={proc.returncode})", flush=True)
+            print(f"[compose] ffmpeg cmd: {' '.join(cmd)}", flush=True)
+            print(f"[compose] ffmpeg filter_complex: {filter_complex}", flush=True)
+            print(f"[compose] ffmpeg stderr 完整:\n{full_err}\n[compose] === stderr 结束 ===", flush=True)
+            # 找真正的错误行 (含 'Error' 或 'error' 关键字), 截出来给前端
+            err_lines = [l for l in full_err.split('\n') if 'rror' in l or 'failed' in l.lower() or 'invalid' in l.lower()]
+            err_summary = '\n'.join(err_lines[-10:]) if err_lines else full_err[-1500:]
+            raise HTTPException(500, f"ffmpeg 合成失败 (完整 log 见 voice-server 窗口): {err_summary}")
 
         # 5. 上传输出 OSS
         out_oss_key = f"outputs/{job_id}.mp4"
