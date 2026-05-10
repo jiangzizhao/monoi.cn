@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { RefreshCw, Pencil, Download, Check, ExternalLink } from 'lucide-react'
+import { RefreshCw, Pencil, Download, Check, ExternalLink, Play } from 'lucide-react'
 import { Badge } from '../ui/Badge'
 import { searchPexels } from '../../services/pexels'
 import { searchPixabay } from '../../services/pixabay'
 import type { FootageSentenceItem, VideoAsset } from '../../types'
+import { TimelinePreview } from './TimelinePreview'
 
 function AssetThumb({ asset, selected, onSelect }: { asset: VideoAsset; selected: boolean; onSelect: () => void }) {
   return (
@@ -87,12 +88,15 @@ function SentenceRow({ item, index, selected, onToggle, onRefresh }: {
   )
 }
 
-export function FootageGrid({ data, onUpdate }: {
+export function FootageGrid({ data, videoUrl, segmentTimes, onUpdate }: {
   data: FootageSentenceItem[]
+  videoUrl?: string
+  segmentTimes?: { start: number; end: number }[]
   msgId?: string; blockIndex?: number
   onUpdate: (newData: FootageSentenceItem[]) => void
 }) {
   const [selected, setSelected] = useState<Record<number, VideoAsset[]>>({})
+  const [previewOpen, setPreviewOpen] = useState(false)
 
   const refresh = async (index: number, keyword: string) => {
     const updated = data.map((it, i) => i === index ? { ...it, loadingAssets: true } : it)
@@ -138,10 +142,30 @@ export function FootageGrid({ data, onUpdate }: {
       {selTotal > 0 && (
         <div className="flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-[var(--bg-hover)] border border-[var(--border)]">
           <span className="text-xs text-[var(--text-2)]">已选 {selTotal} 个素材 · 覆盖 {selSentenceCount} / {data.length} 句</span>
-          <button onClick={exportList} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[var(--text)] text-[var(--bg)] text-xs cursor-pointer hover:opacity-80 transition-opacity">
-            <Download size={12}/> 导出清单
-          </button>
+          <div className="flex gap-2">
+            {videoUrl && segmentTimes && (
+              <button
+                onClick={() => setPreviewOpen(true)}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[var(--text)] text-[var(--bg)] text-xs cursor-pointer hover:opacity-80 transition-opacity"
+              >
+                <Play size={12}/> 预览效果
+              </button>
+            )}
+            <button onClick={exportList} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-[var(--border)] text-[var(--text-2)] hover:bg-[var(--bg-card)] text-xs cursor-pointer transition-colors">
+              <Download size={12}/> 导出清单
+            </button>
+          </div>
         </div>
+      )}
+
+      {previewOpen && videoUrl && segmentTimes && (
+        <TimelinePreview
+          videoUrl={videoUrl}
+          segmentTimes={segmentTimes}
+          items={data}
+          selected={selected}
+          onClose={() => setPreviewOpen(false)}
+        />
       )}
     </div>
   )

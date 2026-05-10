@@ -401,9 +401,24 @@ export function useChat() {
             assets: [],
             loadingAssets: true,
           }))
+          // 找最近的 video_url (来自 video_player block)
+          let videoUrl = ''
+          for (let i = conv.messages.length - 1; i >= 0; i--) {
+            const msg = conv.messages[i]
+            if (msg.role !== 'assistant') continue
+            for (const block of msg.blocks) {
+              if (block.type === 'video_player' && (block as any).data?.video_url) {
+                videoUrl = (block as any).data.video_url
+                break
+              }
+            }
+            if (videoUrl) break
+          }
+          const segmentTimes = segments.map(s => ({ start: s.start, end: s.end }))
+
           store.updateLastAssistantBlocks(convId, [
             { type: 'text', content: `✓ 拆出 ${items.length} 镜, 正在并发去 Pexels + Pixabay 拉素材...` },
-            { type: 'footage_grid', data: items },
+            { type: 'footage_grid', data: items, video_url: videoUrl, segment_times: segmentTimes },
           ])
           const updated = [...items]
           for (let i = 0; i < updated.length; i++) {
@@ -413,13 +428,13 @@ export function useChat() {
             updated[i] = { ...updated[i], assets: [...p, ...px], loadingAssets: false }
             store.updateLastAssistantBlocks(convId, [
               { type: 'text', content: `拉素材中... (${i + 1}/${items.length})` },
-              { type: 'footage_grid', data: [...updated] },
+              { type: 'footage_grid', data: [...updated], video_url: videoUrl, segment_times: segmentTimes },
             ])
             await new Promise(r => setTimeout(r, 200))
           }
           store.updateLastAssistantBlocks(convId, [
-            { type: 'text', content: `✓ 匹配完成 ${items.length} 镜. 每镜挑你喜欢的, 后续会接预览 + 合成.` },
-            { type: 'footage_grid', data: [...updated] },
+            { type: 'text', content: `✓ 匹配完成 ${items.length} 镜. 每镜挑你喜欢的, 点底部"预览效果"看双轨道.` },
+            { type: 'footage_grid', data: [...updated], video_url: videoUrl, segment_times: segmentTimes },
           ])
         } catch (e: any) {
           store.updateLastAssistantBlocks(convId, [{ type: 'error', message: e.message || '匹配失败' }])

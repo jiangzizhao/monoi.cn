@@ -84,7 +84,7 @@ export type MessageBlock =
   | { type: 'text';           content: string; streaming?: boolean }
   | { type: 'choices';        question?: string; options: ChoiceOption[]; chosen?: string }
   | { type: 'script_card';    data: ScriptResult }
-  | { type: 'footage_grid';   data: FootageSentenceItem[] }
+  | { type: 'footage_grid';   data: FootageSentenceItem[]; video_url?: string; segment_times?: { start: number; end: number }[] }
   | { type: 'storyboard';     data: StoryboardRowItem[] }
   | { type: 'teleprompter';   data: string }
   | { type: 'platform_copy';  data: PlatformCopyResult }
