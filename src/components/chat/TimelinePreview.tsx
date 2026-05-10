@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Pause, Play, X, Loader2, Download as DownloadIcon } from 'lucide-react'
+import { Pause, Play, X, Loader2, Download as DownloadIcon, Music, Upload } from 'lucide-react'
 import type { FootageSentenceItem, VideoAsset } from '../../types'
 
 interface Props {
@@ -40,7 +40,43 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
   const [composedUrl, setComposedUrl] = useState<string | null>(null)
   const [composeError, setComposeError] = useState('')
 
+  // BGM 状态: 用户上传一个背景音乐 (mp3/wav 等), 合成时跟口播音轨混音 (避免版权)
+  const [bgm, setBgm] = useState<{ oss_key: string; name: string; preview_url: string } | null>(null)
+  const [bgmVolume, setBgmVolume] = useState(0.3)   // 默认 30%, 不盖过口播
+  const [bgmUploading, setBgmUploading] = useState(false)
+  const bgmFileRef = useRef<HTMLInputElement>(null)
+
   const directBase = (import.meta as any).env?.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'
+
+  const handleBgmUpload = async (file: File) => {
+    if (file.size > 50 * 1024 * 1024) {
+      alert('BGM 太大 (>50MB), 建议先压缩')
+      return
+    }
+    setBgmUploading(true)
+    try {
+      const signRes = await fetch(directBase + '/api/oss/sign-upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: file.name, content_type: file.type || 'audio/mpeg' }),
+      })
+      if (!signRes.ok) throw new Error(`签名失败 (${signRes.status})`)
+      const { put_url, oss_key, content_type } = await signRes.json()
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest()
+        xhr.onload = () => { (xhr.status >= 200 && xhr.status < 300) ? resolve() : reject(new Error(`PUT ${xhr.status}`)) }
+        xhr.onerror = () => reject(new Error('网络错误'))
+        xhr.open('PUT', put_url)
+        xhr.setRequestHeader('Content-Type', content_type)
+        xhr.send(file)
+      })
+      setBgm({ oss_key, name: file.name, preview_url: URL.createObjectURL(file) })
+    } catch (e: any) {
+      alert(`BGM 上传失败: ${e.message}`)
+    } finally {
+      setBgmUploading(false)
+    }
+  }
 
   const handleCompose = async () => {
     if (!narrationOssKey) {
@@ -68,6 +104,8 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
           pos, size, face_y: faceY,
         },
         output_ratio: outputRatio,
+        bgm_oss_key: bgm?.oss_key || null,
+        bgm_volume: bgmVolume,
       }
       const res = await fetch(directBase + '/api/voice/compose-footage', {
         method: 'POST',
@@ -357,6 +395,63 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
             这是预览示意图. 当前 PIP 样式 / 位置 / 大小会在最终合成时按这个布局生效.
             点上方时间轴上的镜头可跳转, 同步看到对应 b-roll. 多素材按时长平均切.
           </p>
+
+          {/* BGM 配置 */}
+          <div className="border border-[var(--border)] rounded-xl p-3 flex flex-col gap-3">
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-medium text-[var(--text-2)] flex items-center gap-1.5">
+                <Music size={12}/> 背景音乐 (BGM)
+              </div>
+              <span className="text-[10px] text-[var(--text-3)]">建议自己上传无版权音乐 (mp3/wav, ≤50MB)</span>
+            </div>
+
+            {bgm ? (
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center justify-between bg-[var(--bg-hover)] rounded-lg px-3 py-2">
+                  <span className="text-xs text-[var(--text)] truncate flex-1">{bgm.name}</span>
+                  <button
+                    onClick={() => { if (bgm.preview_url) URL.revokeObjectURL(bgm.preview_url); setBgm(null) }}
+                    className="text-[11px] text-[var(--text-3)] hover:text-red-400 px-2 py-1 cursor-pointer"
+                  >
+                    移除
+                  </button>
+                </div>
+                <audio src={bgm.preview_url} controls className="w-full" style={{ height: 32 }}/>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-[var(--text-3)] w-16">音量</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={bgmVolume}
+                    onChange={(e) => setBgmVolume(Number(e.target.value))}
+                    className="flex-1 accent-current cursor-pointer"
+                  />
+                  <span className="text-xs text-[var(--text-3)] font-mono w-10 text-right">{Math.round(bgmVolume * 100)}%</span>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => bgmFileRef.current?.click()}
+                disabled={bgmUploading}
+                className="flex items-center justify-center gap-2 px-4 py-3 rounded-lg border border-dashed border-[var(--border)] text-xs text-[var(--text-2)] hover:bg-[var(--bg-hover)] hover:border-[var(--text-3)] cursor-pointer disabled:opacity-50 transition-all"
+              >
+                {bgmUploading ? <><Loader2 size={14} className="animate-spin"/> 上传中...</> : <><Upload size={14}/> 上传 BGM (可选)</>}
+              </button>
+            )}
+            <input
+              ref={bgmFileRef}
+              type="file"
+              accept="audio/*"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0]
+                if (f) handleBgmUpload(f)
+                if (bgmFileRef.current) bgmFileRef.current.value = ''
+              }}
+            />
+          </div>
         </div>
 
         {/* 合成结果区 (合成完显示) */}

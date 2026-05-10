@@ -782,6 +782,8 @@ class ComposeRequest(BaseModel):
     shots: list[ComposeShot]
     pip: ComposePipConfig
     output_ratio: str = '9:16'     # '9:16' / '16:9' / '1:1'
+    bgm_oss_key: Optional[str] = None    # BGM (用户自传, 无版权), 不传就没 BGM
+    bgm_volume: float = 0.3              # BGM 相对口播的音量 (0-1, 默认 30%)
 
 
 # 输出尺寸映射 (1080p 等级)
@@ -925,8 +927,28 @@ def compose_footage(req: ComposeRequest):
             filter_parts.append(f"[main][pip]overlay={overlay_xy}:format=auto[final_v]")
             final_v_label = 'final_v'
 
-        # 音频: 用 narration 完整音轨 (剪辑后已经对齐, 直接用就行)
-        filter_parts.append("[0:a]anull[final_a]")
+        # 音频: 口播音轨 + 可选 BGM 混音
+        bgm_path = None
+        if req.bgm_oss_key:
+            bgm_path = os.path.join(work_dir, 'bgm.audio')
+            try:
+                oss_download(req.bgm_oss_key, bgm_path)
+                ff_inputs.extend(['-i', bgm_path])
+                bgm_input_idx = next_input
+                next_input += 1
+                # BGM 循环播放 (aloop) + 调音量 + atrim 截到视频长度 + 用 amix 跟口播混
+                # aloop 用 -1 + 大 size 实现近似无限循环; atrim 兜底防止 BGM 比视频长太多
+                bgm_vol = max(0.0, min(1.0, req.bgm_volume))
+                filter_parts.append(
+                    f"[{bgm_input_idx}:a]aloop=loop=-1:size=2e9,volume={bgm_vol:.2f}[bgm_a]"
+                )
+                # amix duration=first 用第一个输入(口播)的时长截断; 用 weights 让两个输入按 1:1 权重 (volume 已经调过)
+                filter_parts.append("[0:a][bgm_a]amix=inputs=2:duration=first:dropout_transition=0[final_a]")
+            except Exception as e:
+                print(f"[compose] BGM 下载失败, 跳过 BGM: {e}", flush=True)
+                filter_parts.append("[0:a]anull[final_a]")
+        else:
+            filter_parts.append("[0:a]anull[final_a]")
 
         filter_complex = ';'.join(filter_parts)
 
