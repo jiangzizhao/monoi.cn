@@ -520,7 +520,7 @@ export function useChat() {
           },
           {
             type: 'text',
-            content: '✂️ 口播视频已剪辑完成。要为这段视频内容找配套素材吗?',
+            content: '口播视频已剪辑完成。要为这段视频内容找配套素材吗?',
           },
           {
             type: 'choices',

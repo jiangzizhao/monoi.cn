@@ -549,14 +549,14 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
                 </div>
                 <button
                   onClick={() => toggleSegment(segWords)}
-                  className={`text-[10px] px-1.5 py-0.5 rounded transition-opacity flex-shrink-0 ${
+                  className={`px-1.5 py-1 rounded transition-opacity flex-shrink-0 inline-flex items-center justify-center ${
                     allDel
                       ? 'opacity-100 text-[var(--text-3)] hover:text-[var(--text-2)] hover:bg-[var(--bg-card)]'
                       : 'opacity-0 group-hover:opacity-100 text-red-400 hover:bg-red-950/30'
                   }`}
                   title={allDel ? '恢复整句' : '删除整句'}
                 >
-                  {allDel ? '↩' : '✂'}
+                  {allDel ? <Undo2 size={12}/> : <Scissors size={12}/>}
                 </button>
               </div>
             )
@@ -567,7 +567,7 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
       {error && <div className="text-xs text-red-400">{error}</div>}
 
       <div className="text-xs text-[var(--text-3)]">
-        💡 拖选文字 → 点 <span className="text-[var(--text-2)]">删除选中</span> · 单击词切换删除 · 双击词跳到对应时间
+        拖选文字 → 点 <span className="text-[var(--text-2)]">删除选中</span> · 单击词切换删除 · 双击词跳到对应时间
       </div>
 
       <div className="flex justify-end gap-2 pt-1">

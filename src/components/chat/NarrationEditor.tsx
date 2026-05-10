@@ -402,7 +402,7 @@ export function NarrationEditor({ data, apiBase, onCancel, onDone }: Props) {
       {error && <div className="text-xs text-red-400">{error}</div>}
 
       <div className="text-xs text-[var(--text-3)]">
-        💡 拖选文字 → 点 <span className="text-[var(--text-2)]">删除选中</span> · 单击词切换删除 · 双击词跳到对应时间
+        拖选文字 → 点 <span className="text-[var(--text-2)]">删除选中</span> · 单击词切换删除 · 双击词跳到对应时间
       </div>
 
       <div className="flex justify-end gap-2 pt-1">

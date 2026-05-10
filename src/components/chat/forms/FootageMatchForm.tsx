@@ -78,7 +78,7 @@ export function FootageMatchForm({ defaultScript = '', onSubmit, onClose }: Prop
           )}
 
           <p className="text-[11px] text-[var(--text-3)] leading-relaxed">
-            💡 接下来 AI 会用约 5-10 秒按句子提取关键词, 然后并发拉素材
+            接下来 AI 会用约 5-10 秒按句子提取关键词, 然后并发拉素材
             (每句 5-8 个候选). 你逐句挑你喜欢的, 完了能导出清单.
           </p>
         </div>

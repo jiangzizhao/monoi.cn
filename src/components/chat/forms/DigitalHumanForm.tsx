@@ -408,7 +408,7 @@ export function DigitalHumanForm({ onSubmit, onClose }: Props) {
               {/* 音频区 */}
               {noAudio ? (
                 <div className="text-xs text-[var(--text-2)] bg-[var(--bg-hover)] border border-[var(--border)] rounded-lg px-3 py-3 leading-relaxed">
-                  💡 还没有已生成的配音。请先在 <b>配音</b> 模块生成一段音频, 再回来做数字人。
+                  还没有已生成的配音。请先在 <b>配音</b> 模块生成一段音频, 再回来做数字人。
                 </div>
               ) : (
                 <AudioPickGroup
@@ -427,7 +427,7 @@ export function DigitalHumanForm({ onSubmit, onClose }: Props) {
               )}
 
               <p className="text-[11px] text-[var(--text-3)] leading-relaxed">
-                💡 输出视频时长 = 音频时长。形象视频只做参考, 会自动循环。
+                输出视频时长 = 音频时长。形象视频只做参考, 会自动循环。
               </p>
             </div>
           ) : phase === 'submitting' || phase === 'processing' ? (

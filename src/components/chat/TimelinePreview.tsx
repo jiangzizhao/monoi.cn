@@ -304,7 +304,7 @@ export function TimelinePreview({ videoUrl, segmentTimes, items, selected, onClo
           </div>
 
           <p className="text-[11px] text-[var(--text-3)] leading-relaxed">
-            💡 这是预览示意图. 当前 PIP 样式 / 位置 / 大小会在最终合成时按这个布局生效.
+            这是预览示意图. 当前 PIP 样式 / 位置 / 大小会在最终合成时按这个布局生效.
             点上方时间轴上的镜头可跳转, 同步看到对应 b-roll. 多素材按时长平均切.
           </p>
         </div>

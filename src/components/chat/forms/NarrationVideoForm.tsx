@@ -232,7 +232,7 @@ export function NarrationVideoForm({ onSubmit, onClose }: Props) {
               )}
 
               <p className="text-[11px] text-[var(--text-3)] leading-relaxed">
-                💡 支持 mp4 / mov / avi / mkv / webm. 时长不限,但越长转录越久(Whisper 大约 1 分钟视频要 20-30 秒).
+                支持 mp4 / mov / avi / mkv / webm. 时长不限,但越长转录越久(Whisper 大约 1 分钟视频要 20-30 秒).
               </p>
             </div>
           )}
