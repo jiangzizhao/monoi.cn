@@ -15,9 +15,13 @@ interface Props {
 type PipShape = 'circle' | 'rounded'
 type PipPos = 'tl' | 'tr' | 'bl' | 'br' | 'center'
 type PipSize = 'S' | 'M' | 'L'
+type FaceY = 'top' | 'center' | 'bottom'  // 人物在 PIP 内的纵向位置
 
 const POS_LABEL: Record<PipPos, string> = { tl: '左上', tr: '右上', bl: '左下', br: '右下', center: '居中' }
 const SIZE_RATIO: Record<PipSize, number> = { S: 0.20, M: 0.25, L: 0.33 }
+const FACE_Y_LABEL: Record<FaceY, string> = { top: '人物靠上', center: '居中', bottom: '人物靠下' }
+// CSS object-position 的 y 值 (0% = 顶部, 100% = 底部)
+const FACE_Y_POS: Record<FaceY, string> = { top: '20%', center: '50%', bottom: '80%' }
 
 export function TimelinePreview({ videoUrl, segmentTimes, items, selected, onClose }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -27,6 +31,7 @@ export function TimelinePreview({ videoUrl, segmentTimes, items, selected, onClo
   const [shape, setShape] = useState<PipShape>('rounded')
   const [pos, setPos] = useState<PipPos>('bl')
   const [size, setSize] = useState<PipSize>('M')
+  const [faceY, setFaceY] = useState<FaceY>('top')
 
   // 当前镜头索引: currentTime 落在哪个 segment 时间段
   const currentShotIdx = segmentTimes.findIndex(s => currentTime >= s.start && currentTime < s.end)
@@ -104,28 +109,35 @@ export function TimelinePreview({ videoUrl, segmentTimes, items, selected, onClo
         </div>
 
         <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-4">
-          {/* 预览画面: b-roll 全屏 + 口播 PIP 小窗 */}
+          {/* 预览画面: 没选素材时 video 全屏, 选了 b-roll 全屏 + 口播 PIP 小窗 */}
           <div className="relative w-full aspect-video bg-black rounded-xl overflow-hidden" style={{ maxHeight: '50vh' }}>
-            {/* 上层 b-roll (按当前 currentShotIdx 显示对应素材的缩略图) */}
             {currentBroll ? (
-              <img src={currentBroll.thumbnail} alt="" className="absolute inset-0 w-full h-full object-cover" />
+              <>
+                {/* 上层 b-roll 缩略图 (实际合成会播视频) */}
+                <img src={currentBroll.thumbnail} alt="" className="absolute inset-0 w-full h-full object-cover" />
+                {/* 口播 PIP 小窗 */}
+                <video
+                  ref={videoRef}
+                  src={videoUrl}
+                  playsInline
+                  style={{
+                    ...pipStyle,
+                    width: `${SIZE_RATIO[size] * 100}%`,
+                    aspectRatio: shape === 'circle' ? '1/1' : '16/9',
+                    objectFit: 'cover',
+                    objectPosition: `center ${FACE_Y_POS[faceY]}`,
+                  }}
+                />
+              </>
             ) : (
-              <div className="absolute inset-0 flex items-center justify-center text-[var(--text-3)] text-xs">
-                {currentShotIdx >= 0 ? '当前镜头未选素材, 显示口播原画面' : '准备开始'}
-              </div>
+              // 没素材的镜头: video 全屏 (跟最终合成一致)
+              <video
+                ref={videoRef}
+                src={videoUrl}
+                playsInline
+                className="absolute inset-0 w-full h-full object-cover"
+              />
             )}
-            {/* 口播 PIP 小窗 */}
-            <video
-              ref={videoRef}
-              src={videoUrl}
-              playsInline
-              style={{
-                ...pipStyle,
-                width: `${SIZE_RATIO[size] * 100}%`,
-                aspectRatio: '16/9',
-                objectFit: 'cover',
-              }}
-            />
           </div>
 
           {/* 控制栏 */}
@@ -250,6 +262,21 @@ export function TimelinePreview({ videoUrl, segmentTimes, items, selected, onClo
                     className={`px-3 py-1.5 rounded-lg text-xs border transition-all cursor-pointer ${size === sz ? 'bg-[var(--text)] text-[var(--bg)] border-[var(--text)]' : 'bg-[var(--bg-card)] text-[var(--text-2)] border-[var(--border)] hover:border-[var(--text-3)]'}`}
                   >
                     {sz}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-[var(--text-3)] w-12">人物位置</span>
+              <div className="flex gap-2">
+                {(['top', 'center', 'bottom'] as FaceY[]).map(y => (
+                  <button
+                    key={y}
+                    onClick={() => setFaceY(y)}
+                    className={`px-3 py-1.5 rounded-lg text-xs border transition-all cursor-pointer ${faceY === y ? 'bg-[var(--text)] text-[var(--bg)] border-[var(--text)]' : 'bg-[var(--bg-card)] text-[var(--text-2)] border-[var(--border)] hover:border-[var(--text-3)]'}`}
+                  >
+                    {FACE_Y_LABEL[y]}
                   </button>
                 ))}
               </div>

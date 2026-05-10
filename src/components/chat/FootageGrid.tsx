@@ -21,6 +21,11 @@ function AssetThumb({ asset, selected, onSelect }: { asset: VideoAsset; selected
         className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded bg-black/60">
         <ExternalLink size={10} className="text-white"/>
       </a>
+      {/* 右下: 视频时长 (告诉用户这是视频不是图片, 缩略图只是封面帧) */}
+      <div className="absolute bottom-1 right-1 flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/60 text-white text-[10px] font-medium">
+        <Play size={8} className="fill-white" strokeWidth={0}/>
+        {asset.duration ? `${Math.round(asset.duration)}s` : '视频'}
+      </div>
     </div>
   )
 }
