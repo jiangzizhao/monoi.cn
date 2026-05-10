@@ -995,8 +995,10 @@ def compose_footage(req: ComposeRequest):
         cmd = ["ffmpeg", "-y", *ff_inputs,
                "-filter_complex", filter_complex,
                "-map", f"[{final_v_label}]", "-map", "[final_a]",
-               "-c:v", "h264_nvenc", "-preset", "p2", "-cq", "26",
-               "-c:a", "aac", "-pix_fmt", "yuv420p",
+               # 质量优先 (preset p4 平衡, cq 19 高清, 码率上限保高质量), 用户要"保留原素材清晰度"
+               "-c:v", "h264_nvenc", "-preset", "p4", "-cq", "19",
+               "-b:v", "8M", "-maxrate", "12M", "-bufsize", "16M",
+               "-c:a", "aac", "-b:a", "192k", "-pix_fmt", "yuv420p",
                "-movflags", "+faststart",
                out_path]
         print(f"[compose] ffmpeg cmd: {' '.join(cmd[:6])} ... (filter {len(filter_complex)} chars)", flush=True)

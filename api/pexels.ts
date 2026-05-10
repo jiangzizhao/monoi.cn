@@ -17,7 +17,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       image: v.image,
       duration: v.duration,
       url: v.url,
-      video_files: v.video_files?.slice(0, 2),
+      // 返回全部 video_files (含所有 quality), 让前端选最高分辨率不超过 1920px 的 mp4
+      video_files: v.video_files,
     }))
     return res.json({ videos })
   } catch (e: any) {
