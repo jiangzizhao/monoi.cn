@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Pause, Play, X, Loader2, Download as DownloadIcon, Music, Upload } from 'lucide-react'
+import { Pause, Play, X, Loader2, Download as DownloadIcon, Music, Upload, Image as ImageIcon } from 'lucide-react'
 import type { FootageSentenceItem, VideoAsset } from '../../types'
+import { CoverGeneratorForm } from './forms/CoverGeneratorForm'
 
 interface Props {
   videoUrl: string
@@ -38,7 +39,9 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
   const [outputRatio, setOutputRatio] = useState<OutputRatio>('9:16')
   const [composing, setComposing] = useState(false)
   const [composedUrl, setComposedUrl] = useState<string | null>(null)
+  const [composedOssKey, setComposedOssKey] = useState<string | null>(null)
   const [composeError, setComposeError] = useState('')
+  const [coverModalOpen, setCoverModalOpen] = useState(false)
 
   // BGM 状态: 用户上传一个背景音乐 (mp3/wav 等), 合成时跟口播音轨混音 (避免版权)
   const [bgm, setBgm] = useState<{ oss_key: string; name: string; preview_url: string } | null>(null)
@@ -120,6 +123,7 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
         throw new Error(data.detail || data.error || `合成失败 (${res.status})`)
       }
       setComposedUrl(data.video_url)
+      setComposedOssKey(data.output_oss_key || null)
     } catch (e: any) {
       setComposeError(e.message || '合成失败')
     } finally {
@@ -468,15 +472,25 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
             {composedUrl && (
               <div className="flex flex-col gap-2">
                 <video src={composedUrl} controls className="w-full rounded-lg max-h-[40vh] bg-black"/>
-                <a
-                  href={composedUrl}
-                  download="monoi-composed.mp4"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-[var(--text)] text-[var(--bg)] text-sm rounded-lg hover:opacity-80 cursor-pointer self-start"
-                >
-                  <DownloadIcon size={14}/> 下载成品 mp4
-                </a>
+                <div className="flex flex-wrap gap-2">
+                  <a
+                    href={composedUrl}
+                    download="monoi-composed.mp4"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-[var(--text)] text-[var(--bg)] text-sm rounded-lg hover:opacity-80 cursor-pointer"
+                  >
+                    <DownloadIcon size={14}/> 下载成品 mp4
+                  </a>
+                  {composedOssKey && (
+                    <button
+                      onClick={() => setCoverModalOpen(true)}
+                      className="inline-flex items-center justify-center gap-1.5 px-4 py-2 border border-[var(--border)] text-[var(--text-2)] hover:bg-[var(--bg-hover)] text-sm rounded-lg cursor-pointer transition-colors"
+                    >
+                      <ImageIcon size={14}/> 生成封面
+                    </button>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -506,5 +520,16 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
     </div>
   )
 
-  return createPortal(modal, document.body)
+  return (
+    <>
+      {createPortal(modal, document.body)}
+      {coverModalOpen && composedOssKey && composedUrl && (
+        <CoverGeneratorForm
+          defaultVideoOssKey={composedOssKey}
+          defaultVideoUrl={composedUrl}
+          onClose={() => setCoverModalOpen(false)}
+        />
+      )}
+    </>
+  )
 }
