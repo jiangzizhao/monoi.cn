@@ -7,6 +7,7 @@ import type { FootageSentenceItem, VideoAsset } from '../../types'
 import { TimelinePreview } from './TimelinePreview'
 
 // 浏览器侧截视频首帧做缩略图 (avoid 上传服务器再下回来)
+// .mov HEVC 等浏览器无法解码的格式不触发 onseeked → 加 5s timeout 兜底
 function captureFirstFrame(videoUrl: string): Promise<string> {
   return new Promise((resolve) => {
     const v = document.createElement('video')
@@ -15,8 +16,11 @@ function captureFirstFrame(videoUrl: string): Promise<string> {
     v.muted = true
     v.playsInline = true
     v.preload = 'metadata'
+    const timer = setTimeout(() => resolve(''), 5000)   // 5s 兜底
+    const finish = (val: string) => { clearTimeout(timer); resolve(val) }
     v.onloadeddata = () => {
-      v.currentTime = Math.min(0.5, (v.duration || 1) / 2)
+      try { v.currentTime = Math.min(0.5, (v.duration || 1) / 2) }
+      catch { finish('') }
     }
     v.onseeked = () => {
       const canvas = document.createElement('canvas')
@@ -25,14 +29,11 @@ function captureFirstFrame(videoUrl: string): Promise<string> {
       const ctx = canvas.getContext('2d')
       if (ctx) {
         ctx.drawImage(v, 0, 0, canvas.width, canvas.height)
-        try {
-          resolve(canvas.toDataURL('image/jpeg', 0.7))
-        } catch {
-          resolve('')   // CORS 等情况不出 base64, 用空 (前端会显示占位)
-        }
-      } else resolve('')
+        try { finish(canvas.toDataURL('image/jpeg', 0.7)) }
+        catch { finish('') }   // CORS 等情况不出 base64, 用空 (前端会显示占位)
+      } else finish('')
     }
-    v.onerror = () => resolve('')
+    v.onerror = () => finish('')
   })
 }
 
@@ -41,8 +42,10 @@ function probeDuration(videoUrl: string): Promise<number> {
     const v = document.createElement('video')
     v.src = videoUrl
     v.preload = 'metadata'
-    v.onloadedmetadata = () => resolve(v.duration || 0)
-    v.onerror = () => resolve(0)
+    const timer = setTimeout(() => resolve(0), 3000)   // 3s 兜底
+    const finish = (val: number) => { clearTimeout(timer); resolve(val) }
+    v.onloadedmetadata = () => finish(v.duration || 0)
+    v.onerror = () => finish(0)
   })
 }
 
