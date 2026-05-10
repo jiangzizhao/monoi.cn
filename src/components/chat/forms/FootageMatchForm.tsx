@@ -51,7 +51,7 @@ export function FootageMatchForm({ defaultScript = '', onSubmit, onClose }: Prop
         <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-3">
           <p className="text-xs text-[var(--text-3)] leading-relaxed">
             把口播文案粘贴进来, 系统按句子拆开, 自动生成"画面化"英文搜索词
-            (谁/在哪/干什么), 去 Pexels + Pixabay 搜匹配视频素材.
+            (谁/在哪/干什么), 去免费视频素材库匹配候选.
           </p>
 
           <div>
@@ -78,8 +78,8 @@ export function FootageMatchForm({ defaultScript = '', onSubmit, onClose }: Prop
           )}
 
           <p className="text-[11px] text-[var(--text-3)] leading-relaxed">
-            💡 接下来 AI 会用约 5-10 秒按句子提取关键词, 然后自动并发去 Pexels +
-            Pixabay 拉素材 (每句 5-8 个候选). 你逐句挑你喜欢的, 完了能导出清单.
+            💡 接下来 AI 会用约 5-10 秒按句子提取关键词, 然后并发拉素材
+            (每句 5-8 个候选). 你逐句挑你喜欢的, 完了能导出清单.
           </p>
         </div>
 

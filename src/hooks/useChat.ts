@@ -417,7 +417,7 @@ export function useChat() {
           const segmentTimes = segments.map(s => ({ start: s.start, end: s.end }))
 
           store.updateLastAssistantBlocks(convId, [
-            { type: 'text', content: `✓ 拆出 ${items.length} 镜, 正在并发去 Pexels + Pixabay 拉素材...` },
+            { type: 'text', content: `✓ 拆出 ${items.length} 镜, 正在并发拉素材...` },
             { type: 'footage_grid', data: items, video_url: videoUrl, segment_times: segmentTimes },
           ])
           const updated = [...items]
@@ -459,7 +459,7 @@ export function useChat() {
           }))
           const gridBlock: MessageBlock = { type: 'footage_grid', data: items }
           store.updateLastAssistantBlocks(convId, [
-            { type: 'text', content: `已拆成 ${items.length} 镜, 正在并发去 Pexels + Pixabay 拉素材...` },
+            { type: 'text', content: `已拆成 ${items.length} 镜, 正在并发拉素材...` },
             gridBlock,
           ])
 
@@ -471,7 +471,7 @@ export function useChat() {
             const [p, px] = await Promise.all([searchPexels(kw, 5), searchPixabay(kw, 3)])
             updated[i] = { ...updated[i], assets: [...p, ...px], loadingAssets: false }
             store.updateLastAssistantBlocks(convId, [
-              { type: 'text', content: `已拆成 ${items.length} 镜, 正在并发去 Pexels + Pixabay 拉素材... (${i + 1}/${items.length})` },
+              { type: 'text', content: `已拆成 ${items.length} 镜, 正在并发拉素材... (${i + 1}/${items.length})` },
               { type: 'footage_grid', data: [...updated] },
             ])
             await new Promise(r => setTimeout(r, 200))
@@ -526,7 +526,7 @@ export function useChat() {
             type: 'choices',
             question: '下一步',
             options: [
-              { id: '__auto_footage_from_video__', label: '智能匹配素材', description: '按视频时间戳自动拆镜, 拉 Pexels/Pixabay 候选' },
+              { id: '__auto_footage_from_video__', label: '智能匹配素材', description: '按视频时间戳自动拆镜, 拉候选素材' },
               { id: '我要做分镜表', label: '做分镜', description: '生成达芬奇 EDL 兼容的分镜表' },
               { id: '保留这段视频, 暂不做下一步', label: '保留视频', description: '稍后再决定' },
             ],
