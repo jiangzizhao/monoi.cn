@@ -1021,7 +1021,24 @@ def compose_footage(req: ComposeRequest):
             elif req.pip.pos == 'bl': overlay_xy = f"{pad}:H-h-{pad}"
             elif req.pip.pos == 'br': overlay_xy = f"W-w-{pad}:H-h-{pad}"
             else: overlay_xy = f"(W-w)/2:(H-h)/2"
-            filter_parts.append(f"[main][pip]overlay={overlay_xy}:format=auto[final_v]")
+
+            # PIP 只在"有 b-roll 的镜头"时间段叠 — 没素材的镜头 main 已经是口播全屏, 再叠口播 PIP 是重复
+            broll_intervals: list[tuple[float, float]] = []
+            acc = 0.0
+            for si, shot in enumerate(req.shots):
+                seg_dur = max(0.1, shot.end - shot.start)
+                shot_has_broll = any((si, ai) in asset_files for ai in range(len(shot.assets)))
+                if shot_has_broll:
+                    broll_intervals.append((acc, acc + seg_dur))
+                acc += seg_dur
+
+            if broll_intervals:
+                enable_expr = "+".join(f"between(t,{s:.3f},{e:.3f})" for s, e in broll_intervals)
+                filter_parts.append(f"[main][pip]overlay={overlay_xy}:enable='{enable_expr}':format=auto[final_v]")
+                final_v_label = 'final_v'
+            else:
+                # 一镜都没素材 (理论上不会进这里, has_any_broll 已经判过), 不叠 PIP
+                filter_parts.pop()  # 撤销刚才 append 的 pip filter
             final_v_label = 'final_v'
 
         # 音频: 口播音轨 + 可选 BGM 混音
