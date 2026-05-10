@@ -990,7 +990,9 @@ def compose_footage(req: ComposeRequest):
 
         # 4. 跑 ffmpeg
         out_path = os.path.join(work_dir, 'out.mp4')
-        cmd = ["ffmpeg", "-y", "-hwaccel", "cuda", *ff_inputs,
+        # 注意: 合成阶段不加 -hwaccel cuda. 复杂滤镜链 (split/geq/overlay) 在 GPU memory 上跑不了,
+        # ffmpeg 8.x 严格了, 没显式 hwdownload 直接报 -22 Invalid argument. 解码用 CPU + 编码用 nvenc 即可.
+        cmd = ["ffmpeg", "-y", *ff_inputs,
                "-filter_complex", filter_complex,
                "-map", f"[{final_v_label}]", "-map", "[final_a]",
                "-c:v", "h264_nvenc", "-preset", "p2", "-cq", "26",
