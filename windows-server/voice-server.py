@@ -1129,14 +1129,20 @@ def compose_footage(req: ComposeRequest):
 
 
 class CoverRequest(BaseModel):
-    source_oss_key: str            # 视频 OSS key (合成后或原口播)
-    frame_time: float = 1.0        # 第几秒截帧
-    title: str                     # 主标题
-    subtitle: str = ''             # 副标题 (可选)
+    source_oss_key: str
+    frame_time: float = 1.0
+    title: str
+    subtitle: str = ''
     template: str = 'youtube'
     output_ratios: list[str] = ['9:16', '16:9', '3:4', '1:1']
-    font_title: Optional[str] = None     # 用户选的标题字体文件名 (D:\monoi-server\fonts\ 下的)
-    font_subtitle: Optional[str] = None  # 用户选的副标题字体
+    font_title: Optional[str] = None
+    font_subtitle: Optional[str] = None
+    # 用户自定义 (None 走模板默认)
+    color_fill: Optional[str] = None      # 字色 hex 例如 '#FFD700'
+    color_stroke: Optional[str] = None    # 描边色 hex
+    color_sub_fill: Optional[str] = None  # 副标题字色 hex
+    position: Optional[str] = None        # 9 宫格: 'tl'/'tc'/'tr'/'cl'/'cc'/'cr'/'bl'/'bc'/'br'
+    font_scale: float = 1.0               # 字号倍数 0.5-2.5
 
 
 # 可选字体清单 (跟一键启动.bat 下载的对应) — 给前端 GET /cover-fonts 用
@@ -1233,16 +1239,40 @@ def _draw_text_with_stroke(img, xy, text, font, fill, stroke_color=None, stroke_
         draw.text((x, y), text, font=font, fill=fill)
 
 
+def _hex_to_rgb(hex_str: str, default=(255, 255, 255)):
+    """'#FFD700' / 'FFD700' → (255, 215, 0). 失败返 default."""
+    if not hex_str:
+        return default
+    s = hex_str.strip().lstrip('#')
+    if len(s) == 3:
+        s = ''.join(c * 2 for c in s)
+    if len(s) != 6:
+        return default
+    try:
+        return tuple(int(s[i:i+2], 16) for i in (0, 2, 4))
+    except Exception:
+        return default
+
+
 def _render_template_pillow(img, template: str, title: str, subtitle: str,
                              user_font_title: Optional[str] = None,
-                             user_font_subtitle: Optional[str] = None):
-    """用 Pillow 在图上叠模板. img 是 PIL Image (RGB).
-    user_font_title / subtitle 是用户在前端选的字体文件名, None 则用模板默认."""
+                             user_font_subtitle: Optional[str] = None,
+                             color_fill: Optional[str] = None,
+                             color_stroke: Optional[str] = None,
+                             color_sub_fill: Optional[str] = None,
+                             position: Optional[str] = None,
+                             font_scale: float = 1.0):
+    """用 Pillow 在图上叠模板. user_* 字体, color_* 颜色, position 9 宫格, font_scale 字号倍数."""
     from PIL import ImageDraw
     W, H = img.size
     base = min(W, H)
-    title_size = int(base * 0.13)
-    sub_size = int(base * 0.055)
+    fs = max(0.5, min(2.5, font_scale or 1.0))
+    title_size = int(base * 0.13 * fs)
+    sub_size = int(base * 0.055 * fs)
+    # 用户自定义颜色覆盖模板默认 (None 走模板默认)
+    user_fill = _hex_to_rgb(color_fill) if color_fill else None
+    user_stroke = _hex_to_rgb(color_stroke) if color_stroke else None
+    user_sub_fill = _hex_to_rgb(color_sub_fill) if color_sub_fill else None
 
     if template == 'youtube':
         # YouTube 爆款: 大粗黄字 + 红描边 + 黑阴影, 上方
@@ -1250,16 +1280,19 @@ def _render_template_pillow(img, template: str, title: str, subtitle: str,
         sub_font = _load_font(sub_size, 'heavy', user_font_subtitle)
         draw = ImageDraw.Draw(img)
         tw, th = _text_size(draw, title, font)
-        x = (W - tw) // 2
-        y = int(H * 0.08)
-        # 阴影 (黑色 offset)
+        # 9 宫格定位 (用户没指定走默认 tc 上方居中)
+        pos = position or 'tc'
+        pad = int(min(W, H) * 0.04)
+        x_map = {'l': pad, 'c': (W - tw) // 2, 'r': W - tw - pad}
+        y_map = {'t': int(H * 0.08), 'c': (H - th) // 2, 'b': H - th - pad}
+        x = x_map.get(pos[1] if len(pos) > 1 else 'c', x_map['c'])
+        y = y_map.get(pos[0] if len(pos) > 0 else 't', y_map['t'])
         sh_off = max(4, int(title_size * 0.05))
-        # PIL stroke_width 实现描边, 比循环 8 个方向快 10x
         stroke_w = max(6, int(title_size * 0.10))
         _draw_text_with_stroke(
             img, (x, y), title, font,
-            fill=(255, 220, 0),               # 黄色填充
-            stroke_color=(200, 0, 0),         # 红色描边
+            fill=user_fill or (255, 220, 0),
+            stroke_color=user_stroke or (200, 0, 0),
             stroke_w=stroke_w,
             shadow=(sh_off, sh_off, (0, 0, 0)),
         )
@@ -1269,7 +1302,9 @@ def _render_template_pillow(img, template: str, title: str, subtitle: str,
             sy = y + th + int(title_size * 0.2)
             _draw_text_with_stroke(
                 img, (sx, sy), subtitle, sub_font,
-                fill=(255, 255, 255), stroke_color=(0, 0, 0), stroke_w=max(3, int(sub_size * 0.08)),
+                fill=user_sub_fill or (255, 255, 255),
+                stroke_color=user_stroke or (0, 0, 0),
+                stroke_w=max(3, int(sub_size * 0.08)),
             )
 
     elif template == 'douyin':
@@ -1285,14 +1320,13 @@ def _render_template_pillow(img, template: str, title: str, subtitle: str,
         tw, th = _text_size(draw, title, font)
         x = (W - tw) // 2
         y = (bar_h - th) // 2
-        draw.text((x, y), title, font=font, fill=(255, 255, 255))
-        # 下方副标题 (小一点)
+        draw.text((x, y), title, font=font, fill=user_fill or (255, 255, 255))
         if subtitle:
             sub_font = _load_font(sub_size, 'regular', user_font_subtitle)
             stw, sth = _text_size(draw, subtitle, sub_font)
             sx = (W - stw) // 2
             sy = H - bar_h + (bar_h - sth) // 2
-            draw.text((sx, sy), subtitle, font=sub_font, fill=(255, 200, 100))
+            draw.text((sx, sy), subtitle, font=sub_font, fill=user_sub_fill or (255, 200, 100))
 
     elif template == 'xhs':
         # 小红书干货: 顶部红色块 + 圆角 + 主副两行白字
@@ -1310,11 +1344,11 @@ def _render_template_pillow(img, template: str, title: str, subtitle: str,
             stw, sth = _text_size(draw, subtitle, sub_font)
             total_h = th + int(t_size * 0.25) + sth
             y_start = (block_h - total_h) // 2
-            draw.text((pad, y_start), title, font=font, fill=(255, 255, 255))
-            draw.text((pad, y_start + th + int(t_size * 0.25)), subtitle, font=sub_font, fill=(255, 220, 220))
+            draw.text((pad, y_start), title, font=font, fill=user_fill or (255, 255, 255))
+            draw.text((pad, y_start + th + int(t_size * 0.25)), subtitle, font=sub_font, fill=user_sub_fill or (255, 220, 220))
         else:
             y = (block_h - th) // 2
-            draw.text((pad, y), title, font=font, fill=(255, 255, 255))
+            draw.text((pad, y), title, font=font, fill=user_fill or (255, 255, 255))
 
     elif template == 'bilibili':
         # B站知识型: 左下角白色半透明圆角卡片 + 黑色标题
@@ -1343,11 +1377,11 @@ def _render_template_pillow(img, template: str, title: str, subtitle: str,
             stw, sth = _text_size(draw, subtitle, sub_font)
             total_h = th + int(t_size * 0.2) + sth
             y_start = y0 + (card_h - total_h) // 2
-            draw.text((x0 + text_pad, y_start), title, font=font, fill=(20, 20, 20))
-            draw.text((x0 + text_pad, y_start + th + int(t_size * 0.2)), subtitle, font=sub_font, fill=(120, 120, 120))
+            draw.text((x0 + text_pad, y_start), title, font=font, fill=user_fill or (20, 20, 20))
+            draw.text((x0 + text_pad, y_start + th + int(t_size * 0.2)), subtitle, font=sub_font, fill=user_sub_fill or (120, 120, 120))
         else:
             y = y0 + (card_h - th) // 2
-            draw.text((x0 + text_pad, y), title, font=font, fill=(20, 20, 20))
+            draw.text((x0 + text_pad, y), title, font=font, fill=user_fill or (20, 20, 20))
 
     else:  # minimal
         # 极简: 底部黑色半透明条 + 白字
@@ -1360,9 +1394,14 @@ def _render_template_pillow(img, template: str, title: str, subtitle: str,
         font = _load_font(int(sub_size * 1.1), 'regular', user_font_title)
         draw = ImageDraw.Draw(img)
         tw, th = _text_size(draw, title, font)
-        x = (W - tw) // 2
-        y = H - bar_h + (bar_h - th) // 2
-        draw.text((x, y), title, font=font, fill=(255, 255, 255))
+        # minimal 也支持 9 宫格位置 (默认 bc 底部居中)
+        pos = position or 'bc'
+        pad_min = int(min(W, H) * 0.04)
+        x_map_m = {'l': pad_min, 'c': (W - tw) // 2, 'r': W - tw - pad_min}
+        y_map_m = {'t': pad_min, 'c': (H - th) // 2, 'b': H - bar_h + (bar_h - th) // 2}
+        x = x_map_m.get(pos[1] if len(pos) > 1 else 'c', x_map_m['c'])
+        y = y_map_m.get(pos[0] if len(pos) > 0 else 'b', y_map_m['b'])
+        draw.text((x, y), title, font=font, fill=user_fill or (255, 255, 255))
 
     return img
 
@@ -1443,7 +1482,12 @@ def generate_cover(req: CoverRequest):
                 img = Image.open(base_jpg).convert('RGB')
                 img = _render_template_pillow(img, req.template, req.title, req.subtitle,
                                                user_font_title=req.font_title,
-                                               user_font_subtitle=req.font_subtitle)
+                                               user_font_subtitle=req.font_subtitle,
+                                               color_fill=req.color_fill,
+                                               color_stroke=req.color_stroke,
+                                               color_sub_fill=req.color_sub_fill,
+                                               position=req.position,
+                                               font_scale=req.font_scale)
                 out_jpg = os.path.join(work_dir, f"cover_{ratio.replace(':', 'x')}.jpg")
                 img.save(out_jpg, 'JPEG', quality=92, optimize=True)
             except Exception as e:

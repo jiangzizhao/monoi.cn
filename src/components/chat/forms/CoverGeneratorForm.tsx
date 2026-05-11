@@ -40,8 +40,13 @@ export function CoverGeneratorForm({ defaultVideoOssKey, defaultVideoUrl, onClos
   const [results, setResults] = useState<{ ratio: string; url: string }[]>([])
   const [error, setError] = useState('')
   const [fonts, setFonts] = useState<{ file: string; label: string; tag: string }[]>([])
-  const [fontTitle, setFontTitle] = useState<string>('')      // 空 = 用模板默认
+  const [fontTitle, setFontTitle] = useState<string>('')
   const [fontSubtitle, setFontSubtitle] = useState<string>('')
+  const [colorFill, setColorFill] = useState<string>('')        // hex '#FFD700' 或空字符 = 走模板默认
+  const [colorStroke, setColorStroke] = useState<string>('')
+  const [colorSubFill, setColorSubFill] = useState<string>('')
+  const [position, setPosition] = useState<string>('')          // 9 宫格 id: tl/tc/tr/cl/cc/cr/bl/bc/br, 空走默认
+  const [fontScale, setFontScale] = useState<number>(1.0)
 
   // 自传通道
   const [uploadedCover, setUploadedCover] = useState<{ name: string; url: string } | null>(null)
@@ -122,6 +127,11 @@ export function CoverGeneratorForm({ defaultVideoOssKey, defaultVideoUrl, onClos
           output_ratios: ratios,
           font_title: fontTitle || null,
           font_subtitle: fontSubtitle || null,
+          color_fill: colorFill || null,
+          color_stroke: colorStroke || null,
+          color_sub_fill: colorSubFill || null,
+          position: position || null,
+          font_scale: fontScale,
         }),
       })
       const data = await res.json()
@@ -260,6 +270,91 @@ export function CoverGeneratorForm({ defaultVideoOssKey, defaultVideoUrl, onClos
                       <span className="text-[11px] opacity-70 truncate ml-2">{t.desc}</span>
                     </button>
                   ))}
+                </div>
+              </div>
+
+              {/* 颜色 / 位置 / 字号 自定义 (留空走模板默认) */}
+              <div className="flex flex-col gap-3 border border-[var(--border)] rounded-xl p-3">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs text-[var(--text-2)]">自定义参数</div>
+                  <button
+                    onClick={() => { setColorFill(''); setColorStroke(''); setColorSubFill(''); setPosition(''); setFontScale(1.0) }}
+                    className="text-[10px] text-[var(--text-3)] hover:text-[var(--text)] cursor-pointer"
+                  >全部恢复默认</button>
+                </div>
+
+                {/* 颜色 picker × 3 */}
+                <div className="grid grid-cols-3 gap-2">
+                  <label className="flex flex-col gap-1 cursor-pointer">
+                    <span className="text-[10px] text-[var(--text-3)]">字体颜色</span>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        value={colorFill || '#FFD700'}
+                        onChange={(e) => setColorFill(e.target.value)}
+                        className="w-8 h-8 rounded cursor-pointer border border-[var(--border)]"
+                      />
+                      <span className="text-[11px] text-[var(--text-2)] font-mono">{colorFill || '默认'}</span>
+                    </div>
+                  </label>
+                  <label className="flex flex-col gap-1 cursor-pointer">
+                    <span className="text-[10px] text-[var(--text-3)]">描边颜色</span>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        value={colorStroke || '#C80000'}
+                        onChange={(e) => setColorStroke(e.target.value)}
+                        className="w-8 h-8 rounded cursor-pointer border border-[var(--border)]"
+                      />
+                      <span className="text-[11px] text-[var(--text-2)] font-mono">{colorStroke || '默认'}</span>
+                    </div>
+                  </label>
+                  <label className="flex flex-col gap-1 cursor-pointer">
+                    <span className="text-[10px] text-[var(--text-3)]">副标题颜色</span>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        value={colorSubFill || '#FFFFFF'}
+                        onChange={(e) => setColorSubFill(e.target.value)}
+                        className="w-8 h-8 rounded cursor-pointer border border-[var(--border)]"
+                      />
+                      <span className="text-[11px] text-[var(--text-2)] font-mono">{colorSubFill || '默认'}</span>
+                    </div>
+                  </label>
+                </div>
+
+                {/* 位置 9 宫格 (只对 youtube / minimal 模板生效) */}
+                <div className="flex flex-col gap-1">
+                  <span className="text-[10px] text-[var(--text-3)]">位置 (YouTube/极简 模板生效)</span>
+                  <div className="grid grid-cols-3 gap-1 w-fit">
+                    {['tl', 'tc', 'tr', 'cl', 'cc', 'cr', 'bl', 'bc', 'br'].map(p => (
+                      <button
+                        key={p}
+                        onClick={() => setPosition(p === position ? '' : p)}
+                        className={`w-8 h-8 rounded border text-xs transition-all cursor-pointer ${
+                          position === p
+                            ? 'bg-[var(--text)] text-[var(--bg)] border-[var(--text)]'
+                            : 'bg-[var(--bg-card)] text-[var(--text-3)] border-[var(--border)] hover:border-[var(--text-3)]'
+                        }`}
+                        title={p}
+                      >●</button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 字号倍数滑块 */}
+                <div className="flex items-center gap-3">
+                  <span className="text-[10px] text-[var(--text-3)] w-12">字号</span>
+                  <input
+                    type="range"
+                    min={0.5}
+                    max={2.0}
+                    step={0.1}
+                    value={fontScale}
+                    onChange={(e) => setFontScale(Number(e.target.value))}
+                    className="flex-1 accent-current cursor-pointer"
+                  />
+                  <span className="text-[11px] text-[var(--text-3)] font-mono w-10 text-right">{fontScale.toFixed(1)}x</span>
                 </div>
               </div>
 
