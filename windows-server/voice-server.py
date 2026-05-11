@@ -681,8 +681,9 @@ def clean_narration_video_oss(req: CleanVideoOssRequest):
         try: os.unlink(video_path)
         except: pass
 
-    # 7. 删 OSS 上的原始上传 (短暂中转, 用完即弃)
-    oss_delete(req.oss_key)
+    # 注意: 不主动删 uploads/, 让 OSS lifecycle 1 天兜底.
+    # 之前主动删导致用户重试 (NATAPP 长连接断/前端 retry) 时 404.
+    # 让用户能重试同一个 oss_key, 不会因为我们删了文件而挂.
 
     # 8. 给前端签个 GET URL (6 小时有效, 够用户编辑)
     video_url = oss_sign_get(source_oss_key, expires=6 * 3600)
@@ -788,8 +789,8 @@ def finalize_narration_video_oss(req: FinalizeVideoOssRequest):
         try: os.unlink(out_path)
         except: pass
 
-    # 5. 删源 OSS (用完即弃, lifecycle 也会兜底)
-    oss_delete(req.source_oss_key)
+    # 注意: 不主动删 source_oss_key (sources/), 让 lifecycle 兜底.
+    # 之前主动删导致用户改剪 keep_ranges 重新 finalize 时 404.
 
     # 6. 签 GET URL 返回
     video_url = oss_sign_get(out_oss_key, expires=6 * 3600)
