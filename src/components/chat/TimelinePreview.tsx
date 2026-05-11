@@ -139,7 +139,7 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
               narration_oss_key: data.output_oss_key,   // 给封面/后续模块用
             },
           },
-          { type: 'text', content: '成品视频已合成 (口播 + b-roll + PIP + BGM). 下一步?' },
+          { type: 'text', content: '成品视频已合成' },
           {
             type: 'choices',
             question: '下一步',

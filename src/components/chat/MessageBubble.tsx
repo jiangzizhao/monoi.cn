@@ -129,14 +129,21 @@ function Block({ block, msgId, blockIdx, props }: { block: MessageBlock; msgId: 
   }
 }
 
+// 裸 sentinel: __xxx_yyy__ 这种用户其实没打过, 是早期 bug 把表单触发 id 当文本发出去的残留
+// (修复在 useChat.chooseOption, 这里做渲染兜底, 避免老 chat history 显示 __form_cover__ 这类垃圾)
+const SENTINEL_RE = /^__[a-z][a-z0-9_]*__$/i
+
 export function MessageBubble({ message, ...props }: Props) {
   const isUser = message.role === 'user'
 
   if (isUser) {
+    // user 气泡: 跳过纯 sentinel 文本块. 全是 sentinel → 整条消息不渲染
+    const visibleBlocks = message.blocks.filter(b => b.type !== 'text' || !SENTINEL_RE.test(b.content.trim()))
+    if (visibleBlocks.length === 0) return null
     return (
       <div className="flex justify-end msg-enter">
         <div className="max-w-[75%] px-4 py-2.5 rounded-2xl rounded-tr-sm bg-[var(--bg-card)] border border-[var(--border)] text-sm text-[var(--text)]">
-          {message.blocks.map((b, i) => b.type === 'text' ? <span key={i}>{b.content}</span> : null)}
+          {visibleBlocks.map((b, i) => b.type === 'text' ? <span key={i}>{b.content}</span> : null)}
         </div>
       </div>
     )
