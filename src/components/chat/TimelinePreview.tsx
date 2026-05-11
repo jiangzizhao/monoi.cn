@@ -39,7 +39,6 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
   const [outputRatio, setOutputRatio] = useState<OutputRatio>('9:16')
   const [composing, setComposing] = useState(false)
   const [composedUrl, setComposedUrl] = useState<string | null>(null)
-  const [composedOssKey, setComposedOssKey] = useState<string | null>(null)
   const [composeError, setComposeError] = useState('')
 
   // BGM 状态: 用户上传一个背景音乐 (mp3/wav 等), 合成时跟口播音轨混音 (避免版权)
@@ -123,7 +122,6 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
         throw new Error(data.detail || data.error || `合成失败 (${res.status})`)
       }
       setComposedUrl(data.video_url)
-      setComposedOssKey(data.output_oss_key || null)
 
       // 把成品视频注入对话, 立刻关弹窗 — 结果已经在对话流里, 弹窗里不再重复展示
       const convId = chatStore.activeId
