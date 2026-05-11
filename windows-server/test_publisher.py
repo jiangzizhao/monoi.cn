@@ -12,7 +12,7 @@
 
 import asyncio
 import sys
-from social_publisher import EDGE_PROFILE_DIR, check_login, open_login_window
+from social_publisher import EDGE_PROFILE_DIR, check_login, open_login_window, debug_page
 
 
 async def main():
@@ -30,6 +30,10 @@ async def main():
         print(f"[publisher] 最多等 5 分钟, 超时自动关")
         await open_login_window(platform, timeout_seconds=300)
         print(f"[publisher] 窗口已关. 现在跑 'python test_publisher.py check {platform}' 验证登录态")
+    elif cmd == "debug":
+        platform = sys.argv[2] if len(sys.argv) > 2 else "xhs"
+        print(f"[publisher] 诊断 {platform}: 弹 Edge headed + 截图 + dump 关键元素")
+        await debug_page(platform)
     else:
         print(f"未知命令: {cmd}")
         print(__doc__)

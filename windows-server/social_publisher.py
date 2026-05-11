@@ -80,22 +80,55 @@ async def launch_edge_persistent(headless: bool = False):
 
 async def check_login(platform: str) -> dict:
     """探测某平台当前登录态. 返回:
-      { "logged_in": bool, "platform": str, "url_probed": str, "detail": str }
+      { "logged_in": bool, "platform": str, "url_probed": str, "url_final": str, "detail": str }
 
-    流程: 启 headless Edge → 打开平台创作页 → 等 8 秒 → 看 DOM 命中登录探针还是登录页探针.
+    判断策略 (按可靠性排序):
+    1. URL 重定向: 未登录会被 redirect 到登录页 (URL 含 'login' / 出 creator 后台)
+    2. DOM 登录蒙层: 极少数平台不 redirect 但用蒙层挡功能
+
+    DOM 文字探针不可靠 (平台改文案就跪), 不再用.
     """
     if platform not in PLATFORM_URLS:
         return {"logged_in": False, "platform": platform, "detail": f"未知平台 {platform}"}
+
+    # 各平台 creator 后台 URL 的稳定前缀 (登录后 URL 必须包含这个)
+    creator_prefix = {
+        "xhs": "creator.xiaohongshu.com",
+        "douyin": "creator.douyin.com",
+    }
 
     pw, context = await launch_edge_persistent(headless=True)
     try:
         page = await context.new_page()
         url = PLATFORM_URLS[platform]
         await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-        # 给前端 SPA 留点时间渲染 (XHS / 抖音都是 React)
+        # 给 SPA 时间渲染 + 可能的二次重定向
         await page.wait_for_timeout(8000)
 
-        # 优先查"未登录"探针 (出现 = 100% 没登录)
+        final_url = page.url
+
+        # 判断 1: URL 含 'login' → 未登录
+        if "login" in final_url.lower() or "passport" in final_url.lower():
+            return {
+                "logged_in": False,
+                "platform": platform,
+                "url_probed": url,
+                "url_final": final_url,
+                "detail": "被重定向到登录页",
+            }
+
+        # 判断 2: 出了 creator 后台域名 → 未登录 (抖音特别会跳到 www.douyin.com 主站)
+        expected_prefix = creator_prefix.get(platform)
+        if expected_prefix and expected_prefix not in final_url:
+            return {
+                "logged_in": False,
+                "platform": platform,
+                "url_probed": url,
+                "url_final": final_url,
+                "detail": f"被重定向出 creator 后台 (期望 {expected_prefix})",
+            }
+
+        # 判断 3: DOM 登录蒙层兜底 (有些平台不 redirect 用 modal 挡)
         for sel in LOGOUT_PROBES.get(platform, []):
             try:
                 if await page.locator(sel).count() > 0:
@@ -103,32 +136,59 @@ async def check_login(platform: str) -> dict:
                         "logged_in": False,
                         "platform": platform,
                         "url_probed": url,
-                        "detail": f"页面出现未登录元素: {sel}",
+                        "url_final": final_url,
+                        "detail": f"DOM 出现登录蒙层: {sel}",
                     }
             except Exception:
                 pass
 
-        # 再查"已登录"探针
-        for sel in LOGIN_PROBES.get(platform, []):
-            try:
-                if await page.locator(sel).count() > 0:
-                    return {
-                        "logged_in": True,
-                        "platform": platform,
-                        "url_probed": url,
-                        "detail": f"页面出现已登录元素: {sel}",
-                    }
-            except Exception:
-                pass
-
-        # 探针都没命中: 给个不确定结论, 返回当前 URL 让调用方诊断
-        final_url = page.url
         return {
-            "logged_in": False,
+            "logged_in": True,
             "platform": platform,
             "url_probed": url,
-            "detail": f"探针都没命中, 当前 URL={final_url}. selector 可能过时, 需要更新.",
+            "url_final": final_url,
+            "detail": "URL 仍在 creator 后台, 没有登录蒙层",
         }
+    finally:
+        await context.close()
+        await pw.stop()
+
+
+async def debug_page(platform: str):
+    """诊断: headed 启 Edge 打开 upload 页 + 截图 + dump 关键元素.
+    用于将来 selector 失效时定位用. 跑 `python test_publisher.py debug xhs/douyin`.
+    """
+    if platform not in PLATFORM_URLS:
+        print(f"未知平台: {platform}")
+        return
+
+    pw, context = await launch_edge_persistent(headless=False)
+    try:
+        page = await context.new_page()
+        await page.goto(PLATFORM_URLS[platform], wait_until="domcontentloaded", timeout=30000)
+        await page.wait_for_timeout(10000)
+
+        screenshot_path = os.path.join(os.path.dirname(__file__), f"debug_{platform}.png")
+        await page.screenshot(path=screenshot_path, full_page=False)
+        print(f"[debug] 截图: {screenshot_path}")
+        print(f"[debug] 最终 URL: {page.url}")
+        print(f"[debug] 页面标题: {await page.title()}")
+
+        # 试探常见标识词
+        markers = [
+            "发布视频", "发布笔记", "上传视频", "上传作品", "创作中心",
+            "作品管理", "我的", "登录", "扫码登录", "退出", "账号",
+        ]
+        for m in markers:
+            try:
+                cnt = await page.locator(f"text={m}").count()
+                if cnt > 0:
+                    print(f"[debug]  ✓ text='{m}' × {cnt}")
+            except Exception:
+                pass
+
+        # 让用户看 3 秒再关
+        await page.wait_for_timeout(3000)
     finally:
         await context.close()
         await pw.stop()
