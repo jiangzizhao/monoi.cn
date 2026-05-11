@@ -1,13 +1,11 @@
 @echo off
-chcp 65001 >nul
 echo ===================================
-echo 下载封面字体到 D:\monoi-server\fonts\
-echo (10 个免费可商用字体, 总 ~51MB)
+echo Download cover fonts to D:\monoi-server\fonts\
+echo (10 free commercial-use fonts, ~51MB total)
 echo ===================================
 echo.
 
 if not exist "D:\monoi-server\fonts" mkdir "D:\monoi-server\fonts"
-cd /d D:\monoi-server\fonts
 
 call :dl "SourceHanSansCN-Heavy.otf"  "https://raw.githubusercontent.com/wordshub/free-font/master/assets/font/%%E4%%B8%%AD%%E6%%96%%87/%%E6%%80%%9D%%E6%%BA%%90%%E5%%AD%%97%%E4%%BD%%93%%E7%%B3%%BB%%E5%%88%%97/%%E6%%80%%9D%%E6%%BA%%90%%E9%%BB%%91%%E4%%BD%%93/SourceHanSansCN-Heavy.otf"
 call :dl "zcool-xiaowei-logo.otf"     "https://raw.githubusercontent.com/wordshub/free-font/master/assets/font/%%E4%%B8%%AD%%E6%%96%%87/%%E7%%AB%%99%%E9%%85%%B7%%E5%%AD%%97%%E4%%BD%%93%%E7%%B3%%BB%%E5%%88%%97/%%E7%%AB%%99%%E9%%85%%B7%%E5%%B0%%8F%%E8%%96%%87LOGO%%E4%%BD%%93.otf"
@@ -22,23 +20,23 @@ call :dl "marker-shouhui.ttf"         "https://raw.githubusercontent.com/wordshu
 
 echo.
 echo ===================================
-echo 当前 D:\monoi-server\fonts\ 列表:
+echo Files in D:\monoi-server\fonts\
 echo ===================================
 dir /b D:\monoi-server\fonts\
 echo.
-echo 完成! 重启 voice-server 即可看到字体选择.
+echo Done. Restart voice-server to use the fonts.
 pause
 goto :eof
 
 :dl
 if exist "D:\monoi-server\fonts\%~1" (
-    echo [跳过] %~1 已存在
+    echo [SKIP] %~1 already exists
     goto :eof
 )
-echo [下载] %~1 ...
+echo [DOWN] %~1 ...
 curl -sL --fail --max-time 180 -o "D:\monoi-server\fonts\%~1" "%~2"
 if errorlevel 1 (
-    echo   X 失败 ^(网络问题或链接失效^)
+    echo   X failed
     if exist "D:\monoi-server\fonts\%~1" del "D:\monoi-server\fonts\%~1"
 ) else (
     echo   OK
