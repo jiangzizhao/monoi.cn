@@ -148,6 +148,9 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
   const [finalizing, setFinalizing] = useState(false)
   const [error, setError] = useState('')
   const [hasSelection, setHasSelection] = useState(false)
+  // 导出秒表 + abort: 让用户卡住时能看到耗时 + 主动取消
+  const [finalizeElapsed, setFinalizeElapsed] = useState(0)
+  const finalizeAbortRef = useRef<AbortController | null>(null)
 
   // 摊平 segments → word tokens (用于 keepRanges 计算 / 拖选 / 全局逻辑)
   const allWords: WordToken[] = useMemo(() => {
@@ -385,6 +388,9 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
     }
     setFinalizing(true)
     setError('')
+    setFinalizeElapsed(0)
+    const abort = new AbortController()
+    finalizeAbortRef.current = abort
     try {
       // OSS 模式优先, 否则退回旧 NATAPP 模式
       const body = data.source_oss_key
@@ -394,6 +400,7 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
+        signal: abort.signal,
       })
       const result = await res.json()
       if (!res.ok || !result.success) {
@@ -406,11 +413,29 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
       const keptSegments = computeKeptSegments(data.segments, keepRanges)
       onDone(finalUrl, result.duration, finalText, keptSegments, result.output_oss_key)
     } catch (e: any) {
-      setError(e.message || '导出失败')
+      if (e.name === 'AbortError') {
+        setError('已取消导出. 可重新点"完成导出"重试.')
+      } else {
+        setError(e.message || '导出失败')
+      }
     } finally {
       setFinalizing(false)
+      finalizeAbortRef.current = null
     }
   }
+
+  // 导出秒表: finalizing 期间每秒 +1, 让用户知道卡了多久
+  useEffect(() => {
+    if (!finalizing) return
+    const t = setInterval(() => setFinalizeElapsed(s => s + 1), 1000)
+    return () => clearInterval(t)
+  }, [finalizing])
+
+  const cancelFinalize = useCallback(() => {
+    finalizeAbortRef.current?.abort()
+  }, [])
+
+  const fmtElapsed = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 
   return (
     <div className="flex flex-col gap-3">
@@ -570,21 +595,29 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
         拖选文字 → 点 <span className="text-[var(--text-2)]">删除选中</span> · 单击词切换删除 · 双击词跳到对应时间
       </div>
 
-      <div className="flex justify-end gap-2 pt-1">
-        <button
-          onClick={onCancel}
-          className="px-3 py-1.5 rounded-lg text-sm text-[var(--text-2)] hover:bg-[var(--bg-hover)] cursor-pointer flex items-center gap-1.5"
-        >
-          <X size={14}/> 取消
-        </button>
-        <button
-          onClick={finalize}
-          disabled={finalizing || !ready}
-          className="px-3 py-1.5 rounded-lg text-sm bg-[var(--text)] text-[var(--bg)] hover:opacity-80 cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
-        >
-          {finalizing ? <Loader2 size={14} className="animate-spin"/> : <Check size={14}/>}
-          {finalizing ? '导出中...' : '完成导出'}
-        </button>
+      <div className="flex justify-between items-center gap-2 pt-1">
+        {/* 导出中卡 30 秒+ 给个提示, 让用户知道不是死循环 */}
+        {finalizing && finalizeElapsed >= 30 && (
+          <span className="text-[11px] text-[var(--text-3)]">
+            后端在切片+上传到 OSS, 大文件可能要 1-3 分钟. 卡太久可点"取消"重试.
+          </span>
+        )}
+        <div className="flex justify-end gap-2 ml-auto">
+          <button
+            onClick={finalizing ? cancelFinalize : onCancel}
+            className="px-3 py-1.5 rounded-lg text-sm text-[var(--text-2)] hover:bg-[var(--bg-hover)] cursor-pointer flex items-center gap-1.5"
+          >
+            <X size={14}/> {finalizing ? '取消导出' : '取消'}
+          </button>
+          <button
+            onClick={finalize}
+            disabled={finalizing || !ready}
+            className="px-3 py-1.5 rounded-lg text-sm bg-[var(--text)] text-[var(--bg)] hover:opacity-80 cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+          >
+            {finalizing ? <Loader2 size={14} className="animate-spin"/> : <Check size={14}/>}
+            {finalizing ? `导出中 ${fmtElapsed(finalizeElapsed)}` : '完成导出'}
+          </button>
+        </div>
       </div>
     </div>
   )
