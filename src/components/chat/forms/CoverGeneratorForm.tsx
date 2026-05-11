@@ -61,13 +61,27 @@ export function CoverGeneratorForm({ defaultVideoOssKey, defaultVideoUrl, onClos
     return () => v.removeEventListener('loadedmetadata', onMeta)
   }, [])
 
-  // 拉 server 上可用字体
+  // 拉 server 上可用字体 + 用 FontFace API 注入到浏览器, 让下面卡片能用真字体显示
   useEffect(() => {
     fetch(directBase + '/api/voice/cover-fonts')
       .then(r => r.json())
-      .then(d => setFonts(d.fonts || []))
+      .then((d: any) => {
+        const list = d.fonts || []
+        setFonts(list)
+        // 异步并发加载所有字体到浏览器 (字体大, 国内网慢, 加载完会闪一下从默认字体切到真字体 = FOUT)
+        list.forEach((f: any) => {
+          const family = `monoi-cover-${f.file.replace(/[^\w]/g, '')}`
+          const url = `${directBase}/api/voice/cover-font-file/${encodeURIComponent(f.file)}`
+          try {
+            const ff = new FontFace(family, `url(${url})`)
+            ff.load().then(loaded => (document as any).fonts.add(loaded)).catch(() => {})
+          } catch {}
+        })
+      })
       .catch(() => setFonts([]))
   }, [directBase])
+
+  const fontFamilyFor = (file: string) => `monoi-cover-${file.replace(/[^\w]/g, '')}`
 
   // 拖时间轴时同步 video 显示对应帧
   useEffect(() => {
@@ -249,31 +263,68 @@ export function CoverGeneratorForm({ defaultVideoOssKey, defaultVideoUrl, onClos
                 </div>
               </div>
 
-              {/* 字体选择 (可选, 留空用模板默认) */}
+              {/* 字体选择: 卡片网格, 每张卡片用对应字体写示例字 (FontFace API 加载) */}
               {fonts.length > 0 && (
-                <div className="flex flex-col gap-2">
-                  <div className="text-xs text-[var(--text-2)]">字体 (可选, 留默认走模板预设)</div>
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-center justify-between">
+                    <div className="text-xs text-[var(--text-2)]">主标题字体</div>
+                    {fontTitle && <button onClick={() => setFontTitle('')} className="text-[10px] text-[var(--text-3)] hover:text-[var(--text)] cursor-pointer">恢复默认</button>}
+                  </div>
                   <div className="grid grid-cols-2 gap-2">
-                    <select
-                      value={fontTitle}
-                      onChange={(e) => setFontTitle(e.target.value)}
-                      className="bg-[var(--bg-input)] border border-[var(--border)] rounded-lg px-3 py-2 text-xs text-[var(--text)] focus:outline-none focus:border-[var(--text-3)] cursor-pointer"
+                    {/* 默认卡片 */}
+                    <button
+                      onClick={() => setFontTitle('')}
+                      className={`flex flex-col items-start gap-1 px-3 py-2 rounded-lg border text-left transition-all cursor-pointer ${
+                        !fontTitle ? 'border-[var(--text)] bg-[var(--bg-hover)]' : 'border-[var(--border)] hover:border-[var(--text-3)]'
+                      }`}
                     >
-                      <option value="">主标题: 默认</option>
-                      {fonts.map(f => (
-                        <option key={f.file} value={f.file}>主标题: {f.label}</option>
-                      ))}
-                    </select>
-                    <select
-                      value={fontSubtitle}
-                      onChange={(e) => setFontSubtitle(e.target.value)}
-                      className="bg-[var(--bg-input)] border border-[var(--border)] rounded-lg px-3 py-2 text-xs text-[var(--text)] focus:outline-none focus:border-[var(--text-3)] cursor-pointer"
+                      <span className="text-[10px] text-[var(--text-3)]">默认 (模板预设)</span>
+                      <span className="text-base text-[var(--text)]">爆款标题样字</span>
+                    </button>
+                    {fonts.map(f => (
+                      <button
+                        key={f.file}
+                        onClick={() => setFontTitle(f.file)}
+                        className={`flex flex-col items-start gap-1 px-3 py-2 rounded-lg border text-left transition-all cursor-pointer ${
+                          fontTitle === f.file ? 'border-[var(--text)] bg-[var(--bg-hover)]' : 'border-[var(--border)] hover:border-[var(--text-3)]'
+                        }`}
+                      >
+                        <span className="text-[10px] text-[var(--text-3)]">{f.label} · {f.tag}</span>
+                        <span className="text-base text-[var(--text)] truncate w-full" style={{ fontFamily: fontFamilyFor(f.file) }}>
+                          爆款标题样字
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="flex items-center justify-between mt-1">
+                    <div className="text-xs text-[var(--text-2)]">副标题字体</div>
+                    {fontSubtitle && <button onClick={() => setFontSubtitle('')} className="text-[10px] text-[var(--text-3)] hover:text-[var(--text)] cursor-pointer">恢复默认</button>}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => setFontSubtitle('')}
+                      className={`flex flex-col items-start gap-1 px-3 py-2 rounded-lg border text-left transition-all cursor-pointer ${
+                        !fontSubtitle ? 'border-[var(--text)] bg-[var(--bg-hover)]' : 'border-[var(--border)] hover:border-[var(--text-3)]'
+                      }`}
                     >
-                      <option value="">副标题: 默认</option>
-                      {fonts.map(f => (
-                        <option key={f.file} value={f.file}>副标题: {f.label}</option>
-                      ))}
-                    </select>
+                      <span className="text-[10px] text-[var(--text-3)]">默认 (模板预设)</span>
+                      <span className="text-sm text-[var(--text-2)]">副标题样字</span>
+                    </button>
+                    {fonts.map(f => (
+                      <button
+                        key={f.file}
+                        onClick={() => setFontSubtitle(f.file)}
+                        className={`flex flex-col items-start gap-1 px-3 py-2 rounded-lg border text-left transition-all cursor-pointer ${
+                          fontSubtitle === f.file ? 'border-[var(--text)] bg-[var(--bg-hover)]' : 'border-[var(--border)] hover:border-[var(--text-3)]'
+                        }`}
+                      >
+                        <span className="text-[10px] text-[var(--text-3)]">{f.label}</span>
+                        <span className="text-sm text-[var(--text-2)] truncate w-full" style={{ fontFamily: fontFamilyFor(f.file) }}>
+                          副标题样字
+                        </span>
+                      </button>
+                    ))}
                   </div>
                 </div>
               )}

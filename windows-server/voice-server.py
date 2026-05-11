@@ -1378,6 +1378,17 @@ def list_cover_fonts():
     return {'fonts': available}
 
 
+@app.get("/cover-font-file/{filename}")
+def get_cover_font_file(filename: str):
+    """提供字体文件给浏览器加载 (前端 FontFace API 用, 显示真字体样式)"""
+    safe = os.path.basename(filename)
+    path = os.path.join(_FONT_DIR_PROJECT, safe)
+    if not os.path.exists(path):
+        raise HTTPException(404, f'字体不存在: {safe}')
+    media = 'font/otf' if safe.lower().endswith('.otf') else 'font/ttf'
+    return FileResponse(path, media_type=media, headers={'Cache-Control': 'public, max-age=2592000'})
+
+
 @app.post("/generate-cover")
 def generate_cover(req: CoverRequest):
     """ffmpeg 截帧 + scale → Pillow 渲染模板 → 上传 OSS"""

@@ -1808,6 +1808,23 @@ def finalize_narration_video_proxy(req: FinalizeNarrationVideoRequest):
         raise HTTPException(503, "voice-server (9001) 未启动")
 
 
+@app.get("/api/voice/cover-font-file/{filename}")
+def cover_font_file_proxy(filename: str):
+    """转发: 字体文件 (前端 FontFace API 加载)"""
+    import requests as _req
+    from fastapi.responses import StreamingResponse
+    safe = os.path.basename(filename)
+    try:
+        resp = _req.get(f"{VOICE_SERVER_URL}/cover-font-file/{safe}", stream=True, timeout=60)
+        if resp.status_code != 200:
+            raise HTTPException(resp.status_code, '字体文件未找到')
+        media = 'font/otf' if safe.lower().endswith('.otf') else 'font/ttf'
+        return StreamingResponse(resp.iter_content(8192), media_type=media,
+                                  headers={'Cache-Control': 'public, max-age=2592000'})
+    except _req.exceptions.ConnectionError:
+        raise HTTPException(503, "voice-server (9001) 未启动")
+
+
 @app.get("/api/voice/cover-fonts")
 def cover_fonts_proxy():
     """转发: 列出 server 可用字体"""
