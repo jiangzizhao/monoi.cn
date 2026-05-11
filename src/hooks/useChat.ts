@@ -530,7 +530,6 @@ export function useChat() {
             question: '下一步',
             options: [
               { id: '__auto_footage_from_video__', label: '智能匹配素材', description: '按视频时间戳自动拆镜, 拉候选素材' },
-              { id: '我要做分镜表', label: '做分镜', description: '生成达芬奇 EDL 兼容的分镜表' },
               { id: '保留这段视频, 暂不做下一步', label: '保留视频', description: '稍后再决定' },
             ],
           },
