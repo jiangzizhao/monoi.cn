@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Pause, Play, X, Loader2, Download as DownloadIcon, Music, Upload, Image as ImageIcon } from 'lucide-react'
+import { Pause, Play, X, Loader2, Music, Upload } from 'lucide-react'
 import type { FootageSentenceItem, VideoAsset } from '../../types'
-import { CoverGeneratorForm } from './forms/CoverGeneratorForm'
 import { useChatStore, makeAssistantMsg } from '../../store/chatStore'
 
 interface Props {
@@ -15,18 +14,18 @@ interface Props {
 }
 
 // PIP 配置 (V1: 全局, 全片统一)
-type PipShape = 'none' | 'circle' | 'rounded'
+type PipShape = 'none' | 'circle' | 'rounded' | 'rounded_square'
 type PipPos = 'tl' | 'tr' | 'bl' | 'br' | 'center'
 type PipSize = 'S' | 'M' | 'L'
 type FaceY = 'top' | 'center' | 'bottom'  // 人物在 PIP 内的纵向位置
-type OutputRatio = '9:16' | '16:9' | '1:1'  // 最终成品比例
+type OutputRatio = '9:16' | '16:9' | '3:4' | '1:1'  // 最终成品比例
 
 const POS_LABEL: Record<PipPos, string> = { tl: '左上', tr: '右上', bl: '左下', br: '右下', center: '居中' }
 const SIZE_RATIO: Record<PipSize, number> = { S: 0.20, M: 0.25, L: 0.33 }
 const FACE_Y_LABEL: Record<FaceY, string> = { top: '人物靠上', center: '居中', bottom: '人物靠下' }
 const FACE_Y_POS: Record<FaceY, string> = { top: '20%', center: '50%', bottom: '80%' }
-const RATIO_LABEL: Record<OutputRatio, string> = { '9:16': '竖屏 9:16 (抖音)', '16:9': '横屏 16:9 (B站/YouTube)', '1:1': '方形 1:1' }
-const RATIO_CSS: Record<OutputRatio, string> = { '9:16': '9/16', '16:9': '16/9', '1:1': '1/1' }
+const RATIO_LABEL: Record<OutputRatio, string> = { '9:16': '9:16', '16:9': '16:9', '3:4': '3:4', '1:1': '1:1' }
+const RATIO_CSS: Record<OutputRatio, string> = { '9:16': '9/16', '16:9': '16/9', '3:4': '3/4', '1:1': '1/1' }
 
 export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items, selected, onClose }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -42,7 +41,6 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
   const [composedUrl, setComposedUrl] = useState<string | null>(null)
   const [composedOssKey, setComposedOssKey] = useState<string | null>(null)
   const [composeError, setComposeError] = useState('')
-  const [coverModalOpen, setCoverModalOpen] = useState(false)
 
   // BGM 状态: 用户上传一个背景音乐 (mp3/wav 等), 合成时跟口播音轨混音 (避免版权)
   const [bgm, setBgm] = useState<{ oss_key: string; name: string; preview_url: string } | null>(null)
@@ -127,7 +125,7 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
       setComposedUrl(data.video_url)
       setComposedOssKey(data.output_oss_key || null)
 
-      // 把成品视频注入对话 (跟"口播剪辑完成"体验一致): 视频 + 提示 + 下一步按钮
+      // 把成品视频注入对话, 立刻关弹窗 — 结果已经在对话流里, 弹窗里不再重复展示
       const convId = chatStore.activeId
       if (convId) {
         const msg = makeAssistantMsg([
@@ -154,6 +152,7 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
         ])
         chatStore.addMessage(convId, msg)
       }
+      onClose()
     } catch (e: any) {
       setComposeError(e.message || '合成失败')
     } finally {
@@ -355,7 +354,7 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
             <div className="flex items-center gap-3">
               <span className="text-xs text-[var(--text-3)] w-16">输出比例</span>
               <div className="flex gap-2 flex-wrap">
-                {(['9:16', '16:9', '1:1'] as OutputRatio[]).map(r => (
+                {(['9:16', '16:9', '3:4', '1:1'] as OutputRatio[]).map(r => (
                   <button
                     key={r}
                     onClick={() => setOutputRatio(r)}
@@ -370,13 +369,16 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
             <div className="flex items-center gap-3">
               <span className="text-xs text-[var(--text-3)] w-16">形状</span>
               <div className="flex gap-2 flex-wrap">
-                {(['none', 'rounded', 'circle'] as PipShape[]).map(s => (
+                {(['none', 'rounded', 'rounded_square', 'circle'] as PipShape[]).map(s => (
                   <button
                     key={s}
                     onClick={() => setShape(s)}
                     className={`px-3 py-1.5 rounded-lg text-xs border transition-all cursor-pointer ${shape === s ? 'bg-[var(--text)] text-[var(--bg)] border-[var(--text)]' : 'bg-[var(--bg-card)] text-[var(--text-2)] border-[var(--border)] hover:border-[var(--text-3)]'}`}
                   >
-                    {s === 'none' ? '× 无小窗' : s === 'circle' ? '○ 圆形' : '▢ 圆角矩形'}
+                    {s === 'none' ? '× 无小窗'
+                      : s === 'circle' ? '○ 圆形'
+                      : s === 'rounded_square' ? '◼ 圆角方形'
+                      : '▢ 圆角矩形'}
                   </button>
                 ))}
               </div>
@@ -492,39 +494,12 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
         </div>
 
         {/* 合成结果区 (合成完显示) */}
-        {(composedUrl || composeError) && (
+        {/* 合成失败时显示错误 (成功直接关弹窗, 不在弹窗里重复展示视频) */}
+        {composeError && (
           <div className="px-5 pb-2">
-            {composeError && (
-              <div className="text-xs text-red-400 bg-red-950/20 border border-red-900/30 rounded-lg px-3 py-2">
-                {composeError}
-              </div>
-            )}
-            {composedUrl && (
-              <div className="flex flex-col gap-3">
-                <video src={composedUrl} controls className="w-full rounded-lg max-h-[40vh] bg-black"/>
-                {/* 下一步按钮 (跟对话流里 choices 一致, 用户在弹窗直接能选) */}
-                <div className="flex flex-wrap gap-2">
-                  {composedOssKey && (
-                    <button
-                      onClick={() => setCoverModalOpen(true)}
-                      className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-[var(--text)] text-[var(--bg)] text-sm rounded-lg hover:opacity-80 cursor-pointer"
-                    >
-                      <ImageIcon size={14}/> 生成封面
-                    </button>
-                  )}
-                  <a
-                    href={composedUrl}
-                    download="monoi-composed.mp4"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center justify-center gap-1.5 px-4 py-2 border border-[var(--border)] text-[var(--text-2)] hover:bg-[var(--bg-hover)] text-sm rounded-lg cursor-pointer transition-colors"
-                  >
-                    <DownloadIcon size={14}/> 下载 mp4
-                  </a>
-                </div>
-                <p className="text-[11px] text-[var(--text-3)]">关闭弹窗后, 对话里也会有这段视频 + 下一步选项.</p>
-              </div>
-            )}
+            <div className="text-xs text-red-400 bg-red-950/20 border border-red-900/30 rounded-lg px-3 py-2">
+              {composeError}
+            </div>
           </div>
         )}
 
@@ -552,16 +527,5 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
     </div>
   )
 
-  return (
-    <>
-      {createPortal(modal, document.body)}
-      {coverModalOpen && composedOssKey && composedUrl && (
-        <CoverGeneratorForm
-          defaultVideoOssKey={composedOssKey}
-          defaultVideoUrl={composedUrl}
-          onClose={() => setCoverModalOpen(false)}
-        />
-      )}
-    </>
-  )
+  return createPortal(modal, document.body)
 }
