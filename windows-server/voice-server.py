@@ -830,7 +830,7 @@ class ComposeShot(BaseModel):
 
 class ComposePipConfig(BaseModel):
     enabled: bool                  # shape == 'none' 时为 False
-    shape: str = 'rounded'         # 'circle' / 'rounded'
+    shape: str = 'rounded'         # 'circle' / 'rounded' / 'rounded_square'
     pos: str = 'bl'                # 'tl' / 'tr' / 'bl' / 'br' / 'center'
     size: str = 'M'                # 'S' / 'M' / 'L'
     face_y: str = 'top'            # 'top' / 'center' / 'bottom'
@@ -840,13 +840,13 @@ class ComposeRequest(BaseModel):
     narration_oss_key: str         # 剪辑后口播视频 OSS key (sources/...)
     shots: list[ComposeShot]
     pip: ComposePipConfig
-    output_ratio: str = '9:16'     # '9:16' / '16:9' / '1:1'
+    output_ratio: str = '9:16'     # '9:16' / '16:9' / '3:4' / '1:1'
     bgm_oss_key: Optional[str] = None    # BGM (用户自传, 无版权), 不传就没 BGM
     bgm_volume: float = 0.3              # BGM 相对口播的音量 (0-1, 默认 30%)
 
 
 # 输出尺寸映射 (1080p 等级)
-_OUTPUT_DIMS = {'9:16': (1080, 1920), '16:9': (1920, 1080), '1:1': (1080, 1080)}
+_OUTPUT_DIMS = {'9:16': (1080, 1920), '16:9': (1920, 1080), '3:4': (1080, 1440), '1:1': (1080, 1080)}
 _PIP_SIZE_RATIO = {'S': 0.20, 'M': 0.25, 'L': 0.33}
 _FACE_Y_FRAC = {'top': 0.2, 'center': 0.5, 'bottom': 0.8}
 
@@ -994,21 +994,39 @@ def compose_footage(req: ComposeRequest):
         if req.pip.enabled and has_any_broll:
             pip_size = _PIP_SIZE_RATIO.get(req.pip.size, 0.25)
             pip_w = int(W * pip_size)
-            pip_h = pip_w if req.pip.shape == 'circle' else int(pip_w * 9 / 16)
+            # 形状决定 PIP 高度 (圆形/圆角方形 = 1:1, 圆角矩形 = 16:9)
+            if req.pip.shape in ('circle', 'rounded_square'):
+                pip_h = pip_w
+            else:
+                pip_h = int(pip_w * 9 / 16)
             face_frac = _FACE_Y_FRAC.get(req.pip.face_y, 0.2)
             pip_src = take_narration_v()
             pip_filter = (
                 f"[{pip_src}]scale={pip_w}:-2:force_original_aspect_ratio=increase"
             )
-            # 圆形蒙版: geq 生成圆形 alpha, 跟 PIP 合成
             if req.pip.shape == 'circle':
+                # 圆形蒙版: geq 生成圆形 alpha
                 pip_filter += (
                     f",crop={pip_w}:{pip_w}:0:'(in_h-{pip_w})*{face_frac}',"
                     f"format=yuva420p,"
                     f"geq=lum='p(X,Y)':a='if(lt(pow(X-{pip_w}/2,2)+pow(Y-{pip_w}/2,2),pow({pip_w}/2,2)),255,0)'"
                 )
+            elif req.pip.shape == 'rounded_square':
+                # 圆角方形: 1:1 crop, 4 角 r 半径外的像素 alpha=0
+                # 公式: 在 r 边界外的像素, 算"最近内部安全点"的距离 d; d<r 保留, 否则透明
+                r = max(8, pip_w // 8)   # 圆角半径 (12.5% 边宽, 视觉上够柔和)
+                w_ = pip_w
+                pip_filter += (
+                    f",crop={w_}:{w_}:0:'(in_h-{w_})*{face_frac}',"
+                    f"format=yuva420p,"
+                    f"geq=lum='p(X,Y)':a='if(lt("
+                    f"sqrt("
+                    f"pow(if(lt(X\\,{r})\\,{r}-X\\,if(gt(X\\,{w_-r})\\,X-{w_-r}\\,0))\\,2)+"
+                    f"pow(if(lt(Y\\,{r})\\,{r}-Y\\,if(gt(Y\\,{w_-r})\\,Y-{w_-r}\\,0))\\,2)"
+                    f"),{r}),255,0)'"
+                )
             else:
-                # 圆角矩形: crop 后再 alpha 抠圆角. ffmpeg geq 圆角公式比较丑, V1 简化为直角矩形.
+                # 圆角矩形: V1 直角 (geq 公式开销大, 16:9 直角配 24px padding 视觉够好)
                 pip_filter += (
                     f",crop={pip_w}:{pip_h}:0:'(in_h-{pip_h})*{face_frac}'"
                 )
@@ -1129,7 +1147,8 @@ def compose_footage(req: ComposeRequest):
 
 
 class CoverRequest(BaseModel):
-    source_oss_key: str
+    source_oss_key: Optional[str] = None       # 视频源 (跟 frame_time 配合截帧)
+    source_image_oss_key: Optional[str] = None # 图源 (用户自传图, 代替视频截帧)
     frame_time: float = 1.0
     title: str
     subtitle: str = ''
@@ -1222,6 +1241,41 @@ def _text_size(draw, text: str, font):
     return bbox[2] - bbox[0], bbox[3] - bbox[1]
 
 
+def _wrap_cjk_title(draw, text: str, font, max_width: int) -> list:
+    """中文标题自动断行: 整段宽度超过 max_width 时, 在最优位置断成 2-3 行.
+    优先断在标点 (! ? , . 。 ! ? 的, 让, 怎么 这种语义边界) 或空格, 没有就按宽度均分.
+    返回行列表 (1-3 行)."""
+    text = (text or '').strip()
+    if not text:
+        return ['']
+    w, _ = _text_size(draw, text, font)
+    if w <= max_width:
+        return [text]
+
+    # 估算需要几行 (向上取整, 最多 3)
+    n_lines = min(3, max(2, int(w / max_width) + 1))
+
+    # 优先在中文标点 / 语义停顿处切
+    breakers = '!?,.。!?、:; '
+    # 找所有可断点位置 (字符 index)
+    cuts = [i for i, c in enumerate(text) if c in breakers]
+
+    if n_lines == 2:
+        # 找最接近中点且不太偏的断点
+        target = len(text) // 2
+        if cuts:
+            best = min(cuts, key=lambda i: abs(i - target))
+            if 0 < best < len(text) - 1:
+                # 标点跟前面那段, 下一行从标点后开始
+                return [text[:best+1].rstrip(), text[best+1:].lstrip()]
+        # 没标点: 强制中点切
+        return [text[:target], text[target:]]
+
+    # 3 行: 均分
+    s = len(text) // 3
+    return [text[:s], text[s:s*2], text[s*2:]]
+
+
 def _draw_text_with_stroke(img, xy, text, font, fill, stroke_color=None, stroke_w=0, shadow=None):
     """画文字: 可选多层描边 + 可选阴影. 用 PIL 内置 stroke_width 性能好.
     shadow = (offset_x, offset_y, color) 或 None"""
@@ -1267,44 +1321,71 @@ def _render_template_pillow(img, template: str, title: str, subtitle: str,
     W, H = img.size
     base = min(W, H)
     fs = max(0.5, min(2.5, font_scale or 1.0))
-    title_size = int(base * 0.13 * fs)
-    sub_size = int(base * 0.055 * fs)
+    # 爆款封面: 字号要大. 主标默认 18% (从 13% 提到 18%), 副标 7.5%
+    title_size = int(base * 0.18 * fs)
+    sub_size = int(base * 0.075 * fs)
     # 用户自定义颜色覆盖模板默认 (None 走模板默认)
     user_fill = _hex_to_rgb(color_fill) if color_fill else None
     user_stroke = _hex_to_rgb(color_stroke) if color_stroke else None
     user_sub_fill = _hex_to_rgb(color_sub_fill) if color_sub_fill else None
 
     if template == 'youtube':
-        # YouTube 爆款: 大粗黄字 + 红描边 + 黑阴影, 上方
+        # YouTube 爆款: 大粗字 + 厚描边 + 黑阴影, 主标支持自动多行, 副标紧跟下方
         font = _load_font(title_size, 'heavy', user_font_title)
         sub_font = _load_font(sub_size, 'heavy', user_font_subtitle)
         draw = ImageDraw.Draw(img)
-        tw, th = _text_size(draw, title, font)
+
+        # 主标自动断行 (中文超长就分 2-3 行, 跟爆款封面一致)
+        max_w = int(W * 0.92)
+        lines = _wrap_cjk_title(draw, title, font, max_w)
+        # 每行尺寸
+        line_metrics = [_text_size(draw, ln, font) for ln in lines]
+        line_h = max(m[1] for m in line_metrics) if line_metrics else title_size
+        line_gap = int(line_h * 0.12)  # 行间距 12%
+        total_h = line_h * len(lines) + line_gap * max(0, len(lines) - 1)
+
         # 9 宫格定位 (用户没指定走默认 tc 上方居中)
         pos = position or 'tc'
         pad = int(min(W, H) * 0.04)
-        x_map = {'l': pad, 'c': (W - tw) // 2, 'r': W - tw - pad}
-        y_map = {'t': int(H * 0.08), 'c': (H - th) // 2, 'b': H - th - pad}
-        x = x_map.get(pos[1] if len(pos) > 1 else 'c', x_map['c'])
-        y = y_map.get(pos[0] if len(pos) > 0 else 't', y_map['t'])
+        # x 范围基于最宽那行
+        max_tw = max(m[0] for m in line_metrics) if line_metrics else 0
+        x_map = {'l': pad, 'c': (W - max_tw) // 2, 'r': W - max_tw - pad}
+        y_map = {'t': int(H * 0.08), 'c': (H - total_h) // 2, 'b': H - total_h - pad}
+        block_x = x_map.get(pos[1] if len(pos) > 1 else 'c', x_map['c'])
+        block_y = y_map.get(pos[0] if len(pos) > 0 else 't', y_map['t'])
+
         sh_off = max(4, int(title_size * 0.05))
-        stroke_w = max(6, int(title_size * 0.10))
-        _draw_text_with_stroke(
-            img, (x, y), title, font,
-            fill=user_fill or (255, 220, 0),
-            stroke_color=user_stroke or (200, 0, 0),
-            stroke_w=stroke_w,
-            shadow=(sh_off, sh_off, (0, 0, 0)),
-        )
+        # 描边更厚 (爆款封面看着像 12-15% 字号), 提到 0.13
+        stroke_w = max(8, int(title_size * 0.13))
+
+        # 逐行画
+        cur_y = block_y
+        for ln, (lw, lh) in zip(lines, line_metrics):
+            # 每行单独水平居中 (即使整体 left/right 对齐, 多行情况下每行也居中显得专业)
+            if pos[1] == 'c' or len(pos) < 2:
+                lx = (W - lw) // 2
+            elif pos[1] == 'l':
+                lx = pad
+            else:
+                lx = W - lw - pad
+            _draw_text_with_stroke(
+                img, (lx, cur_y), ln, font,
+                fill=user_fill or (0, 0, 0),                # 默认黑
+                stroke_color=user_stroke or (255, 255, 255), # 默认白描边
+                stroke_w=stroke_w,
+                shadow=(sh_off, sh_off, (0, 0, 0, 120)),     # 阴影黑半透
+            )
+            cur_y += lh + line_gap
+
         if subtitle:
             stw, _ = _text_size(draw, subtitle, sub_font)
             sx = (W - stw) // 2
-            sy = y + th + int(title_size * 0.2)
+            sy = block_y + total_h + int(title_size * 0.2)
             _draw_text_with_stroke(
                 img, (sx, sy), subtitle, sub_font,
-                fill=user_sub_fill or (255, 255, 255),
-                stroke_color=user_stroke or (0, 0, 0),
-                stroke_w=max(3, int(sub_size * 0.08)),
+                fill=user_sub_fill or (0, 0, 0),         # 默认黑
+                stroke_color=user_stroke or (255, 255, 255),
+                stroke_w=max(4, int(sub_size * 0.12)),
             )
 
     elif template == 'douyin':
@@ -1448,17 +1529,32 @@ def generate_cover(req: CoverRequest):
     os.makedirs(work_dir, exist_ok=True)
 
     try:
-        # 1. 从 OSS 下载源视频
-        src_path = os.path.join(work_dir, 'source.mp4')
-        try:
-            oss_download(req.source_oss_key, src_path)
-        except Exception as e:
-            err = str(e)
-            if 'NoSuchKey' in err or '404' in err:
-                raise HTTPException(410, '源视频已过期 (>1 天 OSS 自动清理), 重新合成一遍.')
-            raise HTTPException(400, f'OSS 下载失败: {err[:200]}')
+        # 1. 从 OSS 下载源 — 优先用户自传图, 否则视频截帧
+        if not req.source_image_oss_key and not req.source_oss_key:
+            raise HTTPException(400, '必须提供 source_oss_key (视频) 或 source_image_oss_key (图)')
 
-        # 2. 每个比例: ffmpeg 截帧 + scale+crop → Pillow 叠字 → 保存
+        src_path = None
+        src_image_path = None
+        if req.source_image_oss_key:
+            src_image_path = os.path.join(work_dir, 'source_image')
+            try:
+                oss_download(req.source_image_oss_key, src_image_path)
+            except Exception as e:
+                err = str(e)
+                if 'NoSuchKey' in err or '404' in err:
+                    raise HTTPException(410, '上传的封面图已过期 (>1 天 OSS 自动清理), 请重新上传.')
+                raise HTTPException(400, f'OSS 下载封面图失败: {err[:200]}')
+        else:
+            src_path = os.path.join(work_dir, 'source.mp4')
+            try:
+                oss_download(req.source_oss_key, src_path)
+            except Exception as e:
+                err = str(e)
+                if 'NoSuchKey' in err or '404' in err:
+                    raise HTTPException(410, '源视频已过期 (>1 天 OSS 自动清理), 重新合成一遍.')
+                raise HTTPException(400, f'OSS 下载失败: {err[:200]}')
+
+        # 2. 每个比例: 准备 base 图 (ffmpeg 截帧 OR Pillow 缩放自传图) → Pillow 叠字 → 保存
         results = []
         for ratio in req.output_ratios:
             if ratio not in _COVER_DIMS:
@@ -1466,16 +1562,38 @@ def generate_cover(req: CoverRequest):
             W, H = _COVER_DIMS[ratio]
             base_jpg = os.path.join(work_dir, f"base_{ratio.replace(':', 'x')}.jpg")
 
-            # ffmpeg 只负责截帧 + 缩放 (无文字), Pillow 负责所有文字效果
-            cmd = ["ffmpeg", "-y", "-ss", f"{req.frame_time:.3f}", "-i", src_path,
-                   "-frames:v", "1",
-                   "-vf", f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}",
-                   "-q:v", "2", base_jpg]
-            proc = subprocess.run(cmd, capture_output=True, timeout=60)
-            if proc.returncode != 0 or not os.path.exists(base_jpg):
-                err = proc.stderr.decode("utf-8", errors="ignore")[-400:]
-                print(f"[cover] {ratio} 截帧失败: {err}", flush=True)
-                continue
+            if src_image_path:
+                # 自传图: Pillow 直接 scale + crop 到目标尺寸
+                try:
+                    src_img = Image.open(src_image_path).convert('RGB')
+                    # cover 缩放: 短边对齐 + 中心 crop
+                    src_ratio = src_img.width / src_img.height
+                    tgt_ratio = W / H
+                    if src_ratio > tgt_ratio:
+                        new_h = H
+                        new_w = int(H * src_ratio)
+                    else:
+                        new_w = W
+                        new_h = int(W / src_ratio)
+                    src_img = src_img.resize((new_w, new_h), Image.LANCZOS)
+                    left = (new_w - W) // 2
+                    top = (new_h - H) // 2
+                    src_img = src_img.crop((left, top, left + W, top + H))
+                    src_img.save(base_jpg, 'JPEG', quality=95)
+                except Exception as e:
+                    print(f"[cover] {ratio} 自传图处理失败: {e}", flush=True)
+                    continue
+            else:
+                # 视频截帧
+                cmd = ["ffmpeg", "-y", "-ss", f"{req.frame_time:.3f}", "-i", src_path,
+                       "-frames:v", "1",
+                       "-vf", f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}",
+                       "-q:v", "2", base_jpg]
+                proc = subprocess.run(cmd, capture_output=True, timeout=60)
+                if proc.returncode != 0 or not os.path.exists(base_jpg):
+                    err = proc.stderr.decode("utf-8", errors="ignore")[-400:]
+                    print(f"[cover] {ratio} 截帧失败: {err}", flush=True)
+                    continue
 
             # Pillow 渲染叠字
             try:
