@@ -88,6 +88,27 @@ function Block({ block, msgId, blockIdx, props }: { block: MessageBlock; msgId: 
     case 'video_player':
       return <VideoPlayer data={block.data}/>
 
+    case 'cover_result': {
+      const covers = block.data.covers || []
+      return (
+        <div className="flex flex-col gap-2">
+          <div className="text-xs text-[var(--text-3)]">封面 ({covers.length} 张)</div>
+          <div className="grid grid-cols-2 gap-2">
+            {covers.map((c, i) => (
+              <div key={i} className="flex flex-col gap-1 border border-[var(--border)] rounded-lg p-2">
+                <img src={c.url} alt="" className="w-full rounded bg-black max-h-[40vh] object-contain"/>
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] text-[var(--text-3)]">{c.ratio}</span>
+                  <a href={c.url} download={`cover-${c.ratio.replace(':', 'x')}.jpg`} target="_blank" rel="noreferrer"
+                     className="text-[11px] text-[var(--text)] hover:opacity-80 cursor-pointer">下载</a>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )
+    }
+
     case 'loading':
       return (
         <div className="flex items-center gap-2 text-sm text-[var(--text-2)]">

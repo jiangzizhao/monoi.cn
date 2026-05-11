@@ -500,27 +500,29 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
               </div>
             )}
             {composedUrl && (
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-3">
                 <video src={composedUrl} controls className="w-full rounded-lg max-h-[40vh] bg-black"/>
+                {/* 下一步按钮 (跟对话流里 choices 一致, 用户在弹窗直接能选) */}
                 <div className="flex flex-wrap gap-2">
+                  {composedOssKey && (
+                    <button
+                      onClick={() => setCoverModalOpen(true)}
+                      className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-[var(--text)] text-[var(--bg)] text-sm rounded-lg hover:opacity-80 cursor-pointer"
+                    >
+                      <ImageIcon size={14}/> 生成封面
+                    </button>
+                  )}
                   <a
                     href={composedUrl}
                     download="monoi-composed.mp4"
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-[var(--text)] text-[var(--bg)] text-sm rounded-lg hover:opacity-80 cursor-pointer"
+                    className="inline-flex items-center justify-center gap-1.5 px-4 py-2 border border-[var(--border)] text-[var(--text-2)] hover:bg-[var(--bg-hover)] text-sm rounded-lg cursor-pointer transition-colors"
                   >
-                    <DownloadIcon size={14}/> 下载成品 mp4
+                    <DownloadIcon size={14}/> 下载 mp4
                   </a>
-                  {composedOssKey && (
-                    <button
-                      onClick={() => setCoverModalOpen(true)}
-                      className="inline-flex items-center justify-center gap-1.5 px-4 py-2 border border-[var(--border)] text-[var(--text-2)] hover:bg-[var(--bg-hover)] text-sm rounded-lg cursor-pointer transition-colors"
-                    >
-                      <ImageIcon size={14}/> 生成封面
-                    </button>
-                  )}
                 </div>
+                <p className="text-[11px] text-[var(--text-3)]">关闭弹窗后, 对话里也会有这段视频 + 下一步选项.</p>
               </div>
             )}
           </div>

@@ -64,6 +64,12 @@ function normalizeBlock(block: unknown): MessageBlock | null {
         narration_oss_key: asString((block as any).narration_oss_key) || undefined,
       }
 
+    case 'cover_result':
+      return {
+        type: 'cover_result',
+        data: { covers: Array.isArray((block.data as any)?.covers) ? (block.data as any).covers : [] },
+      }
+
     case 'storyboard':
       return { type: 'storyboard', data: Array.isArray(block.data) ? block.data as any : [] }
 

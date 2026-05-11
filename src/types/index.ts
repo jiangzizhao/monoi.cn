@@ -96,6 +96,7 @@ export type MessageBlock =
   | { type: 'error';               message: string }
   | { type: 'footage_request';     data: { sentences: FootageSentenceItem[] } }
   | { type: 'teleprompter_request';data: { text: string; max_chars?: number } }
+  | { type: 'cover_result';        data: { covers: { ratio: string; url: string }[] } }
 
 export interface ChatMessage {
   id: string

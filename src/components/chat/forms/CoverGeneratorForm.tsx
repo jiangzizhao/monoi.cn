@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { X, Loader2, Download as DownloadIcon, Upload, Image as ImageIcon } from 'lucide-react'
+import { useChatStore, makeAssistantMsg } from '../../../store/chatStore'
 
 interface Props {
   // 从对话最近的合成视频或口播视频拿
@@ -12,13 +13,8 @@ interface Props {
 type Template = 'youtube' | 'douyin' | 'xhs' | 'bilibili' | 'minimal'
 type Ratio = '9:16' | '16:9' | '3:4' | '1:1'
 
-const TEMPLATES: { id: Template; label: string; desc: string }[] = [
-  { id: 'youtube',  label: 'YouTube 大标题', desc: '黄字红描边, 上方大标题 (人脸特写型)' },
-  { id: 'douyin',   label: '抖音爆款',       desc: '上下黑底, 中间画面 + 黑底白字' },
-  { id: 'xhs',      label: '小红书干货',     desc: '顶部彩色块 + 主副两行标题' },
-  { id: 'bilibili', label: 'B站知识',        desc: '左下角白色卡片 + 标题' },
-  { id: 'minimal',  label: '极简',           desc: '底部一行小字, 不抢画面' },
-]
+// 模板 UI 已去掉, 后端固定走 youtube (基础布局: 画面 + 顶部文字 + 描边阴影)
+// 用户用下方"自定义参数"调颜色/位置/字号, 完全自由
 
 const RATIOS: { id: Ratio; label: string }[] = [
   { id: '9:16', label: '竖屏 9:16 (抖音/快手)' },
@@ -34,7 +30,7 @@ export function CoverGeneratorForm({ defaultVideoOssKey, defaultVideoUrl, onClos
   const [frameTime, setFrameTime] = useState(1.0)
   const [title, setTitle] = useState('')
   const [subtitle, setSubtitle] = useState('')
-  const [template, setTemplate] = useState<Template>('youtube')
+  const template: Template = 'youtube'   // 写死 (UI 去掉模板选择, 用自定义参数调)
   const [ratios, setRatios] = useState<Ratio[]>(['9:16', '16:9'])
   const [generating, setGenerating] = useState(false)
   const [results, setResults] = useState<{ ratio: string; url: string }[]>([])
@@ -54,6 +50,7 @@ export function CoverGeneratorForm({ defaultVideoOssKey, defaultVideoUrl, onClos
   const fileRef = useRef<HTMLInputElement>(null)
 
   const directBase = (import.meta as any).env?.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'
+  const chatStore = useChatStore()
 
   useEffect(() => {
     const v = videoRef.current
@@ -138,7 +135,25 @@ export function CoverGeneratorForm({ defaultVideoOssKey, defaultVideoUrl, onClos
       if (!res.ok || !data.success) {
         throw new Error(data.detail || data.error || `生成失败 (${res.status})`)
       }
-      setResults(data.covers || [])
+      const covers = data.covers || []
+      setResults(covers)
+      // 把封面注入对话流 (跟合成完成体验一致)
+      const convId = chatStore.activeId
+      if (convId && covers.length > 0) {
+        const msg = makeAssistantMsg([
+          { type: 'cover_result', data: { covers } },
+          { type: 'text', content: `封面已生成 ${covers.length} 张. 下一步?` },
+          {
+            type: 'choices',
+            question: '下一步',
+            options: [
+              { id: '帮我生成各平台的发布文案', label: '生成发布文案', description: '抖音/小红书/视频号/B站' },
+              { id: '保留封面, 暂不做下一步', label: '保留封面', description: '稍后再决定' },
+            ],
+          },
+        ])
+        chatStore.addMessage(convId, msg)
+      }
     } catch (e: any) {
       setError(e.message || '生成失败')
     } finally {
@@ -252,26 +267,6 @@ export function CoverGeneratorForm({ defaultVideoOssKey, defaultVideoUrl, onClos
                 />
               </div>
 
-              {/* 模板选择 */}
-              <div className="flex flex-col gap-2">
-                <div className="text-xs text-[var(--text-2)]">模板</div>
-                <div className="grid grid-cols-1 gap-1.5">
-                  {TEMPLATES.map(t => (
-                    <button
-                      key={t.id}
-                      onClick={() => setTemplate(t.id)}
-                      className={`flex items-center justify-between px-3 py-2 rounded-lg border text-left transition-all cursor-pointer ${
-                        template === t.id
-                          ? 'bg-[var(--text)] border-[var(--text)] text-[var(--bg)]'
-                          : 'bg-[var(--bg-card)] border-[var(--border)] text-[var(--text-2)] hover:border-[var(--text-3)]'
-                      }`}
-                    >
-                      <span className="text-sm font-medium">{t.label}</span>
-                      <span className="text-[11px] opacity-70 truncate ml-2">{t.desc}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
 
               {/* 颜色 / 位置 / 字号 自定义 (留空走模板默认) */}
               <div className="flex flex-col gap-3 border border-[var(--border)] rounded-xl p-3">
