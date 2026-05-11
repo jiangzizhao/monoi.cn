@@ -83,9 +83,27 @@ def _get_bucket():
             "OSS 未配置. 需要在 .env 设 OSS_ENDPOINT / OSS_BUCKET / OSS_ACCESS_KEY_ID / OSS_ACCESS_KEY_SECRET"
         )
 
+    # connect_timeout 600s (10 分钟): 合成视频可能 50-100MB, 服务器上行慢的话默认 60s 不够
     auth = oss2.Auth(ak_id, ak_secret)
-    _BUCKET_CACHE = oss2.Bucket(auth, endpoint, bucket_name)
+    _BUCKET_CACHE = oss2.Bucket(auth, endpoint, bucket_name, connect_timeout=600)
     return _BUCKET_CACHE
+
+
+def oss_upload_resumable(oss_key: str, local_path: str, content_type: str = "video/mp4") -> None:
+    """大文件分片上传 (>50MB 自动启用), 断点续传, 不受单次超时限制"""
+    bucket = _get_bucket()
+    try:
+        import oss2
+        # 50MB 以上启用分片上传 (multipart_threshold), 单片 10MB
+        oss2.resumable_upload(
+            bucket, oss_key, local_path,
+            multipart_threshold=50 * 1024 * 1024,
+            part_size=10 * 1024 * 1024,
+            num_threads=3,
+            headers={"Content-Type": content_type},
+        )
+    except Exception as e:
+        raise RuntimeError(f"OSS 分片上传失败: {e}")
 
 
 def oss_is_configured() -> bool:
@@ -123,10 +141,17 @@ def oss_download(oss_key: str, local_path: str) -> None:
 
 
 def oss_upload(oss_key: str, local_path: str, content_type: str = "video/mp4") -> None:
-    """从本地文件上传到 OSS."""
-    bucket = _get_bucket()
-    headers = {"Content-Type": content_type}
-    bucket.put_object_from_file(oss_key, local_path, headers=headers)
+    """从本地文件上传到 OSS. 大文件 (>50MB) 自动用分片上传 (断点续传, 不受单次超时限制)."""
+    try:
+        size = os.path.getsize(local_path)
+    except OSError:
+        size = 0
+    if size > 50 * 1024 * 1024:
+        # 大文件用 resumable_upload (分片 + 多线程, 适合视频)
+        oss_upload_resumable(oss_key, local_path, content_type)
+    else:
+        bucket = _get_bucket()
+        bucket.put_object_from_file(oss_key, local_path, headers={"Content-Type": content_type})
 
 
 def oss_delete(oss_key: str) -> None:
