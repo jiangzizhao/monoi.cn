@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { Pause, Play, X, Loader2, Download as DownloadIcon, Music, Upload, Image as ImageIcon } from 'lucide-react'
 import type { FootageSentenceItem, VideoAsset } from '../../types'
 import { CoverGeneratorForm } from './forms/CoverGeneratorForm'
+import { useChatStore, makeAssistantMsg } from '../../store/chatStore'
 
 interface Props {
   videoUrl: string
@@ -50,6 +51,7 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
   const bgmFileRef = useRef<HTMLInputElement>(null)
 
   const directBase = (import.meta as any).env?.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'
+  const chatStore = useChatStore()
 
   const handleBgmUpload = async (file: File) => {
     if (file.size > 50 * 1024 * 1024) {
@@ -124,6 +126,35 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
       }
       setComposedUrl(data.video_url)
       setComposedOssKey(data.output_oss_key || null)
+
+      // 把成品视频注入对话 (跟"口播剪辑完成"体验一致): 视频 + 提示 + 下一步按钮
+      const convId = chatStore.activeId
+      if (convId) {
+        const msg = makeAssistantMsg([
+          {
+            type: 'video_player',
+            data: {
+              video_url: data.video_url,
+              duration_ms: data.duration ? Math.round(data.duration * 1000) : undefined,
+              audio_label: '一键合成',
+              source: 'ai_generated' as const,
+              narration_oss_key: data.output_oss_key,   // 给封面/后续模块用
+            },
+          },
+          { type: 'text', content: '成品视频已合成 (口播 + b-roll + PIP + BGM). 下一步?' },
+          {
+            type: 'choices',
+            question: '下一步',
+            options: [
+              { id: '__form_cover__', label: '生成封面', description: '截帧 + 模板, 输出多比例' },
+              { id: '我要做分镜表', label: '做分镜表', description: '生成达芬奇 EDL 兼容' },
+              { id: '帮我生成各平台的发布文案', label: '生成发布文案', description: '抖音/小红书/视频号/B站' },
+              { id: '保留这段视频, 暂不做下一步', label: '保留视频', description: '稍后再决定' },
+            ],
+          },
+        ])
+        chatStore.addMessage(convId, msg)
+      }
     } catch (e: any) {
       setComposeError(e.message || '合成失败')
     } finally {
