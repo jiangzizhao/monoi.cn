@@ -1132,8 +1132,25 @@ class CoverRequest(BaseModel):
     frame_time: float = 1.0        # 第几秒截帧
     title: str                     # 主标题
     subtitle: str = ''             # 副标题 (可选)
-    template: str = 'youtube'      # 'youtube' / 'douyin' / 'xhs' / 'bilibili' / 'minimal'
+    template: str = 'youtube'
     output_ratios: list[str] = ['9:16', '16:9', '3:4', '1:1']
+    font_title: Optional[str] = None     # 用户选的标题字体文件名 (D:\monoi-server\fonts\ 下的)
+    font_subtitle: Optional[str] = None  # 用户选的副标题字体
+
+
+# 可选字体清单 (跟一键启动.bat 下载的对应) — 给前端 GET /cover-fonts 用
+_FONT_CATALOG = [
+    {'file': 'SourceHanSansCN-Heavy.otf',  'label': '思源黑体 Heavy',  'tag': '现代粗黑·万能'},
+    {'file': 'youshe-biaoti-hei.ttf',      'label': '优设标题黑',      'tag': '设计感粗黑·标题首选'},
+    {'file': 'zcool-xiaowei-logo.otf',     'label': '站酷小薇 LOGO 体', 'tag': 'logo 风·品牌'},
+    {'file': 'zcool-qingke-huangyou.ttf',  'label': '站酷庆科黄油体',  'tag': '圆润 q 弹·美食/可爱'},
+    {'file': 'zcool-kuaile.ttf',           'label': '站酷快乐体',      'tag': '卡通可爱'},
+    {'file': 'shetu-modern-xiaofang.ttf',  'label': '摄图摩登小方体',  'tag': '现代方正·商业'},
+    {'file': 'baotu-xiaobai.ttf',          'label': '包图小白体',      'tag': '圆润可爱·种草'},
+    {'file': 'jiangxi-zhuokai.ttf',        'label': '江西拙楷',        'tag': '楷书古风·文艺'},
+    {'file': 'zhuangjia-mincho.ttf',       'label': '装甲明朝',        'tag': '日文明朝·古典'},
+    {'file': 'marker-shouhui.ttf',         'label': '麦克笔手绘体',    'tag': '马克笔手写·涂鸦'},
+]
 
 
 # 各模板按比例输出尺寸 (短边 1080)
@@ -1172,13 +1189,19 @@ def _find_font(candidates: list, fallback: str) -> str:
     return fallback
 
 
-def _load_font(size: int, weight: str = 'heavy'):
-    """加载 PIL 字体, weight = 'heavy' (标题) / 'regular' (副标题)"""
+def _load_font(size: int, weight: str = 'heavy', user_pick: Optional[str] = None):
+    """加载 PIL 字体. user_pick = 用户选的文件名 (优先), 没选才走 weight 兜底."""
     from PIL import ImageFont
-    if weight == 'heavy':
-        path = _find_font(_FONT_CANDIDATES_HEAVY, _FONT_FALLBACK_HEAVY)
-    else:
-        path = _find_font(_FONT_CANDIDATES_REGULAR, _FONT_FALLBACK_REGULAR)
+    path = None
+    if user_pick:
+        candidate = os.path.join(_FONT_DIR_PROJECT, os.path.basename(user_pick))
+        if os.path.exists(candidate):
+            path = candidate
+    if not path:
+        if weight == 'heavy':
+            path = _find_font(_FONT_CANDIDATES_HEAVY, _FONT_FALLBACK_HEAVY)
+        else:
+            path = _find_font(_FONT_CANDIDATES_REGULAR, _FONT_FALLBACK_REGULAR)
     try:
         return ImageFont.truetype(path, size)
     except Exception as e:
@@ -1209,8 +1232,11 @@ def _draw_text_with_stroke(img, xy, text, font, fill, stroke_color=None, stroke_
         draw.text((x, y), text, font=font, fill=fill)
 
 
-def _render_template_pillow(img, template: str, title: str, subtitle: str):
-    """用 Pillow 在图上叠模板. img 是 PIL Image (RGB)"""
+def _render_template_pillow(img, template: str, title: str, subtitle: str,
+                             user_font_title: Optional[str] = None,
+                             user_font_subtitle: Optional[str] = None):
+    """用 Pillow 在图上叠模板. img 是 PIL Image (RGB).
+    user_font_title / subtitle 是用户在前端选的字体文件名, None 则用模板默认."""
     from PIL import ImageDraw
     W, H = img.size
     base = min(W, H)
@@ -1219,8 +1245,8 @@ def _render_template_pillow(img, template: str, title: str, subtitle: str):
 
     if template == 'youtube':
         # YouTube 爆款: 大粗黄字 + 红描边 + 黑阴影, 上方
-        font = _load_font(title_size, 'heavy')
-        sub_font = _load_font(sub_size, 'heavy')
+        font = _load_font(title_size, 'heavy', user_font_title)
+        sub_font = _load_font(sub_size, 'heavy', user_font_subtitle)
         draw = ImageDraw.Draw(img)
         tw, th = _text_size(draw, title, font)
         x = (W - tw) // 2
@@ -1253,7 +1279,7 @@ def _render_template_pillow(img, template: str, title: str, subtitle: str):
         ImageDraw.Draw(img).rectangle([(0, H - bar_h), (W, H)], fill=(0, 0, 0))
         # 上方主标题 (大白字)
         t_size = int(bar_h * 0.55)
-        font = _load_font(t_size, 'heavy')
+        font = _load_font(t_size, 'heavy', user_font_title)
         draw = ImageDraw.Draw(img)
         tw, th = _text_size(draw, title, font)
         x = (W - tw) // 2
@@ -1261,7 +1287,7 @@ def _render_template_pillow(img, template: str, title: str, subtitle: str):
         draw.text((x, y), title, font=font, fill=(255, 255, 255))
         # 下方副标题 (小一点)
         if subtitle:
-            sub_font = _load_font(sub_size, 'regular')
+            sub_font = _load_font(sub_size, 'regular', user_font_subtitle)
             stw, sth = _text_size(draw, subtitle, sub_font)
             sx = (W - stw) // 2
             sy = H - bar_h + (bar_h - sth) // 2
@@ -1274,12 +1300,12 @@ def _render_template_pillow(img, template: str, title: str, subtitle: str):
         ImageDraw.Draw(img).rectangle([(0, 0), (W, block_h)], fill=(255, 87, 87))
         # 主标题
         t_size = int(block_h * 0.42) if subtitle else int(block_h * 0.55)
-        font = _load_font(t_size, 'heavy')
+        font = _load_font(t_size, 'heavy', user_font_title)
         draw = ImageDraw.Draw(img)
         tw, th = _text_size(draw, title, font)
         pad = int(W * 0.05)
         if subtitle:
-            sub_font = _load_font(sub_size, 'regular')
+            sub_font = _load_font(sub_size, 'regular', user_font_subtitle)
             stw, sth = _text_size(draw, subtitle, sub_font)
             total_h = th + int(t_size * 0.25) + sth
             y_start = (block_h - total_h) // 2
@@ -1308,11 +1334,11 @@ def _render_template_pillow(img, template: str, title: str, subtitle: str):
         # 标题 (黑色) + 副标题 (灰)
         draw = ImageDraw.Draw(img)
         t_size = int(card_h * 0.40) if subtitle else int(card_h * 0.55)
-        font = _load_font(t_size, 'heavy')
+        font = _load_font(t_size, 'heavy', user_font_title)
         tw, th = _text_size(draw, title, font)
         text_pad = int(card_w * 0.04)
         if subtitle:
-            sub_font = _load_font(int(sub_size * 0.85), 'regular')
+            sub_font = _load_font(int(sub_size * 0.85), 'regular', user_font_subtitle)
             stw, sth = _text_size(draw, subtitle, sub_font)
             total_h = th + int(t_size * 0.2) + sth
             y_start = y0 + (card_h - total_h) // 2
@@ -1330,7 +1356,7 @@ def _render_template_pillow(img, template: str, title: str, subtitle: str):
         odraw = ImageDraw.Draw(overlay)
         odraw.rectangle([(0, H - bar_h), (W, H)], fill=(0, 0, 0, 160))
         img.paste(Image.alpha_composite(img.convert('RGBA'), overlay).convert('RGB'))
-        font = _load_font(int(sub_size * 1.1), 'regular')
+        font = _load_font(int(sub_size * 1.1), 'regular', user_font_title)
         draw = ImageDraw.Draw(img)
         tw, th = _text_size(draw, title, font)
         x = (W - tw) // 2
@@ -1338,6 +1364,18 @@ def _render_template_pillow(img, template: str, title: str, subtitle: str):
         draw.text((x, y), title, font=font, fill=(255, 255, 255))
 
     return img
+
+
+@app.get("/cover-fonts")
+def list_cover_fonts():
+    """列出 server 上可用的字体 (扫 D:\\monoi-server\\fonts\\, 跟 _FONT_CATALOG 对比).
+    前端用这个接口拉字体下拉选项."""
+    available = []
+    for item in _FONT_CATALOG:
+        path = os.path.join(_FONT_DIR_PROJECT, item['file'])
+        if os.path.exists(path):
+            available.append(item)
+    return {'fonts': available}
 
 
 @app.post("/generate-cover")
@@ -1391,7 +1429,9 @@ def generate_cover(req: CoverRequest):
             # Pillow 渲染叠字
             try:
                 img = Image.open(base_jpg).convert('RGB')
-                img = _render_template_pillow(img, req.template, req.title, req.subtitle)
+                img = _render_template_pillow(img, req.template, req.title, req.subtitle,
+                                               user_font_title=req.font_title,
+                                               user_font_subtitle=req.font_subtitle)
                 out_jpg = os.path.join(work_dir, f"cover_{ratio.replace(':', 'x')}.jpg")
                 img.save(out_jpg, 'JPEG', quality=92, optimize=True)
             except Exception as e:

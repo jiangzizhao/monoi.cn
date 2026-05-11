@@ -1808,6 +1808,19 @@ def finalize_narration_video_proxy(req: FinalizeNarrationVideoRequest):
         raise HTTPException(503, "voice-server (9001) 未启动")
 
 
+@app.get("/api/voice/cover-fonts")
+def cover_fonts_proxy():
+    """转发: 列出 server 可用字体"""
+    import requests as _req
+    try:
+        resp = _req.get(f"{VOICE_SERVER_URL}/cover-fonts", timeout=10)
+        if resp.status_code != 200:
+            raise HTTPException(resp.status_code, f"voice-server 错误: {resp.text[:200]}")
+        return resp.json()
+    except _req.exceptions.ConnectionError:
+        raise HTTPException(503, "voice-server (9001) 未启动")
+
+
 @app.post("/api/voice/generate-cover")
 def generate_cover_proxy(req: dict):
     """转发到 voice-server: 截帧 + 模板叠字生成多比例封面"""

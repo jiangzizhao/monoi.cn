@@ -39,6 +39,9 @@ export function CoverGeneratorForm({ defaultVideoOssKey, defaultVideoUrl, onClos
   const [generating, setGenerating] = useState(false)
   const [results, setResults] = useState<{ ratio: string; url: string }[]>([])
   const [error, setError] = useState('')
+  const [fonts, setFonts] = useState<{ file: string; label: string; tag: string }[]>([])
+  const [fontTitle, setFontTitle] = useState<string>('')      // 空 = 用模板默认
+  const [fontSubtitle, setFontSubtitle] = useState<string>('')
 
   // 自传通道
   const [uploadedCover, setUploadedCover] = useState<{ name: string; url: string } | null>(null)
@@ -57,6 +60,14 @@ export function CoverGeneratorForm({ defaultVideoOssKey, defaultVideoUrl, onClos
     v.addEventListener('loadedmetadata', onMeta)
     return () => v.removeEventListener('loadedmetadata', onMeta)
   }, [])
+
+  // 拉 server 上可用字体
+  useEffect(() => {
+    fetch(directBase + '/api/voice/cover-fonts')
+      .then(r => r.json())
+      .then(d => setFonts(d.fonts || []))
+      .catch(() => setFonts([]))
+  }, [directBase])
 
   // 拖时间轴时同步 video 显示对应帧
   useEffect(() => {
@@ -95,6 +106,8 @@ export function CoverGeneratorForm({ defaultVideoOssKey, defaultVideoUrl, onClos
           subtitle: subtitle.trim(),
           template,
           output_ratios: ratios,
+          font_title: fontTitle || null,
+          font_subtitle: fontSubtitle || null,
         }),
       })
       const data = await res.json()
@@ -235,6 +248,35 @@ export function CoverGeneratorForm({ defaultVideoOssKey, defaultVideoUrl, onClos
                   ))}
                 </div>
               </div>
+
+              {/* 字体选择 (可选, 留空用模板默认) */}
+              {fonts.length > 0 && (
+                <div className="flex flex-col gap-2">
+                  <div className="text-xs text-[var(--text-2)]">字体 (可选, 留默认走模板预设)</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <select
+                      value={fontTitle}
+                      onChange={(e) => setFontTitle(e.target.value)}
+                      className="bg-[var(--bg-input)] border border-[var(--border)] rounded-lg px-3 py-2 text-xs text-[var(--text)] focus:outline-none focus:border-[var(--text-3)] cursor-pointer"
+                    >
+                      <option value="">主标题: 默认</option>
+                      {fonts.map(f => (
+                        <option key={f.file} value={f.file}>主标题: {f.label}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={fontSubtitle}
+                      onChange={(e) => setFontSubtitle(e.target.value)}
+                      className="bg-[var(--bg-input)] border border-[var(--border)] rounded-lg px-3 py-2 text-xs text-[var(--text)] focus:outline-none focus:border-[var(--text-3)] cursor-pointer"
+                    >
+                      <option value="">副标题: 默认</option>
+                      {fonts.map(f => (
+                        <option key={f.file} value={f.file}>副标题: {f.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              )}
 
               {/* 输出比例 */}
               <div className="flex flex-col gap-2">
