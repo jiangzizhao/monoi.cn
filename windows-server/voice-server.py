@@ -1144,107 +1144,209 @@ _COVER_DIMS = {
     '1:1':  (1080, 1080),
 }
 
-# Windows 系统中文字体路径
-_WIN_FONTS = {
-    'msyh':   'C:/Windows/Fonts/msyh.ttc',     # 微软雅黑
-    'msyhbd': 'C:/Windows/Fonts/msyhbd.ttc',   # 微软雅黑 Bold
-    'simhei': 'C:/Windows/Fonts/simhei.ttf',   # 黑体
-    'simsun': 'C:/Windows/Fonts/simsun.ttc',   # 宋体
-}
+# 字体路径优先级: 项目 fonts 目录 (用户放设计字体) → Win 系统字体 (兜底)
+# 用户在 D:\monoi-server\fonts\ 放思源黑体 Heavy 等设计字体, 自动用; 没的话 fallback 到微软雅黑
+_FONT_DIR_PROJECT = r'D:\monoi-server\fonts'
+_FONT_CANDIDATES_HEAVY = [   # 标题用粗体
+    'SourceHanSansCN-Heavy.otf',
+    'SourceHanSansSC-Heavy.otf',
+    'zcool-gaoduanhei.ttf',     # 站酷高端黑
+    'pmzd.ttf',                  # 庞门正道粗书
+    'AlibabaPuHuiTi-3-115-Black.ttf',
+]
+_FONT_CANDIDATES_REGULAR = [  # 副标题用常规
+    'SourceHanSansCN-Bold.otf',
+    'SourceHanSansSC-Bold.otf',
+    'AlibabaPuHuiTi-3-85-Bold.ttf',
+]
+_FONT_FALLBACK_HEAVY = 'C:/Windows/Fonts/msyhbd.ttc'      # 微软雅黑 Bold
+_FONT_FALLBACK_REGULAR = 'C:/Windows/Fonts/msyh.ttc'      # 微软雅黑
 
 
-def _escape_drawtext(s: str) -> str:
-    """ffmpeg drawtext 参数特殊字符转义"""
-    return s.replace('\\', '\\\\').replace(':', '\\:').replace("'", "\\'").replace('%', '\\%')
+def _find_font(candidates: list, fallback: str) -> str:
+    """优先项目 fonts 目录, 否则系统字体兜底"""
+    for name in candidates:
+        path = os.path.join(_FONT_DIR_PROJECT, name)
+        if os.path.exists(path):
+            return path
+    return fallback
 
 
-def _build_template_filter(template: str, title: str, subtitle: str, W: int, H: int) -> str:
-    """按模板生成 ffmpeg 滤镜片段 (在 scale+crop 之后追加)"""
-    title = _escape_drawtext(title)
-    subtitle = _escape_drawtext(subtitle) if subtitle else ''
-    bd = _WIN_FONTS['msyhbd'].replace(':', r'\:')
-    rg = _WIN_FONTS['msyh'].replace(':', r'\:')
+def _load_font(size: int, weight: str = 'heavy'):
+    """加载 PIL 字体, weight = 'heavy' (标题) / 'regular' (副标题)"""
+    from PIL import ImageFont
+    if weight == 'heavy':
+        path = _find_font(_FONT_CANDIDATES_HEAVY, _FONT_FALLBACK_HEAVY)
+    else:
+        path = _find_font(_FONT_CANDIDATES_REGULAR, _FONT_FALLBACK_REGULAR)
+    try:
+        return ImageFont.truetype(path, size)
+    except Exception as e:
+        print(f"[cover] 字体加载失败 {path}: {e}, 用默认", flush=True)
+        return ImageFont.load_default()
 
-    # 字号按短边算 (短边 1080, 大标题 ~120px, 副标题 ~60px)
+
+def _text_size(draw, text: str, font):
+    """跨 PIL 版本拿文字尺寸"""
+    bbox = draw.textbbox((0, 0), text, font=font)
+    return bbox[2] - bbox[0], bbox[3] - bbox[1]
+
+
+def _draw_text_with_stroke(img, xy, text, font, fill, stroke_color=None, stroke_w=0, shadow=None):
+    """画文字: 可选多层描边 + 可选阴影. 用 PIL 内置 stroke_width 性能好.
+    shadow = (offset_x, offset_y, color) 或 None"""
+    from PIL import ImageDraw
+    draw = ImageDraw.Draw(img)
+    x, y = xy
+    # 阴影
+    if shadow:
+        sx, sy, sc = shadow
+        draw.text((x + sx, y + sy), text, font=font, fill=sc)
+    # 主字 + 描边 (PIL 自带 stroke_width 比手动循环快很多)
+    if stroke_w > 0 and stroke_color:
+        draw.text((x, y), text, font=font, fill=fill, stroke_width=stroke_w, stroke_fill=stroke_color)
+    else:
+        draw.text((x, y), text, font=font, fill=fill)
+
+
+def _render_template_pillow(img, template: str, title: str, subtitle: str):
+    """用 Pillow 在图上叠模板. img 是 PIL Image (RGB)"""
+    from PIL import ImageDraw
+    W, H = img.size
     base = min(W, H)
-    title_size = int(base * 0.10)
-    sub_size = int(base * 0.05)
-
-    parts = []
+    title_size = int(base * 0.13)
+    sub_size = int(base * 0.055)
 
     if template == 'youtube':
-        # 大粗黄字 + 红描边, 上方 1/4
-        parts.append(
-            f"drawtext=fontfile='{bd}':text='{title}':fontsize={title_size}:fontcolor=yellow:"
-            f"bordercolor=red:borderw=8:x=(w-text_w)/2:y=h*0.12"
+        # YouTube 爆款: 大粗黄字 + 红描边 + 黑阴影, 上方
+        font = _load_font(title_size, 'heavy')
+        sub_font = _load_font(sub_size, 'heavy')
+        draw = ImageDraw.Draw(img)
+        tw, th = _text_size(draw, title, font)
+        x = (W - tw) // 2
+        y = int(H * 0.08)
+        # 阴影 (黑色 offset)
+        sh_off = max(4, int(title_size * 0.05))
+        # PIL stroke_width 实现描边, 比循环 8 个方向快 10x
+        stroke_w = max(6, int(title_size * 0.10))
+        _draw_text_with_stroke(
+            img, (x, y), title, font,
+            fill=(255, 220, 0),               # 黄色填充
+            stroke_color=(200, 0, 0),         # 红色描边
+            stroke_w=stroke_w,
+            shadow=(sh_off, sh_off, (0, 0, 0)),
         )
         if subtitle:
-            parts.append(
-                f"drawtext=fontfile='{bd}':text='{subtitle}':fontsize={sub_size}:fontcolor=white:"
-                f"bordercolor=black:borderw=4:x=(w-text_w)/2:y=h*0.12+{title_size}*1.3"
+            stw, _ = _text_size(draw, subtitle, sub_font)
+            sx = (W - stw) // 2
+            sy = y + th + int(title_size * 0.2)
+            _draw_text_with_stroke(
+                img, (sx, sy), subtitle, sub_font,
+                fill=(255, 255, 255), stroke_color=(0, 0, 0), stroke_w=max(3, int(sub_size * 0.08)),
             )
 
     elif template == 'douyin':
-        # 上下黑底 padding (drawbox), 中间画面, 黑底上写白字
+        # 抖音爆款: 上下黑底 padding + 中间画面 + 黑底上白字
         bar_h = int(H * 0.18)
-        parts.append(f"drawbox=x=0:y=0:w=iw:h={bar_h}:color=black@1:t=fill")
-        parts.append(f"drawbox=x=0:y=ih-{bar_h}:w=iw:h={bar_h}:color=black@1:t=fill")
-        parts.append(
-            f"drawtext=fontfile='{bd}':text='{title}':fontsize={int(title_size*0.9)}:fontcolor=white:"
-            f"x=(w-text_w)/2:y={(bar_h - int(title_size*0.9))//2}"
-        )
+        # 上下黑底
+        ImageDraw.Draw(img).rectangle([(0, 0), (W, bar_h)], fill=(0, 0, 0))
+        ImageDraw.Draw(img).rectangle([(0, H - bar_h), (W, H)], fill=(0, 0, 0))
+        # 上方主标题 (大白字)
+        t_size = int(bar_h * 0.55)
+        font = _load_font(t_size, 'heavy')
+        draw = ImageDraw.Draw(img)
+        tw, th = _text_size(draw, title, font)
+        x = (W - tw) // 2
+        y = (bar_h - th) // 2
+        draw.text((x, y), title, font=font, fill=(255, 255, 255))
+        # 下方副标题 (小一点)
         if subtitle:
-            parts.append(
-                f"drawtext=fontfile='{rg}':text='{subtitle}':fontsize={sub_size}:fontcolor=white:"
-                f"x=(w-text_w)/2:y=ih-{bar_h}+{(bar_h - sub_size)//2}"
-            )
+            sub_font = _load_font(sub_size, 'regular')
+            stw, sth = _text_size(draw, subtitle, sub_font)
+            sx = (W - stw) // 2
+            sy = H - bar_h + (bar_h - sth) // 2
+            draw.text((sx, sy), subtitle, font=sub_font, fill=(255, 200, 100))
 
     elif template == 'xhs':
-        # 顶部亮色色块 + 主副两行
-        block_h = int(H * 0.22)
-        parts.append(f"drawbox=x=0:y=0:w=iw:h={block_h}:color=0xFF6B6B@0.92:t=fill")
-        parts.append(
-            f"drawtext=fontfile='{bd}':text='{title}':fontsize={int(title_size*0.85)}:fontcolor=white:"
-            f"x=40:y=40"
-        )
+        # 小红书干货: 顶部红色块 + 圆角 + 主副两行白字
+        block_h = int(H * 0.24)
+        # 红色色块 (略带圆角下沿: 用矩形够了, 视觉上没差太多)
+        ImageDraw.Draw(img).rectangle([(0, 0), (W, block_h)], fill=(255, 87, 87))
+        # 主标题
+        t_size = int(block_h * 0.42) if subtitle else int(block_h * 0.55)
+        font = _load_font(t_size, 'heavy')
+        draw = ImageDraw.Draw(img)
+        tw, th = _text_size(draw, title, font)
+        pad = int(W * 0.05)
         if subtitle:
-            parts.append(
-                f"drawtext=fontfile='{rg}':text='{subtitle}':fontsize={sub_size}:fontcolor=white:"
-                f"x=40:y=40+{int(title_size*0.85)}*1.2"
-            )
+            sub_font = _load_font(sub_size, 'regular')
+            stw, sth = _text_size(draw, subtitle, sub_font)
+            total_h = th + int(t_size * 0.25) + sth
+            y_start = (block_h - total_h) // 2
+            draw.text((pad, y_start), title, font=font, fill=(255, 255, 255))
+            draw.text((pad, y_start + th + int(t_size * 0.25)), subtitle, font=sub_font, fill=(255, 220, 220))
+        else:
+            y = (block_h - th) // 2
+            draw.text((pad, y), title, font=font, fill=(255, 255, 255))
 
     elif template == 'bilibili':
-        # 左下角浅色半透明卡片 + 标题
-        card_h = int(H * 0.16)
-        card_w = int(W * 0.8)
-        parts.append(f"drawbox=x=40:y=ih-{card_h}-40:w={card_w}:h={card_h}:color=white@0.85:t=fill")
-        parts.append(
-            f"drawtext=fontfile='{bd}':text='{title}':fontsize={int(title_size*0.7)}:fontcolor=black:"
-            f"x=70:y=ih-{card_h}-40+30"
-        )
+        # B站知识型: 左下角白色半透明圆角卡片 + 黑色标题
+        card_w = int(W * 0.85)
+        card_h = int(H * 0.18)
+        margin = int(W * 0.04)
+        x0 = margin
+        y0 = H - card_h - margin
+        # 半透明白色卡片 (要 RGBA 合成才能透明)
+        from PIL import Image
+        overlay = Image.new('RGBA', (W, H), (0, 0, 0, 0))
+        odraw = ImageDraw.Draw(overlay)
+        try:
+            odraw.rounded_rectangle([(x0, y0), (x0 + card_w, y0 + card_h)], radius=20, fill=(255, 255, 255, 230))
+        except AttributeError:
+            odraw.rectangle([(x0, y0), (x0 + card_w, y0 + card_h)], fill=(255, 255, 255, 230))
+        img.paste(Image.alpha_composite(img.convert('RGBA'), overlay).convert('RGB'))
+        # 标题 (黑色) + 副标题 (灰)
+        draw = ImageDraw.Draw(img)
+        t_size = int(card_h * 0.40) if subtitle else int(card_h * 0.55)
+        font = _load_font(t_size, 'heavy')
+        tw, th = _text_size(draw, title, font)
+        text_pad = int(card_w * 0.04)
         if subtitle:
-            parts.append(
-                f"drawtext=fontfile='{rg}':text='{subtitle}':fontsize={int(sub_size*0.9)}:fontcolor=0x666666:"
-                f"x=70:y=ih-{card_h}-40+30+{int(title_size*0.7)}*1.2"
-            )
+            sub_font = _load_font(int(sub_size * 0.85), 'regular')
+            stw, sth = _text_size(draw, subtitle, sub_font)
+            total_h = th + int(t_size * 0.2) + sth
+            y_start = y0 + (card_h - total_h) // 2
+            draw.text((x0 + text_pad, y_start), title, font=font, fill=(20, 20, 20))
+            draw.text((x0 + text_pad, y_start + th + int(t_size * 0.2)), subtitle, font=sub_font, fill=(120, 120, 120))
+        else:
+            y = y0 + (card_h - th) // 2
+            draw.text((x0 + text_pad, y), title, font=font, fill=(20, 20, 20))
 
     else:  # minimal
-        # 底部一行小字, 半透明黑底
-        parts.append(f"drawbox=x=0:y=ih-{int(sub_size*2.5)}:w=iw:h={int(sub_size*2.5)}:color=black@0.6:t=fill")
-        parts.append(
-            f"drawtext=fontfile='{rg}':text='{title}':fontsize={int(sub_size*1.2)}:fontcolor=white:"
-            f"x=(w-text_w)/2:y=ih-{int(sub_size*2.5)}+{int(sub_size*0.6)}"
-        )
+        # 极简: 底部黑色半透明条 + 白字
+        bar_h = int(sub_size * 2.4)
+        from PIL import Image
+        overlay = Image.new('RGBA', (W, H), (0, 0, 0, 0))
+        odraw = ImageDraw.Draw(overlay)
+        odraw.rectangle([(0, H - bar_h), (W, H)], fill=(0, 0, 0, 160))
+        img.paste(Image.alpha_composite(img.convert('RGBA'), overlay).convert('RGB'))
+        font = _load_font(int(sub_size * 1.1), 'regular')
+        draw = ImageDraw.Draw(img)
+        tw, th = _text_size(draw, title, font)
+        x = (W - tw) // 2
+        y = H - bar_h + (bar_h - th) // 2
+        draw.text((x, y), title, font=font, fill=(255, 255, 255))
 
-    return ','.join(parts)
+    return img
 
 
 @app.post("/generate-cover")
 def generate_cover(req: CoverRequest):
-    """从源视频截帧 + drawtext 叠标题 + 输出多比例封面到 OSS"""
+    """ffmpeg 截帧 + scale → Pillow 渲染模板 → 上传 OSS"""
     import shutil
     import subprocess
     import tempfile
+    from PIL import Image
     from oss_helper import oss_download, oss_upload, oss_sign_get
 
     if not req.title.strip():
@@ -1267,27 +1369,33 @@ def generate_cover(req: CoverRequest):
                 raise HTTPException(410, '源视频已过期 (>1 天 OSS 自动清理), 重新合成一遍.')
             raise HTTPException(400, f'OSS 下载失败: {err[:200]}')
 
-        # 2. 每个比例输出一张
+        # 2. 每个比例: ffmpeg 截帧 + scale+crop → Pillow 叠字 → 保存
         results = []
         for ratio in req.output_ratios:
             if ratio not in _COVER_DIMS:
                 continue
             W, H = _COVER_DIMS[ratio]
-            out_jpg = os.path.join(work_dir, f"cover_{ratio.replace(':', 'x')}.jpg")
+            base_jpg = os.path.join(work_dir, f"base_{ratio.replace(':', 'x')}.jpg")
 
-            # 滤镜: 截帧 → scale+crop 到目标尺寸 → 模板叠字
-            template_filter = _build_template_filter(req.template, req.title, req.subtitle, W, H)
-            vf = (
-                f"scale={W}:{H}:force_original_aspect_ratio=increase,"
-                f"crop={W}:{H},"
-                f"{template_filter}"
-            )
+            # ffmpeg 只负责截帧 + 缩放 (无文字), Pillow 负责所有文字效果
             cmd = ["ffmpeg", "-y", "-ss", f"{req.frame_time:.3f}", "-i", src_path,
-                   "-frames:v", "1", "-vf", vf, "-q:v", "2", out_jpg]
+                   "-frames:v", "1",
+                   "-vf", f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}",
+                   "-q:v", "2", base_jpg]
             proc = subprocess.run(cmd, capture_output=True, timeout=60)
-            if proc.returncode != 0 or not os.path.exists(out_jpg):
+            if proc.returncode != 0 or not os.path.exists(base_jpg):
                 err = proc.stderr.decode("utf-8", errors="ignore")[-400:]
-                print(f"[cover] ratio {ratio} 失败: {err}", flush=True)
+                print(f"[cover] {ratio} 截帧失败: {err}", flush=True)
+                continue
+
+            # Pillow 渲染叠字
+            try:
+                img = Image.open(base_jpg).convert('RGB')
+                img = _render_template_pillow(img, req.template, req.title, req.subtitle)
+                out_jpg = os.path.join(work_dir, f"cover_{ratio.replace(':', 'x')}.jpg")
+                img.save(out_jpg, 'JPEG', quality=92, optimize=True)
+            except Exception as e:
+                print(f"[cover] {ratio} Pillow 渲染失败: {e}", flush=True)
                 continue
 
             # 上传 OSS
