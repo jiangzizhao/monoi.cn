@@ -144,12 +144,17 @@ export function CoverGeneratorForm({ defaultVideoOssKey, defaultVideoUrl, onClos
       }
       const covers = data.covers || []
       setResults(covers)
+      // covers 空 = 后端说成功但所有比例都被跳过 (大概率是图源坏掉或 Pillow 渲染失败)
+      // 不能静默, 否则用户看不到为啥没结果
+      if (covers.length === 0) {
+        throw new Error('后端返回 0 张封面, 检查图源/字体/比例是否有问题 (打开 Windows voice-server 日志看)')
+      }
       // 把封面注入对话流 (跟合成完成体验一致)
       const convId = chatStore.activeId
-      if (convId && covers.length > 0) {
+      if (convId) {
         const msg = makeAssistantMsg([
           { type: 'cover_result', data: { covers } },
-          { type: 'text', content: `封面已生成 ${covers.length} 张. 下一步?` },
+          { type: 'text', content: `封面已生成 ${covers.length} 张` },
           {
             type: 'choices',
             question: '下一步',
@@ -160,9 +165,9 @@ export function CoverGeneratorForm({ defaultVideoOssKey, defaultVideoUrl, onClos
           },
         ])
         chatStore.addMessage(convId, msg)
-        // 1 秒后自动关弹窗, 用户回到对话流看结果 + 操作
-        setTimeout(() => onClose(), 1000)
       }
+      // 立刻关弹窗 (跟合成完成的行为对齐, 不再等 1 秒)
+      onClose()
     } catch (e: any) {
       setError(e.message || '生成失败')
     } finally {
