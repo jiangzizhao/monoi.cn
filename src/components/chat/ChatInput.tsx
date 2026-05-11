@@ -72,6 +72,18 @@ export function ChatInput({ moduleMenu, onModuleClick, onModuleMenuClose }: Prop
   const { isGenerating, conversations, activeId } = useChatStore()
   const { send, stop } = useChat()
 
+  // 监听 useChat 派发的"打开表单"事件 (从消息气泡里的选项按钮触发, 比如合成完成后点"生成封面")
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const id = (e as CustomEvent<string>).detail
+      pickModuleOption(id)
+    }
+    window.addEventListener('monoi:open-form', handler)
+    return () => window.removeEventListener('monoi:open-form', handler)
+    // pickModuleOption 是组件内闭包, 不会变, 故无依赖
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()

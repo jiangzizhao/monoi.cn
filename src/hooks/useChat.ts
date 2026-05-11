@@ -725,6 +725,18 @@ export function useChat() {
     const convId = store.activeId
     if (!convId) return
     store.chooseOption(convId, msgId, blockIdx, opt.id)
+    // 表单开启 sentinel: 不发给 LLM, 通知 ChatInput 弹对应表单
+    // (跟 __dialect__/__digital_human_video__ 这种"带 payload 给 LLM" 的 sentinel 区分: 这些只是 UI 信号)
+    const FORM_SENTINELS = new Set([
+      '__form_original__', '__form_rewrite__', '__form_paste__',
+      '__voice_preset__', '__voice_upload__', '__voice_clone__',
+      '__digital_human__', '__narration_video__',
+      '__form_footage__', '__form_cover__',
+    ])
+    if (FORM_SENTINELS.has(opt.id)) {
+      window.dispatchEvent(new CustomEvent('monoi:open-form', { detail: opt.id }))
+      return
+    }
     // __ 前缀的 id 是内部 payload (走特殊处理), 用 id 触发; 否则用 label (作为对话文本)
     send(opt.id.startsWith('__') ? opt.id : opt.label)
   }, [store, send])
