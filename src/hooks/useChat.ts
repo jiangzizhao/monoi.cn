@@ -731,7 +731,7 @@ export function useChat() {
       '__form_original__', '__form_rewrite__', '__form_paste__',
       '__voice_preset__', '__voice_upload__', '__voice_clone__',
       '__digital_human__', '__narration_video__',
-      '__form_footage__', '__form_cover__',
+      '__form_footage__', '__form_cover__', '__form_publish__',
     ])
     if (FORM_SENTINELS.has(opt.id)) {
       window.dispatchEvent(new CustomEvent('monoi:open-form', { detail: opt.id }))

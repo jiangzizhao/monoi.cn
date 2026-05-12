@@ -159,7 +159,8 @@ export function CoverGeneratorForm({ defaultVideoOssKey, defaultVideoUrl, onClos
             type: 'choices',
             question: '下一步',
             options: [
-              { id: '帮我生成各平台的发布文案', label: '发布', description: '生成各平台标题描述, 准备发布' },
+              { id: '__form_publish__', label: '去发布', description: '弹起 Edge 自动上传到小红书/抖音' },
+              { id: '帮我生成各平台的发布文案', label: '先生成发布文案', description: 'AI 给每平台写标题/描述/标签' },
               { id: '保留封面, 暂不做下一步', label: '保留封面', description: '稍后再决定' },
             ],
           },

@@ -9,6 +9,7 @@ import { DigitalHumanForm } from './forms/DigitalHumanForm'
 import { NarrationVideoForm } from './forms/NarrationVideoForm'
 import { FootageMatchForm } from './forms/FootageMatchForm'
 import { CoverGeneratorForm } from './forms/CoverGeneratorForm'
+import { PublishForm } from './forms/PublishForm'
 
 const MODULES: { label: string; Icon: LucideIcon }[] = [
   { label: '文案',  Icon: FileText  },
@@ -47,7 +48,8 @@ const MODULE_OPTIONS: Record<string, { id: string; label: string; desc: string }
     { id: '__form_cover__', label: '生成封面', desc: '截帧 + 5 个模板, 输出多比例; 也能上传自传' },
   ],
   '发布': [
-    { id: '帮我生成各平台的发布文案', label: '生成发布文案', desc: '抖音/小红书/视频号/B站' },
+    { id: '__form_publish__', label: '去发布', desc: '弹起 Edge 自动上传到小红书/抖音, 你审稿后点发布' },
+    { id: '帮我生成各平台的发布文案', label: '生成发布文案', desc: '让 AI 先为每平台生成标题描述标签' },
   ],
   '导出': [
     { id: '告诉我推荐的导出参数', label: '查看导出参数', desc: 'H.264 / 1080p 最佳设置' },
@@ -68,6 +70,7 @@ export function ChatInput({ moduleMenu, onModuleClick, onModuleMenuClose }: Prop
   const [narrationVideoForm, setNarrationVideoForm] = useState(false)
   const [footageForm, setFootageForm] = useState(false)
   const [coverForm, setCoverForm] = useState(false)
+  const [publishForm, setPublishForm] = useState(false)
   const textRef = useRef<HTMLTextAreaElement>(null)
   const { isGenerating, conversations, activeId } = useChatStore()
   const { send, stop } = useChat()
@@ -122,6 +125,8 @@ export function ChatInput({ moduleMenu, onModuleClick, onModuleMenuClose }: Prop
       setFootageForm(true)
     } else if (optId === '__form_cover__') {
       setCoverForm(true)
+    } else if (optId === '__form_publish__') {
+      setPublishForm(true)
     } else {
       send(optId)
     }
@@ -236,6 +241,9 @@ export function ChatInput({ moduleMenu, onModuleClick, onModuleMenuClose }: Prop
             />
           )
         })()}
+        {publishForm && (
+          <PublishForm onClose={() => setPublishForm(false)}/>
+        )}
 
         {/* Module option popup */}
         {moduleMenu && options.length > 0 && (
