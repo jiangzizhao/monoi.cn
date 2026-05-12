@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { ArrowUp, FileText, Mic, Video, Film, Scissors, Image, Send, Download } from 'lucide-react'
+import { ArrowUp, FileText, Mic, Video } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useChatStore } from '../../store/chatStore'
 import { useChat } from '../../hooks/useChat'
@@ -11,15 +11,12 @@ import { FootageMatchForm } from './forms/FootageMatchForm'
 import { CoverGeneratorForm } from './forms/CoverGeneratorForm'
 import { PublishForm } from './forms/PublishForm'
 
+// 底部入口: 只放真正"从零开始"的功能. 流程中段的 (素材/剪辑/封面/发布/导出) 通过
+// 上一步完成后的 chat 选项按钮自然进入, 不在工具栏重复.
 const MODULES: { label: string; Icon: LucideIcon }[] = [
   { label: '文案',  Icon: FileText  },
   { label: '配音',  Icon: Mic       },
   { label: '口播',  Icon: Video     },
-  { label: '素材',  Icon: Film      },
-  { label: '剪辑',  Icon: Scissors  },
-  { label: '封面',  Icon: Image     },
-  { label: '发布',  Icon: Send      },
-  { label: '导出',  Icon: Download  },
 ]
 
 const MODULE_OPTIONS: Record<string, { id: string; label: string; desc: string }[]> = {
