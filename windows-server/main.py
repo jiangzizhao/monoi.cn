@@ -266,10 +266,18 @@ def init_db():
 
 init_db()
 
+# 商业化模块 (会员/积分/推广)
+import billing
+billing.init_billing_tables()
+app.include_router(billing.router)
+app.include_router(billing.referral_router)
+
+
 class RegisterRequest(BaseModel):
     username: str
     email: str
     password: str
+    referral_code: Optional[str] = None      # 可选: 通过谁的推广码注册
 
 class LoginRequest(BaseModel):
     email: str
@@ -321,14 +329,31 @@ def register(req: RegisterRequest):
     conn = get_db()
     try:
         hashed = hash_password(req.password)
-        conn.execute("INSERT INTO users (username, email, password) VALUES (?, ?, ?)",
-                     (req.username, req.email, hashed))
+        cursor = conn.execute("INSERT INTO users (username, email, password) VALUES (?, ?, ?)",
+                              (req.username, req.email, hashed))
+        new_user_id = cursor.lastrowid
         conn.commit()
-        return {"success": True, "message": "注册成功"}
     except sqlite3.IntegrityError:
         raise HTTPException(400, "用户名或邮箱已存在")
     finally:
         conn.close()
+
+    # 商业化: 给新用户建推广员状态 (拿到推广码) + 绑定推广关系 (如果有 referral_code)
+    try:
+        billing.ensure_referrer_status(new_user_id)
+        if req.referral_code:
+            billing.bind_referrer(new_user_id, req.referral_code.strip().upper())
+        # 给免费用户 50 体验积分 (一次性)
+        billing.add_credits(new_user_id, FREE_PLAN_INIT_CREDITS, 'subscription_grant',
+                             feature='free_signup', to_monthly=False)
+    except Exception as e:
+        # 推广/积分初始化失败不影响注册主流程
+        print(f"[register] billing 初始化失败 user={new_user_id}: {e}", flush=True)
+
+    return {"success": True, "message": "注册成功"}
+
+
+FREE_PLAN_INIT_CREDITS = 50    # 免费用户注册一次性送的积分
 
 @app.post("/api/login")
 def login(req: LoginRequest):

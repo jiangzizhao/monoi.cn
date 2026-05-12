@@ -1,0 +1,829 @@
+"""monoi 商业化模块: 会员套餐 + 积分扣减 + 三级推广
+
+设计文档: docs/business-model.md
+
+模块结构:
+- 套餐 / 积分包 / 扣减规则 配置 (PLANS / CREDIT_PACKS / CONSUME_RATES)
+- 9 张新表初始化 (init_billing_tables)
+- 积分 helpers (get_balance / consume_credits / add_credits)
+- 订阅 helpers (get_user_subscription / activate_subscription)
+- 推广 helpers (bind_referrer / get_referrer_level / write_commission)
+- FastAPI router (/api/billing/*, /api/referral/*)
+
+V1 阶段:
+- 数据库: SQLite (跟 main.py monoi.db 同库, 等迁 RDS MySQL 时一起改 SQL 占位符)
+- 支付: 暂时 mock (admin 后台手工开通), V2 接微信/支付宝
+- 退款: 不退款 (设计已定)
+"""
+
+import sqlite3
+import time
+import uuid
+import secrets
+from typing import Optional
+from fastapi import APIRouter, HTTPException, Depends, Request
+from pydantic import BaseModel
+
+
+DB_PATH = "monoi.db"
+
+
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+# ============================== 套餐 / 积分包 / 扣减规则 配置 ==============================
+
+
+# 套餐 (tier → 配置). free 用户不需要在 DB 里建订阅 row, 默认就是 free
+PLANS = {
+    'pro_monthly': {
+        'name': 'Pro',
+        'price_yuan': 99,
+        'period_days': 30,
+        'monthly_credits': 1500,
+        'credit_pack_rate': 15,        # 加买积分 ¥1=15 (1.5x 标准)
+        'digital_human_quota': 30,      # 月配额, 超出走积分扣
+        'clone_voice_slots': 1,
+        'priority_gpu': False,
+        'commercial_license': False,
+        'watermark': False,
+    },
+    'max_monthly': {
+        'name': 'Max',
+        'price_yuan': 199,
+        'period_days': 30,
+        'monthly_credits': 4000,
+        'credit_pack_rate': 20,        # ¥1=20 (2x)
+        'digital_human_quota': 100,
+        'clone_voice_slots': 3,
+        'priority_gpu': True,
+        'commercial_license': True,
+        'multi_platform_account': True,
+        'watermark': False,
+    },
+    'flagship_yearly': {
+        'name': '旗舰年卡',
+        'price_yuan': 2980,
+        'period_days': 365,
+        'monthly_credits': 5000,        # 每月均匀, 入账时按月入而不是一次性 60000
+        'yearly_total_credits': 60000,
+        'credit_pack_rate': 25,        # ¥1=25 (2.5x)
+        'digital_human_quota': 300,
+        'clone_voice_slots': 5,
+        'priority_gpu': True,
+        'commercial_license': True,
+        'multi_platform_account': True,
+        'team_seats': True,
+        'watermark': False,
+    },
+}
+
+
+# 免费用户默认权益 (没记 user_subscription row 时回退)
+FREE_PLAN = {
+    'name': '免费',
+    'price_yuan': 0,
+    'monthly_credits': 50,           # 一次性, 注册时给
+    'credit_pack_rate': 10,           # ¥1=10 标准
+    'digital_human_quota': 3,
+    'clone_voice_slots': 0,
+    'priority_gpu': False,
+    'commercial_license': False,
+    'watermark': True,
+}
+
+
+# 单独积分包
+CREDIT_PACKS = {
+    'pack_99': {'name': '体验包', 'price_yuan': 9.9, 'credits': 100},
+    'pack_49': {'name': '小包', 'price_yuan': 49, 'credits': 600},
+    'pack_199': {'name': '中包', 'price_yuan': 199, 'credits': 3000},
+    'pack_499': {'name': '大包', 'price_yuan': 499, 'credits': 8000},
+}
+
+
+# 积分扣减规则. unit_amount = 积分/秒 或 积分/次
+CONSUME_RULES = {
+    'voice_preset':     {'per_second': 0.5},        # 预设音色配音
+    'voice_clone':      {'per_second': 1.5},        # 克隆音色配音
+    'narration_clean':  {'fixed': 5},               # 口播剪辑导出
+    'compose_no_dh':    {'fixed': 10},              # 一键合成 (无数字人)
+    'digital_human':    {'per_second': 2.0},        # 数字人合成
+    # 0 积分功能 (基础福利)
+    'script':            {'fixed': 0},              # 文案生成
+    'footage_match':     {'fixed': 0},              # 素材匹配
+    'cover_generate':    {'fixed': 0},              # 封面生成
+    'publish':           {'fixed': 0},              # 自动发布
+}
+
+
+# 推广分成规则
+COMMISSION_RULES = {
+    'normal': {                                     # 普通用户 (积分奖励)
+        'register_bonus_credits': 30,               # 推荐注册双方各 30 积分
+        'first_order_credit_pct': 0.30,             # 首单 30% 等值积分
+        'renewal_credit_pct': 0,                    # 续费不给积分 (防止持续被动收入)
+        'flagship_credit_cap': 3000,                # 旗舰版积分奖励上限 3000 (防刷)
+        'invitee_bonus_pct': 0.10,                  # 被推荐人额外 10% 积分
+    },
+    'certified': {                                  # 认证推广员 (现金, 累计 5 人 / ¥500)
+        'first_order_cash_pct': 0.30,
+        'renewal_cash_pct': 0.10,
+        'renewal_months': 3,                        # 续费分成只算前 3 个月
+        'min_withdraw_yuan': 100,
+        'trigger_paying_users': 5,
+        'trigger_revenue_yuan': 500,
+    },
+    'partner': {                                    # 核心合伙人 (月推 20 人 / ¥3000)
+        'first_order_cash_pct': 0.50,
+        'renewal_cash_pct': 0.15,
+        'renewal_months': 3,
+        'min_withdraw_yuan': 100,
+        'trigger_monthly_paying_users': 20,
+        'trigger_monthly_revenue_yuan': 3000,
+    },
+}
+
+
+# ============================== Schema 初始化 ==============================
+
+
+def init_billing_tables():
+    """在 monoi.db 里创建 9 张商业化表 (CREATE TABLE IF NOT EXISTS, 已建跳过)"""
+    conn = get_db()
+    c = conn.cursor()
+
+    # 1. 用户订阅
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS user_subscription (
+            user_id INTEGER PRIMARY KEY,
+            tier TEXT NOT NULL,
+            current_period_start REAL NOT NULL,
+            current_period_end REAL NOT NULL,
+            auto_renew INTEGER DEFAULT 1,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL
+        )
+    """)
+
+    # 2. 积分余额 (两个 bucket: 月送 + 加买)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS credit_balance (
+            user_id INTEGER PRIMARY KEY,
+            monthly_credits INTEGER DEFAULT 0,
+            monthly_credits_reset_at REAL,
+            purchased_credits INTEGER DEFAULT 0,
+            updated_at REAL NOT NULL
+        )
+    """)
+
+    # 3. 积分流水
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS credit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            feature TEXT,
+            delta INTEGER NOT NULL,
+            source TEXT NOT NULL,
+            ref_id TEXT,
+            created_at REAL NOT NULL
+        )
+    """)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_credit_log_user ON credit_log(user_id, created_at DESC)")
+
+    # 4. 订单 (套餐 + 积分包)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS billing_orders (
+            id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            order_type TEXT NOT NULL,
+            product_code TEXT NOT NULL,
+            amount_yuan REAL NOT NULL,
+            credits_added INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'pending',
+            payment_method TEXT,
+            paid_at REAL,
+            refunded_at REAL,
+            referrer_id INTEGER,
+            created_at REAL NOT NULL
+        )
+    """)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_billing_orders_user ON billing_orders(user_id, created_at DESC)")
+
+    # 5. 推广绑定 (用户首次注册时记, 终身不变)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS referral_binding (
+            user_id INTEGER PRIMARY KEY,
+            referrer_id INTEGER NOT NULL,
+            referral_code_used TEXT,
+            bound_at REAL NOT NULL
+        )
+    """)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_referral_binding_referrer ON referral_binding(referrer_id)")
+
+    # 6. 推广员等级状态
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS referrer_status (
+            user_id INTEGER PRIMARY KEY,
+            level TEXT DEFAULT 'normal',
+            referral_code TEXT UNIQUE NOT NULL,
+            total_paying_users INTEGER DEFAULT 0,
+            total_revenue_brought REAL DEFAULT 0,
+            month_paying_users INTEGER DEFAULT 0,
+            month_revenue_brought REAL DEFAULT 0,
+            month_stats_reset_at REAL,
+            alipay_account TEXT,
+            wechat_account TEXT,
+            level_upgraded_at REAL,
+            updated_at REAL NOT NULL
+        )
+    """)
+
+    # 7. 佣金流水
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS commission_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id TEXT NOT NULL,
+            beneficiary_user_id INTEGER NOT NULL,
+            beneficiary_level TEXT NOT NULL,
+            commission_type TEXT NOT NULL,
+            renewal_month_index INTEGER,
+            credits INTEGER DEFAULT 0,
+            cash_yuan REAL DEFAULT 0,
+            status TEXT DEFAULT 'pending',
+            settled_at REAL,
+            created_at REAL NOT NULL
+        )
+    """)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_commission_log_beneficiary ON commission_log(beneficiary_user_id, created_at DESC)")
+
+    # 8. 推广员余额
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS referrer_balance (
+            user_id INTEGER PRIMARY KEY,
+            cash_balance REAL DEFAULT 0,
+            cash_withdrawn_total REAL DEFAULT 0,
+            updated_at REAL NOT NULL
+        )
+    """)
+
+    # 9. 提现申请
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS withdrawal_request (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            amount_yuan REAL NOT NULL,
+            payment_method TEXT NOT NULL,
+            account_info TEXT NOT NULL,
+            status TEXT DEFAULT 'pending',
+            admin_note TEXT,
+            created_at REAL NOT NULL,
+            processed_at REAL
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+    print("[billing] 9 张商业化表已初始化 (CREATE IF NOT EXISTS)", flush=True)
+
+
+# ============================== 积分 helpers ==============================
+
+
+def get_balance(user_id: int) -> dict:
+    """返回 { monthly, purchased, total }"""
+    conn = get_db()
+    row = conn.execute(
+        "SELECT monthly_credits, purchased_credits FROM credit_balance WHERE user_id = ?",
+        (user_id,)
+    ).fetchone()
+    conn.close()
+    if not row:
+        return {'monthly': 0, 'purchased': 0, 'total': 0}
+    return {
+        'monthly': row['monthly_credits'] or 0,
+        'purchased': row['purchased_credits'] or 0,
+        'total': (row['monthly_credits'] or 0) + (row['purchased_credits'] or 0),
+    }
+
+
+def consume_credits(user_id: int, feature: str, amount: int, ref_id: Optional[str] = None):
+    """扣积分. 优先扣 monthly, 不够扣 purchased. 不够抛 HTTPException(402)."""
+    if amount <= 0:
+        return  # 0 积分功能直接放过
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT monthly_credits, purchased_credits FROM credit_balance WHERE user_id = ?",
+            (user_id,)
+        ).fetchone()
+        monthly = row['monthly_credits'] if row else 0
+        purchased = row['purchased_credits'] if row else 0
+        total = (monthly or 0) + (purchased or 0)
+        if total < amount:
+            raise HTTPException(402, f"积分不足: 需要 {amount}, 当前余额 {total}. 升级套餐或加买积分.")
+        from_monthly = min(monthly or 0, amount)
+        from_purchased = amount - from_monthly
+        now = time.time()
+        conn.execute("""
+            UPDATE credit_balance
+            SET monthly_credits = monthly_credits - ?,
+                purchased_credits = purchased_credits - ?,
+                updated_at = ?
+            WHERE user_id = ?
+        """, (from_monthly, from_purchased, now, user_id))
+        conn.execute("""
+            INSERT INTO credit_log (user_id, feature, delta, source, ref_id, created_at)
+            VALUES (?, ?, ?, 'consume', ?, ?)
+        """, (user_id, feature, -amount, ref_id, now))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def add_credits(user_id: int, amount: int, source: str, ref_id: Optional[str] = None,
+                to_monthly: bool = False, feature: Optional[str] = None):
+    """加积分.
+    - to_monthly=True: 加到 monthly_credits (会员月送)
+    - to_monthly=False: 加到 purchased_credits (买的 / 推广奖励 / 退款)
+    """
+    if amount <= 0:
+        return
+    conn = get_db()
+    now = time.time()
+    # 确保 row 存在
+    conn.execute("""
+        INSERT OR IGNORE INTO credit_balance (user_id, monthly_credits, purchased_credits, updated_at)
+        VALUES (?, 0, 0, ?)
+    """, (user_id, now))
+    col = 'monthly_credits' if to_monthly else 'purchased_credits'
+    conn.execute(f"""
+        UPDATE credit_balance SET {col} = {col} + ?, updated_at = ? WHERE user_id = ?
+    """, (amount, now, user_id))
+    conn.execute("""
+        INSERT INTO credit_log (user_id, feature, delta, source, ref_id, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (user_id, feature, amount, source, ref_id, now))
+    conn.commit()
+    conn.close()
+
+
+def calculate_consume(feature: str, **params) -> int:
+    """根据 CONSUME_RULES 计算应扣积分.
+    - per_second 类: 传 duration (秒)
+    - fixed 类: 直接返回
+    """
+    rule = CONSUME_RULES.get(feature)
+    if not rule:
+        return 0
+    if 'fixed' in rule:
+        return int(rule['fixed'])
+    if 'per_second' in rule:
+        duration = params.get('duration', 0)
+        return max(1, int(rule['per_second'] * duration))
+    return 0
+
+
+# ============================== 订阅 helpers ==============================
+
+
+def get_user_subscription(user_id: int) -> dict:
+    """返回当前订阅. 没有或过期 = free 默认."""
+    conn = get_db()
+    row = conn.execute(
+        "SELECT * FROM user_subscription WHERE user_id = ?", (user_id,)
+    ).fetchone()
+    conn.close()
+    if not row:
+        return {'tier': 'free', 'expired': True, **FREE_PLAN}
+    sub = dict(row)
+    sub['expired'] = sub['current_period_end'] < time.time()
+    if sub['expired']:
+        sub['tier'] = 'free'
+        sub.update(FREE_PLAN)
+    else:
+        sub.update(PLANS.get(sub['tier'], {}))
+    return sub
+
+
+def activate_subscription(user_id: int, tier: str, payment_method: str = 'manual',
+                          referrer_id: Optional[int] = None, order_id: Optional[str] = None):
+    """开通/续费订阅. 加月度积分, 写订单, 触发推广佣金."""
+    if tier not in PLANS:
+        raise HTTPException(400, f"未知套餐 {tier}")
+    plan = PLANS[tier]
+    now = time.time()
+    end = now + plan['period_days'] * 86400
+
+    conn = get_db()
+    # upsert subscription
+    existing = conn.execute(
+        "SELECT current_period_end FROM user_subscription WHERE user_id = ?", (user_id,)
+    ).fetchone()
+    if existing and existing['current_period_end'] > now:
+        # 续费: 在原 period_end 基础上加
+        end = existing['current_period_end'] + plan['period_days'] * 86400
+        conn.execute("""
+            UPDATE user_subscription
+            SET tier = ?, current_period_end = ?, updated_at = ?
+            WHERE user_id = ?
+        """, (tier, end, now, user_id))
+    else:
+        # 新开或过期重开
+        conn.execute("""
+            INSERT OR REPLACE INTO user_subscription
+              (user_id, tier, current_period_start, current_period_end, auto_renew, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 1, ?, ?)
+        """, (user_id, tier, now, end, now, now))
+    conn.commit()
+    conn.close()
+
+    # 加月度积分
+    if plan['monthly_credits'] > 0:
+        add_credits(user_id, plan['monthly_credits'], 'subscription_grant',
+                    ref_id=order_id, to_monthly=True, feature=tier)
+
+    # 触发推广佣金 (在订单 webhook 里调用更合适, 这里留接口)
+    if referrer_id and order_id:
+        write_first_order_commission(order_id, referrer_id, user_id, plan['price_yuan'], tier)
+
+
+# ============================== 推广 helpers ==============================
+
+
+def gen_referral_code(user_id: int) -> str:
+    """生成 6 位推广码, 跟 user_id 关联. 没冲突就直接用."""
+    base = secrets.token_urlsafe(4).replace('_', '').replace('-', '')[:6].upper()
+    return f"M{user_id}{base[:4]}"  # 前缀 M + user_id + 4 位随机
+
+
+def ensure_referrer_status(user_id: int) -> dict:
+    """保证 referrer_status row 存在 (注册时调用)."""
+    conn = get_db()
+    row = conn.execute("SELECT * FROM referrer_status WHERE user_id = ?", (user_id,)).fetchone()
+    if row:
+        conn.close()
+        return dict(row)
+    code = gen_referral_code(user_id)
+    now = time.time()
+    conn.execute("""
+        INSERT INTO referrer_status (user_id, level, referral_code, total_paying_users,
+                                      total_revenue_brought, month_paying_users, month_revenue_brought,
+                                      month_stats_reset_at, updated_at)
+        VALUES (?, 'normal', ?, 0, 0, 0, 0, ?, ?)
+    """, (user_id, code, now, now))
+    conn.commit()
+    row = conn.execute("SELECT * FROM referrer_status WHERE user_id = ?", (user_id,)).fetchone()
+    conn.close()
+    return dict(row)
+
+
+def bind_referrer(user_id: int, referral_code: str) -> bool:
+    """用户首次注册时绑定推广关系. 已绑定则 no-op (终身不变)."""
+    conn = get_db()
+    existing = conn.execute(
+        "SELECT 1 FROM referral_binding WHERE user_id = ?", (user_id,)
+    ).fetchone()
+    if existing:
+        conn.close()
+        return False
+    referrer = conn.execute(
+        "SELECT user_id FROM referrer_status WHERE referral_code = ?", (referral_code,)
+    ).fetchone()
+    if not referrer or referrer['user_id'] == user_id:
+        conn.close()
+        return False
+    now = time.time()
+    conn.execute("""
+        INSERT INTO referral_binding (user_id, referrer_id, referral_code_used, bound_at)
+        VALUES (?, ?, ?, ?)
+    """, (user_id, referrer['user_id'], referral_code, now))
+    conn.commit()
+    conn.close()
+    # 双方各 30 积分 (注册奖励, 不依赖付费)
+    bonus = COMMISSION_RULES['normal']['register_bonus_credits']
+    add_credits(referrer['user_id'], bonus, 'referral', ref_id=f"register_{user_id}", feature='register_referrer')
+    add_credits(user_id, bonus, 'referral', ref_id=f"register_{referrer['user_id']}", feature='register_invitee')
+    return True
+
+
+def get_referrer_id(user_id: int) -> Optional[int]:
+    conn = get_db()
+    row = conn.execute(
+        "SELECT referrer_id FROM referral_binding WHERE user_id = ?", (user_id,)
+    ).fetchone()
+    conn.close()
+    return row['referrer_id'] if row else None
+
+
+def write_first_order_commission(order_id: str, referrer_id: int, buyer_id: int,
+                                  amount_yuan: float, product_code: str):
+    """订单首单 → 写推广佣金 + 推广员余额涨 + 检查升级."""
+    status = get_referrer_status_dict(referrer_id)
+    level = status['level']
+    now = time.time()
+
+    conn = get_db()
+    is_flagship = product_code == 'flagship_yearly'
+
+    if level == 'normal':
+        # 积分奖励: 30% 等值积分 (¥1=10 积分), 旗舰封顶 3000
+        pct = COMMISSION_RULES['normal']['first_order_credit_pct']
+        credits = int(amount_yuan * 10 * pct)
+        if is_flagship:
+            credits = min(credits, COMMISSION_RULES['normal']['flagship_credit_cap'])
+        invitee_bonus = int(amount_yuan * 10 * COMMISSION_RULES['normal']['invitee_bonus_pct'])
+        conn.execute("""
+            INSERT INTO commission_log (order_id, beneficiary_user_id, beneficiary_level,
+                                         commission_type, credits, cash_yuan, status, created_at)
+            VALUES (?, ?, 'normal', 'first_order', ?, 0, 'settled', ?)
+        """, (order_id, referrer_id, credits, now))
+        conn.commit()
+        conn.close()
+        # 真给积分
+        add_credits(referrer_id, credits, 'referral', ref_id=order_id, feature='first_order_referrer')
+        if invitee_bonus > 0:
+            add_credits(buyer_id, invitee_bonus, 'referral', ref_id=order_id, feature='first_order_invitee')
+    else:
+        # certified / partner: 现金奖励
+        rules = COMMISSION_RULES[level]
+        pct = rules['first_order_cash_pct']
+        cash = round(amount_yuan * pct, 2)
+        conn.execute("""
+            INSERT INTO commission_log (order_id, beneficiary_user_id, beneficiary_level,
+                                         commission_type, credits, cash_yuan, status, created_at)
+            VALUES (?, ?, ?, 'first_order', 0, ?, 'pending', ?)
+        """, (order_id, referrer_id, level, cash, now))
+        # 推广员余额涨
+        conn.execute("""
+            INSERT OR IGNORE INTO referrer_balance (user_id, cash_balance, cash_withdrawn_total, updated_at)
+            VALUES (?, 0, 0, ?)
+        """, (referrer_id, now))
+        conn.execute("""
+            UPDATE referrer_balance SET cash_balance = cash_balance + ?, updated_at = ? WHERE user_id = ?
+        """, (cash, now, referrer_id))
+        conn.commit()
+        conn.close()
+
+    # 更新 referrer 累计统计
+    update_referrer_stats(referrer_id, amount_yuan, is_new_paying_user=True)
+
+
+def get_referrer_status_dict(user_id: int) -> dict:
+    conn = get_db()
+    row = conn.execute("SELECT * FROM referrer_status WHERE user_id = ?", (user_id,)).fetchone()
+    conn.close()
+    if not row:
+        # 自动建一个 normal
+        return ensure_referrer_status(user_id)
+    return dict(row)
+
+
+def update_referrer_stats(referrer_id: int, amount_yuan: float, is_new_paying_user: bool):
+    """订单后更新 referrer 累计 + 月内统计, 检查升级."""
+    now = time.time()
+    conn = get_db()
+    # 月度统计重置 (跨自然月)
+    row = conn.execute("SELECT * FROM referrer_status WHERE user_id = ?", (referrer_id,)).fetchone()
+    if not row:
+        conn.close()
+        ensure_referrer_status(referrer_id)
+        return update_referrer_stats(referrer_id, amount_yuan, is_new_paying_user)
+    reset_at = row['month_stats_reset_at'] or 0
+    if now - reset_at > 30 * 86400:
+        conn.execute("""
+            UPDATE referrer_status SET month_paying_users = 0, month_revenue_brought = 0,
+                month_stats_reset_at = ? WHERE user_id = ?
+        """, (now, referrer_id))
+
+    paying_delta = 1 if is_new_paying_user else 0
+    conn.execute("""
+        UPDATE referrer_status SET
+            total_paying_users = total_paying_users + ?,
+            total_revenue_brought = total_revenue_brought + ?,
+            month_paying_users = month_paying_users + ?,
+            month_revenue_brought = month_revenue_brought + ?,
+            updated_at = ?
+        WHERE user_id = ?
+    """, (paying_delta, amount_yuan, paying_delta, amount_yuan, now, referrer_id))
+    conn.commit()
+
+    # 检查升级
+    after = conn.execute("SELECT * FROM referrer_status WHERE user_id = ?", (referrer_id,)).fetchone()
+    new_level = after['level']
+    cert = COMMISSION_RULES['certified']
+    partner = COMMISSION_RULES['partner']
+    if after['level'] == 'normal':
+        if (after['total_paying_users'] >= cert['trigger_paying_users'] or
+            after['total_revenue_brought'] >= cert['trigger_revenue_yuan']):
+            new_level = 'certified'
+    if (after['month_paying_users'] >= partner['trigger_monthly_paying_users'] or
+        after['month_revenue_brought'] >= partner['trigger_monthly_revenue_yuan']):
+        new_level = 'partner'
+    if new_level != after['level']:
+        conn.execute(
+            "UPDATE referrer_status SET level = ?, level_upgraded_at = ?, updated_at = ? WHERE user_id = ?",
+            (new_level, now, now, referrer_id)
+        )
+        conn.commit()
+        print(f"[billing] 推广员升级: user_id={referrer_id} {after['level']} → {new_level}", flush=True)
+    conn.close()
+
+
+# ============================== FastAPI Router ==============================
+
+
+router = APIRouter(prefix="/api/billing")
+referral_router = APIRouter(prefix="/api/referral")
+
+
+class SubscribeRequest(BaseModel):
+    tier: str                                       # pro_monthly / max_monthly / flagship_yearly
+    payment_method: str = 'manual'                  # V1 走 manual (admin 后台开), V2 接微信/支付宝
+
+
+class BuyCreditsRequest(BaseModel):
+    pack_code: str                                  # pack_99 / pack_49 / pack_199 / pack_499
+    payment_method: str = 'manual'
+
+
+def get_current_user_id(request: Request) -> int:
+    """从 JWT 或 session 拿 user_id. 先从 header 取 X-User-Id (跟 main.py 现有 auth 一致)."""
+    uid = request.headers.get('X-User-Id')
+    if not uid:
+        raise HTTPException(401, '未登录')
+    try:
+        return int(uid)
+    except ValueError:
+        raise HTTPException(401, '无效 user_id')
+
+
+@router.get("/plans")
+def list_plans():
+    """返回所有套餐 + 积分包配置 (前端展示用)"""
+    return {
+        'plans': PLANS,
+        'free': FREE_PLAN,
+        'credit_packs': CREDIT_PACKS,
+        'consume_rules': CONSUME_RULES,
+    }
+
+
+@router.get("/credits")
+def my_credits(request: Request):
+    user_id = get_current_user_id(request)
+    return get_balance(user_id)
+
+
+@router.get("/subscription")
+def my_subscription(request: Request):
+    user_id = get_current_user_id(request)
+    return get_user_subscription(user_id)
+
+
+@router.get("/credit-log")
+def my_credit_log(request: Request, limit: int = 50):
+    user_id = get_current_user_id(request)
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT * FROM credit_log WHERE user_id = ? ORDER BY created_at DESC LIMIT ?
+    """, (user_id, limit)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@router.post("/subscribe")
+def subscribe(req: SubscribeRequest, request: Request):
+    """开通/续费套餐. V1 手工模式 (admin 后台触发); V2 接支付前会先创建 pending 订单 + 跳支付."""
+    user_id = get_current_user_id(request)
+    if req.tier not in PLANS:
+        raise HTTPException(400, f"未知套餐: {req.tier}")
+    if req.payment_method != 'manual':
+        raise HTTPException(400, '支付通道还没接, V1 走 admin 手工开通')
+    # V1: 直接当作支付成功创建订单 + 开通 (只允许 admin / 测试用)
+    # 真上线时这条 endpoint 应该改成创建 pending order 返回支付二维码
+    plan = PLANS[req.tier]
+    order_id = f"ord_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}"
+    referrer_id = get_referrer_id(user_id)
+    now = time.time()
+    conn = get_db()
+    conn.execute("""
+        INSERT INTO billing_orders (id, user_id, order_type, product_code, amount_yuan,
+                                      status, payment_method, paid_at, referrer_id, created_at)
+        VALUES (?, ?, 'subscription', ?, ?, 'paid', ?, ?, ?, ?)
+    """, (order_id, user_id, req.tier, plan['price_yuan'], 'manual', now, referrer_id, now))
+    conn.commit()
+    conn.close()
+    activate_subscription(user_id, req.tier, payment_method='manual',
+                           referrer_id=referrer_id, order_id=order_id)
+    return {'success': True, 'order_id': order_id, 'tier': req.tier,
+            'message': f'已开通 {plan["name"]}'}
+
+
+@router.post("/buy-credits")
+def buy_credits(req: BuyCreditsRequest, request: Request):
+    user_id = get_current_user_id(request)
+    if req.pack_code not in CREDIT_PACKS:
+        raise HTTPException(400, f"未知积分包: {req.pack_code}")
+    if req.payment_method != 'manual':
+        raise HTTPException(400, '支付通道还没接, V1 走 admin 手工开通')
+    pack = CREDIT_PACKS[req.pack_code]
+    order_id = f"ord_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}"
+    referrer_id = get_referrer_id(user_id)
+    now = time.time()
+    conn = get_db()
+    conn.execute("""
+        INSERT INTO billing_orders (id, user_id, order_type, product_code, amount_yuan,
+                                      credits_added, status, payment_method, paid_at,
+                                      referrer_id, created_at)
+        VALUES (?, ?, 'credit_pack', ?, ?, ?, 'paid', ?, ?, ?, ?)
+    """, (order_id, user_id, req.pack_code, pack['price_yuan'], pack['credits'],
+          'manual', now, referrer_id, now))
+    conn.commit()
+    conn.close()
+    add_credits(user_id, pack['credits'], 'purchase', ref_id=order_id, feature=req.pack_code)
+    # 触发推广佣金
+    if referrer_id:
+        write_first_order_commission(order_id, referrer_id, user_id, pack['price_yuan'], req.pack_code)
+    return {'success': True, 'order_id': order_id, 'credits_added': pack['credits']}
+
+
+# ============================== Referral router ==============================
+
+
+@referral_router.get("/my-code")
+def my_referral_code(request: Request):
+    user_id = get_current_user_id(request)
+    status = ensure_referrer_status(user_id)
+    return {
+        'referral_code': status['referral_code'],
+        'link': f"https://monoi.cn/register?ref={status['referral_code']}",
+    }
+
+
+@referral_router.get("/status")
+def my_referrer_status(request: Request):
+    user_id = get_current_user_id(request)
+    return get_referrer_status_dict(user_id)
+
+
+@referral_router.get("/commissions")
+def my_commissions(request: Request, limit: int = 50):
+    user_id = get_current_user_id(request)
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT * FROM commission_log WHERE beneficiary_user_id = ?
+        ORDER BY created_at DESC LIMIT ?
+    """, (user_id, limit)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@referral_router.get("/balance")
+def my_referrer_balance(request: Request):
+    user_id = get_current_user_id(request)
+    conn = get_db()
+    row = conn.execute("SELECT * FROM referrer_balance WHERE user_id = ?", (user_id,)).fetchone()
+    conn.close()
+    if not row:
+        return {'cash_balance': 0, 'cash_withdrawn_total': 0}
+    return dict(row)
+
+
+class WithdrawRequest(BaseModel):
+    amount_yuan: float
+    payment_method: str         # 'alipay' / 'wechat'
+    account_info: str           # 真实姓名 + 账号
+
+
+@referral_router.post("/withdraw")
+def submit_withdraw(req: WithdrawRequest, request: Request):
+    user_id = get_current_user_id(request)
+    status = get_referrer_status_dict(user_id)
+    if status['level'] == 'normal':
+        raise HTTPException(403, '普通用户不能提现现金, 升级为认证推广员 (累计带 5 付费用户 或 ¥500 流水) 才行')
+    min_amount = COMMISSION_RULES[status['level']]['min_withdraw_yuan']
+    if req.amount_yuan < min_amount:
+        raise HTTPException(400, f'最低提现金额 ¥{min_amount}')
+
+    conn = get_db()
+    bal = conn.execute("SELECT cash_balance FROM referrer_balance WHERE user_id = ?", (user_id,)).fetchone()
+    if not bal or bal['cash_balance'] < req.amount_yuan:
+        conn.close()
+        raise HTTPException(400, '余额不足')
+    now = time.time()
+    cursor = conn.execute("""
+        INSERT INTO withdrawal_request (user_id, amount_yuan, payment_method, account_info, created_at)
+        VALUES (?, ?, ?, ?, ?)
+    """, (user_id, req.amount_yuan, req.payment_method, req.account_info, now))
+    wid = cursor.lastrowid
+    # 余额暂扣 (审核后不通过会回滚)
+    conn.execute("""
+        UPDATE referrer_balance SET cash_balance = cash_balance - ?, updated_at = ? WHERE user_id = ?
+    """, (req.amount_yuan, now, user_id))
+    conn.commit()
+    conn.close()
+    return {'success': True, 'withdrawal_id': wid, 'message': '提现申请已提交, 审核通过后转账到账'}
