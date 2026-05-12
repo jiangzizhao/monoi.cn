@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
-import { Menu, Plus } from 'lucide-react'
+import { Menu, Plus, User } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { ChatContainer } from '../chat/ChatContainer'
 import { ChatInput } from '../chat/ChatInput'
@@ -41,15 +42,20 @@ export function AppShell() {
 
       {/* Main */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-[var(--bg-chat)]">
-        {/* Mobile header */}
+        {/* Mobile/Tablet header (lg 以下显示) */}
         <div className="lg:hidden flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
           <button onClick={() => setSidebarOpen(true)} className="p-2 rounded-lg text-[var(--text-2)] hover:bg-[var(--bg-hover)] cursor-pointer transition-colors">
             <Menu size={20}/>
           </button>
           <span className="text-sm font-semibold text-[var(--text)]">monoi</span>
-          <button onClick={() => newConversation()} className="p-2 rounded-lg text-[var(--text-2)] hover:bg-[var(--bg-hover)] cursor-pointer transition-colors">
-            <Plus size={20}/>
-          </button>
+          <div className="flex items-center gap-1">
+            <button onClick={() => newConversation()} className="p-2 rounded-lg text-[var(--text-2)] hover:bg-[var(--bg-hover)] cursor-pointer transition-colors" title="新对话">
+              <Plus size={20}/>
+            </button>
+            <Link to="/app/account" className="p-2 rounded-lg text-[var(--text-2)] hover:bg-[var(--bg-hover)] cursor-pointer transition-colors" title="账户中心">
+              <User size={20}/>
+            </Link>
+          </div>
         </div>
 
         <ChatContainer/>
