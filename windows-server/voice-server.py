@@ -1627,6 +1627,135 @@ def generate_cover(req: CoverRequest):
         except: pass
 
 
+# ============== 自动发布 (Playwright + Edge persistent profile) ==============
+# 走 social_publisher 模块, 档 B 策略: 自动上传+填表+不点发布, 用户在 Edge 里审稿手动点
+
+
+class PublishStartRequest(BaseModel):
+    platform: str                                # 'xhs' / 'douyin'
+    video_oss_key: str                           # 视频 OSS key (sources/xxx 或 outputs/xxx)
+    cover_oss_key: Optional[str] = None          # 封面 OSS key (V1 暂不用, 平台自动截帧)
+    title: str = ""
+    description: str = ""
+    tags: list = []
+
+
+# 进程内 job 状态, 单进程 voice-server 用足够; 重启清空
+PUBLISH_JOBS: dict = {}
+
+
+def _publish_job_update(job_id: str, **kwargs):
+    if job_id not in PUBLISH_JOBS:
+        return
+    PUBLISH_JOBS[job_id].update(kwargs)
+    PUBLISH_JOBS[job_id]["updated_at"] = time.time()
+
+
+async def _run_publish_job(job_id: str, req: PublishStartRequest, video_local: str):
+    """后台异步 task: 调 social_publisher.publish_xxx 完成发布."""
+    import sys
+    sys.path.insert(0, os.path.dirname(__file__))
+    try:
+        from social_publisher import publish_xhs, publish_douyin
+    except ImportError as e:
+        _publish_job_update(job_id, status="failed", detail=f"social_publisher 模块没装: {e}")
+        return
+
+    try:
+        _publish_job_update(job_id, status="publishing",
+                            detail=f"启动 Edge 开始上传到 {req.platform}, 你在弹出的 Edge 窗口里审稿后点'发布'")
+        if req.platform == "xhs":
+            result = await publish_xhs(video_local, req.title, req.description, req.tags)
+        elif req.platform == "douyin":
+            result = await publish_douyin(video_local, req.title, req.description, req.tags)
+        else:
+            _publish_job_update(job_id, status="failed", detail=f"未知平台: {req.platform}")
+            return
+
+        if result.get("success"):
+            _publish_job_update(job_id, status="completed",
+                                detail=result.get("detail", "完成"))
+        else:
+            _publish_job_update(job_id, status="failed",
+                                detail=result.get("detail", "发布失败"))
+    except Exception as e:
+        _publish_job_update(job_id, status="failed", detail=f"异常: {type(e).__name__}: {e}")
+    finally:
+        # 清本地临时视频
+        try:
+            if os.path.exists(video_local):
+                os.unlink(video_local)
+        except Exception:
+            pass
+
+
+@app.post("/publish/start")
+async def publish_start(req: PublishStartRequest):
+    """发起发布任务. 立刻返 job_id, 后台 task 异步跑 publish_xxx."""
+    import asyncio
+    import tempfile
+    from oss_helper import oss_download
+
+    if req.platform not in ("xhs", "douyin"):
+        raise HTTPException(400, f"未知平台: {req.platform}")
+    if not req.video_oss_key:
+        raise HTTPException(400, "video_oss_key 不能为空")
+
+    job_id = f"pub_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}"
+    video_local = os.path.join(tempfile.gettempdir(), f"{job_id}_video.mp4")
+
+    PUBLISH_JOBS[job_id] = {
+        "job_id": job_id,
+        "platform": req.platform,
+        "title": req.title,
+        "status": "downloading",
+        "detail": "从 OSS 拉视频到本地...",
+        "started_at": time.time(),
+        "updated_at": time.time(),
+    }
+
+    # 同步下载视频 (避免在 async task 里下载阻塞 — 直接在 endpoint 里下完再启动 task)
+    try:
+        oss_download(req.video_oss_key, video_local)
+        size_mb = os.path.getsize(video_local) / 1024 / 1024
+        _publish_job_update(job_id, detail=f"视频已下载 ({size_mb:.1f} MB), 准备启动 Edge")
+    except Exception as e:
+        err = str(e)
+        if "NoSuchKey" in err or "404" in err:
+            _publish_job_update(job_id, status="failed",
+                                detail="视频已过期 (OSS lifecycle 1 天), 重新合成后再发布")
+        else:
+            _publish_job_update(job_id, status="failed", detail=f"OSS 下载失败: {err[:200]}")
+        return {"job_id": job_id}
+
+    # 启动后台 task, 立刻返回
+    asyncio.create_task(_run_publish_job(job_id, req, video_local))
+    return {"job_id": job_id}
+
+
+@app.get("/publish/status/{job_id}")
+def publish_status(job_id: str):
+    """查发布 job 状态. 前端轮询用."""
+    job = PUBLISH_JOBS.get(job_id)
+    if not job:
+        raise HTTPException(404, f"job 不存在: {job_id}")
+    return job
+
+
+@app.get("/publish/check-login/{platform}")
+async def publish_check_login(platform: str):
+    """探测平台登录态. 前端在弹发布弹窗前先调这个, 没登录就引导用户去 Windows 上扫码."""
+    import sys
+    sys.path.insert(0, os.path.dirname(__file__))
+    try:
+        from social_publisher import check_login
+        result = await check_login(platform)
+        return result
+    except Exception as e:
+        return {"logged_in": False, "platform": platform,
+                "detail": f"探测失败: {type(e).__name__}: {e}"}
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=9001)

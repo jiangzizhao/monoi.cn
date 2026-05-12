@@ -1880,6 +1880,48 @@ def proxy_narration_video(name: str):
     return FileResponse(file_path, media_type="video/mp4")
 
 
+# ============== 自动发布代理 (转发到 voice-server 的 /publish/* ) ==============
+
+
+@app.post("/api/publish/start")
+def publish_start_proxy(req: dict):
+    """转发到 voice-server: 起 Edge persistent profile 自动上传 + 填表, 立刻返 job_id"""
+    import requests as _req
+    try:
+        resp = _req.post(f"{VOICE_SERVER_URL}/publish/start", json=req, timeout=60)
+        if resp.status_code != 200:
+            raise HTTPException(resp.status_code, f"voice-server 错误: {resp.text[:300]}")
+        return resp.json()
+    except _req.exceptions.ConnectionError:
+        raise HTTPException(503, "voice-server (9001) 未启动")
+
+
+@app.get("/api/publish/status/{job_id}")
+def publish_status_proxy(job_id: str):
+    """查发布 job 状态 (前端轮询用)"""
+    import requests as _req
+    try:
+        resp = _req.get(f"{VOICE_SERVER_URL}/publish/status/{job_id}", timeout=10)
+        if resp.status_code != 200:
+            raise HTTPException(resp.status_code, f"voice-server 错误: {resp.text[:300]}")
+        return resp.json()
+    except _req.exceptions.ConnectionError:
+        raise HTTPException(503, "voice-server (9001) 未启动")
+
+
+@app.get("/api/publish/check-login/{platform}")
+def publish_check_login_proxy(platform: str):
+    """探测平台登录态. 没登录前端引导用户去 Windows 上手动 login"""
+    import requests as _req
+    try:
+        resp = _req.get(f"{VOICE_SERVER_URL}/publish/check-login/{platform}", timeout=120)
+        if resp.status_code != 200:
+            raise HTTPException(resp.status_code, f"voice-server 错误: {resp.text[:300]}")
+        return resp.json()
+    except _req.exceptions.ConnectionError:
+        raise HTTPException(503, "voice-server (9001) 未启动")
+
+
 @app.get("/api/voice/audio-index/{name}")
 def proxy_audio_index(name: str):
     """IndexTTS 输出音频代理"""
