@@ -394,6 +394,15 @@ async def inspect_after_upload(platform: str, video_path: str):
         print(msg)
         lines.append(msg)
 
+    # 提前验视频文件 size: 0 字节直接劝退, 别白等 5 分钟
+    try:
+        size_mb = os.path.getsize(video_path) / 1024 / 1024
+    except Exception:
+        size_mb = 0
+    if size_mb < 0.1:
+        print(f"!! 视频文件太小 ({size_mb:.2f} MB), 可能是空文件 / OSS 下载失败. 换一个再试.")
+        return
+
     pw, context = await launch_edge_persistent(headless=False)
     try:
         page = await context.new_page()
@@ -402,7 +411,7 @@ async def inspect_after_upload(platform: str, video_path: str):
         await page.wait_for_timeout(10000)
 
         log(f"========== {platform} 上传后 DOM 探测 ==========")
-        log(f"视频: {video_path} ({os.path.getsize(video_path) / 1024 / 1024:.1f} MB)")
+        log(f"视频: {video_path} ({size_mb:.1f} MB)")
         log(f"上传前 URL: {page.url}")
 
         # set_input_files 直接喂给 file input (隐藏可见都能用)
@@ -520,14 +529,23 @@ async def inspect_after_upload(platform: str, video_path: str):
             await page.wait_for_event("close", timeout=60000)
         except Exception:
             pass
-    finally:
-        await context.close()
-        await pw.stop()
-
-    dump_path = os.path.join(os.path.dirname(__file__), f"inspect_{platform}_after_dump.txt")
-    try:
-        with open(dump_path, "w", encoding="utf-8") as f:
-            f.write("\n".join(lines))
-        print(f"\n>>> dump 已写入: {dump_path}")
     except Exception as e:
-        print(f">>> 写 dump 文件失败: {e}")
+        # 用户中途关 Edge 会触发 TargetClosedError, 把已收集的 dump 落盘比报错重要
+        log(f"\n!! 异常中断: {type(e).__name__}: {e}")
+    finally:
+        # 先写 dump (即使浏览器还没关), 再清浏览器 — 保证 dump 一定能写出来
+        dump_path = os.path.join(os.path.dirname(__file__), f"inspect_{platform}_after_dump.txt")
+        try:
+            with open(dump_path, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines))
+            print(f"\n>>> dump 已写入: {dump_path}")
+        except Exception as ex:
+            print(f">>> 写 dump 文件失败: {ex}")
+        try:
+            await context.close()
+        except Exception:
+            pass
+        try:
+            await pw.stop()
+        except Exception:
+            pass
