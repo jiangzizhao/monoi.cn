@@ -202,11 +202,11 @@ function SentenceRow({ item, index, selected, onToggle, onRefresh, onAddAsset }:
       {expanded && (
         <div className="px-3.5 pb-3">
           {item.loadingAssets ? (
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
               {[...Array(6)].map((_, i) => <div key={i} className="aspect-video rounded-lg bg-[var(--bg-hover)] animate-pulse"/>)}
             </div>
           ) : item.assets && item.assets.length > 0 ? (
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
               {item.assets.map(a => (
                 <AssetThumb key={`${a.source}-${a.id}`} asset={a} selected={isSelected(a)} onSelect={() => onToggle(a)}/>
               ))}

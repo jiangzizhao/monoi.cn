@@ -18,52 +18,52 @@ export default function Landing() {
   return (
     <div className="min-h-screen bg-[var(--bg)] flex flex-col">
       {/* Nav */}
-      <nav className="flex items-center justify-between px-8 py-4 border-b border-[var(--border)]">
+      <nav className="flex items-center justify-between px-4 sm:px-8 py-3 sm:py-4 border-b border-[var(--border)]">
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-xl bg-[var(--text)] flex items-center justify-center text-[var(--bg)] font-bold text-sm">M</div>
           <span className="font-semibold text-[var(--text)]">monoi</span>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
           <button onClick={() => nav('/login')}
-            className="px-4 py-2 text-sm text-[var(--text-2)] hover:text-[var(--text)] transition-colors cursor-pointer">
+            className="px-3 sm:px-4 py-2 text-sm text-[var(--text-2)] hover:text-[var(--text)] transition-colors cursor-pointer">
             登录
           </button>
           <button onClick={() => nav('/register')}
-            className="px-4 py-2 text-sm bg-[var(--text)] hover:opacity-80 text-[var(--bg)] rounded-xl transition-all cursor-pointer font-medium">
+            className="px-3 sm:px-4 py-2 text-sm bg-[var(--text)] hover:opacity-80 text-[var(--bg)] rounded-xl transition-all cursor-pointer font-medium">
             免费注册
           </button>
         </div>
       </nav>
 
       {/* Hero */}
-      <div className="flex flex-col items-center justify-center flex-1 px-6 py-24 text-center">
+      <div className="flex flex-col items-center justify-center flex-1 px-4 sm:px-6 py-12 sm:py-24 text-center">
         <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--bg-hover)] border border-[var(--border)] text-[var(--text-2)] text-xs mb-6">
           <Sparkles size={12}/> AI 驱动的口播视频全流程工具
         </div>
-        <h1 className="text-5xl font-bold text-[var(--text)] mb-4 leading-tight">
+        <h1 className="text-3xl sm:text-5xl font-bold text-[var(--text)] mb-4 leading-tight">
           从文案到成片<br/>
           <span className="text-[var(--text-2)]">一站搞定</span>
         </h1>
-        <p className="text-lg text-[var(--text-2)] max-w-md mb-10">
+        <p className="text-base sm:text-lg text-[var(--text-2)] max-w-md mb-8 sm:mb-10">
           monoi 帮你完成口播视频制作的每一个环节，文案、配音、数字人、素材、剪辑、发布，全流程 AI 辅助。
         </p>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto">
           <button onClick={() => nav('/register')}
-            className="flex items-center gap-2 px-6 py-3 bg-[var(--text)] hover:opacity-80 text-[var(--bg)] rounded-xl font-medium transition-all cursor-pointer">
+            className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3 bg-[var(--text)] hover:opacity-80 text-[var(--bg)] rounded-xl font-medium transition-all cursor-pointer">
             免费开始 <ArrowRight size={16}/>
           </button>
           <button onClick={() => nav('/login')}
-            className="px-6 py-3 border border-[var(--border)] text-[var(--text-2)] hover:text-[var(--text)] hover:border-[var(--text-3)] rounded-xl font-medium transition-colors cursor-pointer">
+            className="w-full sm:w-auto px-6 py-3 border border-[var(--border)] text-[var(--text-2)] hover:text-[var(--text)] hover:border-[var(--text-3)] rounded-xl font-medium transition-colors cursor-pointer">
             已有账号登录
           </button>
         </div>
       </div>
 
       {/* Modules */}
-      <div className="px-8 pb-24">
+      <div className="px-4 sm:px-8 pb-12 sm:pb-24">
         <div className="max-w-4xl mx-auto">
           <p className="text-center text-sm text-[var(--text-3)] mb-6">覆盖口播视频制作全流程</p>
-          <div className="grid grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {MODULES.map(({ Icon, label, desc }) => (
               <div key={label}
                 className="flex flex-col gap-2 p-4 rounded-xl bg-[var(--bg-card)] border border-[var(--border)]">
@@ -77,7 +77,7 @@ export default function Landing() {
       </div>
 
       {/* Footer */}
-      <div className="border-t border-[var(--border)] px-8 py-4 text-center text-xs text-[var(--text-3)]">
+      <div className="border-t border-[var(--border)] px-4 sm:px-8 py-4 text-center text-xs text-[var(--text-3)]">
         © 2025 monoi · 专为中文自媒体创作者设计
       </div>
     </div>

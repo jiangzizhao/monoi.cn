@@ -410,7 +410,7 @@ export function CoverGeneratorForm({ defaultVideoOssKey, defaultVideoUrl, onClos
                     <div className="text-xs text-[var(--text-2)]">主标题字体</div>
                     {fontTitle && <button onClick={() => setFontTitle('')} className="text-[10px] text-[var(--text-3)] hover:text-[var(--text)] cursor-pointer">恢复默认</button>}
                   </div>
-                  <div className="grid grid-cols-4 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
                     {/* 默认卡片 */}
                     <button
                       onClick={() => setFontTitle('')}
@@ -441,7 +441,7 @@ export function CoverGeneratorForm({ defaultVideoOssKey, defaultVideoUrl, onClos
                     <div className="text-xs text-[var(--text-2)]">副标题字体</div>
                     {fontSubtitle && <button onClick={() => setFontSubtitle('')} className="text-[10px] text-[var(--text-3)] hover:text-[var(--text)] cursor-pointer">恢复默认</button>}
                   </div>
-                  <div className="grid grid-cols-4 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
                     <button
                       onClick={() => setFontSubtitle('')}
                       className={`flex flex-col items-start gap-1 px-3 py-2 rounded-lg border text-left transition-all cursor-pointer ${

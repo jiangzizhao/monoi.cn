@@ -142,7 +142,7 @@ export function MessageBubble({ message, ...props }: Props) {
     if (visibleBlocks.length === 0) return null
     return (
       <div className="flex justify-end msg-enter">
-        <div className="max-w-[75%] px-4 py-2.5 rounded-2xl rounded-tr-sm bg-[var(--bg-card)] border border-[var(--border)] text-sm text-[var(--text)]">
+        <div className="max-w-[85%] sm:max-w-[75%] px-4 py-2.5 rounded-2xl rounded-tr-sm bg-[var(--bg-card)] border border-[var(--border)] text-sm text-[var(--text)]">
           {visibleBlocks.map((b, i) => b.type === 'text' ? <span key={i}>{b.content}</span> : null)}
         </div>
       </div>

@@ -221,9 +221,9 @@ export function PublishForm({ onClose }: Props) {
         {/* Edit state (default) */}
         {!jobId && (
           <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-4">
-            {/* 视频源 + 封面 预览 */}
-            <div className="flex gap-3">
-              <div className="flex-1">
+            {/* 视频源 + 封面 预览 — 手机竖排, 平板+ 横排 */}
+            <div className="flex flex-col sm:flex-row gap-3">
+              <div className="flex-1 min-w-0">
                 <div className="text-xs text-[var(--text-3)] mb-1">视频源</div>
                 {videoUrl ? (
                   <video src={videoUrl} controls className="w-full rounded-lg bg-black max-h-[28vh] object-contain"/>
@@ -234,9 +234,9 @@ export function PublishForm({ onClose }: Props) {
                 )}
               </div>
               {coverUrl && (
-                <div className="w-32">
+                <div className="w-full sm:w-32 flex-shrink-0">
                   <div className="text-xs text-[var(--text-3)] mb-1">封面</div>
-                  <img src={coverUrl} alt="cover" className="w-full rounded-lg bg-black object-contain"/>
+                  <img src={coverUrl} alt="cover" className="w-full max-h-[20vh] sm:max-h-none rounded-lg bg-black object-contain"/>
                 </div>
               )}
             </div>

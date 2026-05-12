@@ -595,14 +595,14 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
         拖选文字 → 点 <span className="text-[var(--text-2)]">删除选中</span> · 单击词切换删除 · 双击词跳到对应时间
       </div>
 
-      <div className="flex justify-between items-center gap-2 pt-1">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 pt-1">
         {/* 导出中卡 30 秒+ 给个提示, 让用户知道不是死循环 */}
         {finalizing && finalizeElapsed >= 30 && (
-          <span className="text-[11px] text-[var(--text-3)]">
+          <span className="text-[11px] text-[var(--text-3)] leading-snug">
             后端在切片+上传到 OSS, 大文件可能要 1-3 分钟. 卡太久可点"取消"重试.
           </span>
         )}
-        <div className="flex justify-end gap-2 ml-auto">
+        <div className="flex justify-end gap-2 sm:ml-auto">
           <button
             onClick={finalizing ? cancelFinalize : onCancel}
             className="px-3 py-1.5 rounded-lg text-sm text-[var(--text-2)] hover:bg-[var(--bg-hover)] cursor-pointer flex items-center gap-1.5"
