@@ -562,7 +562,7 @@ async def publish_xhs(
     title: str = "",
     description: str = "",
     tags=None,
-    wait_close_timeout: int = 600,
+    wait_close_timeout: int = 1800,
 ):
     """小红书: 开 Edge → 上传 → 填标题/描述/标签 → 停在发布按钮前 → 等用户审稿点发布或关窗口.
 
@@ -682,7 +682,7 @@ async def publish_douyin(
     title: str = "",
     description: str = "",
     tags=None,
-    wait_close_timeout: int = 600,
+    wait_close_timeout: int = 1800,
 ):
     """抖音: 开 Edge → 上传 → 填标题/描述/标签 → 停在'发布'按钮前 → 等用户审稿点发布或关窗口.
 
