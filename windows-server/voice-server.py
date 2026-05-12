@@ -202,27 +202,31 @@ def _detect_repeats(segments, similarity_threshold=0.6, max_gap=8.0):
 
 
 # 中文口播常见纯填充词 (没语义贡献, 可以无脑删)
+# 注意 whisper 中文模型会把"嗯"识别成同音字"恩"/"呣"等, 一并收录
 _FILLER_WORDS = {
     "嗯", "啊", "呃", "哦", "诶", "欸", "哎", "唉", "咦", "哟", "呵",
     "唔", "呢", "嘿", "哈", "哇", "诶嘿", "嗯嗯", "啊啊", "呃呃",
+    # whisper 同音误识别 / 组合形式
+    "恩", "嗯哼", "嗯啊", "啊嗯", "唔嗯", "嗯嗯嗯", "啊啊啊",
+    "诶嗯", "嗯诶", "呃啊", "嗯嗯啊", "那个", "这个那个",
 }
 # 标点 (Whisper 词级时间戳的 word 可能带标点 like "嗯,")
 _FILLER_PUNCTUATION = "，。、；！？!?,.;:：~～-—_… "
 
 
 def _detect_fillers(segments):
-    """识别词级"嗯啊呃哦"等填充词. 跳过开头第一个 + 结尾最后一个词
-    (用户反馈: "把开头或者结尾的字给去掉了", 边界保护避免误删开场招呼/收尾)"""
+    """识别词级"嗯啊呃哦"等填充词. 只跳过开头第一个 (保护开场招呼); 结尾"嗯…"
+    用户反馈普遍要删, 不再保护."""
     intervals = []
     # 摊平所有词
     all_words = []
     for seg in segments:
         for word in seg.get("words") or []:
             all_words.append(word)
-    if len(all_words) < 3:
+    if len(all_words) < 2:
         return intervals  # 太短, 不识别
-    # 跳过第一个和最后一个词 (保护边界)
-    for i in range(1, len(all_words) - 1):
+    # 只跳过第 0 个 (开场招呼"嗯, 大家好"那种), 后面全部检查
+    for i in range(1, len(all_words)):
         word = all_words[i]
         raw = (word.get("word") or "").strip()
         clean = raw.strip(_FILLER_PUNCTUATION)
@@ -233,7 +237,7 @@ def _detect_fillers(segments):
     return intervals
 
 
-def _detect_word_gaps(segments, min_gap=0.4):
+def _detect_word_gaps(segments, min_gap=0.3):
     """检测词与词之间的停顿. 跳过开头/结尾相邻的 gap (保护边界)"""
     intervals = []
     all_words = []
@@ -325,8 +329,8 @@ async def clean_narration(file: UploadFile = File(...), reference_text: str = Fo
     full_text = "".join(s["text"] for s in segments).strip()
 
     # 5. 找静音 + 词间隔 + 重复 + 填充词 (作为"建议删除"提示给用户)
-    silences = _ffmpeg_silence_detect(norm_path, noise_db=-25, min_silence=0.4)
-    word_gaps = _detect_word_gaps(segments, min_gap=0.4)
+    silences = _ffmpeg_silence_detect(norm_path, noise_db=-30, min_silence=0.3)
+    word_gaps = _detect_word_gaps(segments, min_gap=0.3)
     repeats = _detect_repeats(segments)
     fillers = _detect_fillers(segments)
 
@@ -471,8 +475,8 @@ async def clean_narration_video(file: UploadFile = File(...)):
     full_text = "".join(s["text"] for s in segments).strip()
 
     # 6. 静音 + 词间隔 + 重复 + 填充词 (建议删除)
-    silences = _ffmpeg_silence_detect(audio_path, noise_db=-25, min_silence=0.4)
-    word_gaps = _detect_word_gaps(segments, min_gap=0.4)
+    silences = _ffmpeg_silence_detect(audio_path, noise_db=-30, min_silence=0.3)
+    word_gaps = _detect_word_gaps(segments, min_gap=0.3)
     repeats = _detect_repeats(segments)
     fillers = _detect_fillers(segments)
 
@@ -661,8 +665,8 @@ def clean_narration_video_oss(req: CleanVideoOssRequest):
     full_text = "".join(s["text"] for s in segments).strip()
 
     # 5. 检测气口/重复/填充词
-    silences = _ffmpeg_silence_detect(audio_path, noise_db=-25, min_silence=0.4)
-    word_gaps = _detect_word_gaps(segments, min_gap=0.4)
+    silences = _ffmpeg_silence_detect(audio_path, noise_db=-30, min_silence=0.3)
+    word_gaps = _detect_word_gaps(segments, min_gap=0.3)
     repeats = _detect_repeats(segments)
     fillers = _detect_fillers(segments)
 
