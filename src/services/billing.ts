@@ -1,0 +1,159 @@
+// 商业化 API 客户端
+// 所有请求带 Authorization: Bearer <jwt>, jwt 从 localStorage monoi_token 读
+
+import { getToken } from '../lib/auth'
+
+const directBase = (import.meta as any).env?.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'
+
+export interface PlanConfig {
+  name: string
+  price_yuan: number
+  period_days?: number
+  monthly_credits: number
+  yearly_total_credits?: number
+  credit_pack_rate: number
+  digital_human_quota: number
+  clone_voice_slots: number
+  priority_gpu: boolean
+  commercial_license: boolean
+  multi_platform_account?: boolean
+  team_seats?: boolean
+  watermark: boolean
+}
+
+export interface CreditPack {
+  name: string
+  price_yuan: number
+  credits: number
+}
+
+export interface PlansResponse {
+  plans: Record<string, PlanConfig>           // pro_monthly / max_monthly / flagship_yearly
+  free: PlanConfig
+  credit_packs: Record<string, CreditPack>    // pack_99 / pack_49 / pack_199 / pack_499
+  consume_rules: Record<string, { per_second?: number; fixed?: number }>
+}
+
+export interface CreditBalance {
+  monthly: number
+  purchased: number
+  total: number
+}
+
+export interface UserSubscription {
+  tier: string                                 // free / pro_monthly / max_monthly / flagship_yearly
+  expired?: boolean
+  current_period_start?: number
+  current_period_end?: number
+  auto_renew?: number
+  name?: string
+}
+
+export interface ReferralCode {
+  referral_code: string
+  link: string
+}
+
+export interface ReferrerStatus {
+  user_id: number
+  level: 'normal' | 'certified' | 'partner'
+  referral_code: string
+  total_paying_users: number
+  total_revenue_brought: number
+  month_paying_users: number
+  month_revenue_brought: number
+  alipay_account?: string
+  wechat_account?: string
+}
+
+export interface ReferrerBalance {
+  cash_balance: number
+  cash_withdrawn_total: number
+}
+
+export interface CreditLogEntry {
+  id: number
+  user_id: number
+  feature?: string
+  delta: number
+  source: string
+  ref_id?: string
+  created_at: number
+}
+
+function authHeaders(): Record<string, string> {
+  const token = getToken()
+  if (!token) throw new Error('未登录')
+  return {
+    'Authorization': `Bearer ${token}`,
+    'Content-Type': 'application/json',
+  }
+}
+
+async function get<T>(path: string): Promise<T> {
+  const res = await fetch(directBase + path, { headers: authHeaders() })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.detail || data.error || `${path} ${res.status}`)
+  return data
+}
+
+async function post<T>(path: string, body: any): Promise<T> {
+  const res = await fetch(directBase + path, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify(body),
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.detail || data.error || `${path} ${res.status}`)
+  return data
+}
+
+// ============== 套餐 ==============
+
+// 套餐列表是公开的, 不需要 auth (但带上也没事)
+export async function fetchPlans(): Promise<PlansResponse> {
+  const res = await fetch(directBase + '/api/billing/plans')
+  return res.json()
+}
+
+export async function fetchMyCredits(): Promise<CreditBalance> {
+  return get('/api/billing/credits')
+}
+
+export async function fetchMySubscription(): Promise<UserSubscription> {
+  return get('/api/billing/subscription')
+}
+
+export async function fetchCreditLog(limit = 50): Promise<CreditLogEntry[]> {
+  return get(`/api/billing/credit-log?limit=${limit}`)
+}
+
+export async function subscribe(tier: string): Promise<{ success: boolean; order_id: string; message: string }> {
+  return post('/api/billing/subscribe', { tier, payment_method: 'manual' })
+}
+
+export async function buyCredits(pack_code: string): Promise<{ success: boolean; order_id: string; credits_added: number }> {
+  return post('/api/billing/buy-credits', { pack_code, payment_method: 'manual' })
+}
+
+// ============== 推广 ==============
+
+export async function fetchMyReferralCode(): Promise<ReferralCode> {
+  return get('/api/referral/my-code')
+}
+
+export async function fetchMyReferrerStatus(): Promise<ReferrerStatus> {
+  return get('/api/referral/status')
+}
+
+export async function fetchMyReferrerBalance(): Promise<ReferrerBalance> {
+  return get('/api/referral/balance')
+}
+
+export async function fetchMyCommissions(limit = 50) {
+  return get(`/api/referral/commissions?limit=${limit}`)
+}
+
+export async function submitWithdraw(amount_yuan: number, payment_method: 'alipay' | 'wechat', account_info: string) {
+  return post('/api/referral/withdraw', { amount_yuan, payment_method, account_info })
+}

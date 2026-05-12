@@ -5,6 +5,7 @@ import { AppShell } from './components/layout/AppShell'
 import Landing from './pages/Landing'
 import Login from './pages/Login'
 import Register from './pages/Register'
+import Account from './pages/Account'
 import { isLoggedIn } from './lib/auth'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -80,6 +81,11 @@ export default function App() {
               <AppErrorBoundary>
                 <AppShell/>
               </AppErrorBoundary>
+            </ProtectedRoute>
+          }/>
+          <Route path="/app/account" element={
+            <ProtectedRoute>
+              <Account/>
             </ProtectedRoute>
           }/>
           <Route path="*" element={<Navigate to="/" replace/>}/>

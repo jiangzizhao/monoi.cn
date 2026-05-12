@@ -650,15 +650,23 @@ class BuyCreditsRequest(BaseModel):
     payment_method: str = 'manual'
 
 
+# JWT 配置 (跟 main.py 保持一致, 后续抽到 config 模块)
+SECRET_KEY = "monoi-secret-key-2025"
+ALGORITHM = "HS256"
+
+
 def get_current_user_id(request: Request) -> int:
-    """从 JWT 或 session 拿 user_id. 先从 header 取 X-User-Id (跟 main.py 现有 auth 一致)."""
-    uid = request.headers.get('X-User-Id')
-    if not uid:
-        raise HTTPException(401, '未登录')
+    """从 Authorization: Bearer <jwt> 解析 user_id."""
+    auth = request.headers.get('authorization') or request.headers.get('Authorization') or ''
+    if not auth.startswith('Bearer '):
+        raise HTTPException(401, '未登录: 缺少 Authorization Bearer token')
+    token = auth[7:]
     try:
-        return int(uid)
-    except ValueError:
-        raise HTTPException(401, '无效 user_id')
+        from jose import jwt
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        return int(payload['sub'])
+    except Exception as e:
+        raise HTTPException(401, f'token 无效: {type(e).__name__}')
 
 
 @router.get("/plans")

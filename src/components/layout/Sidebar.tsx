@@ -1,5 +1,7 @@
-import { Plus, Trash2, MessageSquare } from 'lucide-react'
+import { Plus, Trash2, MessageSquare, User, LogOut } from 'lucide-react'
+import { Link, useNavigate } from 'react-router-dom'
 import { useChatStore } from '../../store/chatStore'
+import { getUsername, logout } from '../../lib/auth'
 
 function timeAgo(ts: number) {
   const diff = Date.now() - ts
@@ -11,6 +13,13 @@ function timeAgo(ts: number) {
 
 export function Sidebar({ onClose }: { onClose?: () => void }) {
   const { conversations, activeId, setActiveId, newConversation, deleteConversation } = useChatStore()
+  const nav = useNavigate()
+  const username = getUsername()
+
+  const handleLogout = () => {
+    logout()
+    nav('/login')
+  }
 
   const handleNew = () => {
     newConversation()
@@ -63,6 +72,20 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
             )
           })
         )}
+      </div>
+
+      {/* Footer: 用户 / 账户中心 / 登出 */}
+      <div className="border-t border-[var(--border)] px-2 py-2 flex flex-col gap-0.5">
+        <Link to="/app/account" onClick={onClose}
+          className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-[var(--text-2)] hover:bg-[var(--bg-hover)] hover:text-[var(--text)] cursor-pointer transition-colors">
+          <User size={14}/>
+          <span className="flex-1 truncate">{username || '账户'}</span>
+          <span className="text-[10px] text-[var(--text-3)]">账户中心</span>
+        </Link>
+        <button onClick={handleLogout}
+          className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-[var(--text-3)] hover:bg-[var(--bg-hover)] hover:text-red-400 cursor-pointer transition-colors">
+          <LogOut size={14}/> 退出登录
+        </button>
       </div>
     </div>
   )
