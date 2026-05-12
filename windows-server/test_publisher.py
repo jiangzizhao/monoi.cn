@@ -12,7 +12,7 @@
 
 import asyncio
 import sys
-from social_publisher import EDGE_PROFILE_DIR, check_login, open_login_window, debug_page
+from social_publisher import EDGE_PROFILE_DIR, check_login, open_login_window, debug_page, inspect_upload_page
 
 
 async def main():
@@ -34,6 +34,10 @@ async def main():
         platform = sys.argv[2] if len(sys.argv) > 2 else "xhs"
         print(f"[publisher] 诊断 {platform}: 弹 Edge headed + 截图 + dump 关键元素")
         await debug_page(platform)
+    elif cmd == "inspect":
+        platform = sys.argv[2] if len(sys.argv) > 2 else "xhs"
+        print(f"[publisher] 探测 {platform} 上传页 DOM (给我看 dump 输出, 我写实际 selector)")
+        await inspect_upload_page(platform)
     else:
         print(f"未知命令: {cmd}")
         print(__doc__)

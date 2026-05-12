@@ -11,7 +11,9 @@ Stage 1 (本文件目前阶段): 只做 launch_edge + login_probe — 不上传
 Stage 2: 加 publish_xhs / publish_douyin
 """
 
+import asyncio
 import os
+import random
 from pathlib import Path
 
 # Edge profile 目录: 放在 voice-server 旁边 (D:\monoi-server\edge-profile)
@@ -214,6 +216,137 @@ async def open_login_window(platform: str, timeout_seconds: int = 300):
             await page.wait_for_event("close", timeout=timeout_seconds * 1000)
         except Exception:
             pass  # 超时: 强制关
+    finally:
+        await context.close()
+        await pw.stop()
+
+
+# ===================== 拟人化辅助 (反检测) =====================
+# 平台风控会看行为节奏: 1 秒填完整个表单 / 0 鼠标轨迹 / fill() 一次塞入 = 高危
+# 这组函数加随机延迟 + 逐字输入 + 偶尔的鼠标移动, 让操作节奏接近真人
+
+
+async def random_sleep(min_ms: int = 600, max_ms: int = 1800):
+    """两个动作之间随机停顿"""
+    await asyncio.sleep(random.uniform(min_ms / 1000, max_ms / 1000))
+
+
+async def human_type(locator, text: str, per_char_min: int = 30, per_char_max: int = 90):
+    """逐字输入, 每字符随机间隔. 比 page.fill() 慢一截但接近真人打字."""
+    await locator.click()
+    await asyncio.sleep(random.uniform(0.2, 0.5))
+    for ch in text:
+        await locator.type(ch, delay=random.uniform(per_char_min, per_char_max))
+
+
+async def mouse_jitter(page, n: int = 2):
+    """随机移动鼠标到画面不同位置, 模拟视线扫读. 调用方在 input 之间穿插用."""
+    w = page.viewport_size["width"] if page.viewport_size else 1440
+    h = page.viewport_size["height"] if page.viewport_size else 900
+    for _ in range(n):
+        x = random.randint(int(w * 0.2), int(w * 0.8))
+        y = random.randint(int(h * 0.2), int(h * 0.8))
+        await page.mouse.move(x, y, steps=random.randint(10, 25))
+        await asyncio.sleep(random.uniform(0.1, 0.3))
+
+
+# ===================== Selector 探测 (给 stage 2.x 选 selector 用) =====================
+
+
+async def inspect_upload_page(platform: str):
+    """Headed 打开 creator 上传页, dump 所有 input/button/textarea 的可识别属性 + 截图.
+
+    给我看 dump 输出, 我才能写准 publish_xhs / publish_douyin 的实际 selector.
+    用户在 Windows 上跑: python test_publisher.py inspect xhs (或 douyin)
+    """
+    if platform not in PLATFORM_URLS:
+        print(f"未知平台: {platform}")
+        return
+
+    pw, context = await launch_edge_persistent(headless=False)
+    try:
+        page = await context.new_page()
+        await page.goto(PLATFORM_URLS[platform], wait_until="domcontentloaded", timeout=30000)
+        # 上传页 SPA 渲染慢, 给 15 秒充分加载
+        await page.wait_for_timeout(15000)
+
+        print(f"\n========== {platform} 上传页 DOM 探测 ==========")
+        print(f"最终 URL: {page.url}")
+        print(f"页面标题: {await page.title()}")
+
+        # 截图 (帮我视觉对照)
+        screenshot_path = os.path.join(os.path.dirname(__file__), f"inspect_{platform}.png")
+        await page.screenshot(path=screenshot_path, full_page=True)
+        print(f"截图 (full page): {screenshot_path}")
+
+        # Dump 所有 input
+        print(f"\n----- 所有 <input> 元素 -----")
+        inputs = await page.locator("input").all()
+        for i, el in enumerate(inputs[:30]):
+            try:
+                info = {
+                    "type": await el.get_attribute("type"),
+                    "placeholder": await el.get_attribute("placeholder"),
+                    "aria-label": await el.get_attribute("aria-label"),
+                    "name": await el.get_attribute("name"),
+                    "class": (await el.get_attribute("class") or "")[:80],
+                    "visible": await el.is_visible(),
+                }
+                print(f"  [{i}] {info}")
+            except Exception as e:
+                print(f"  [{i}] (读取失败: {e})")
+
+        # Dump 所有 textarea
+        print(f"\n----- 所有 <textarea> 元素 -----")
+        textareas = await page.locator("textarea").all()
+        for i, el in enumerate(textareas[:10]):
+            try:
+                info = {
+                    "placeholder": await el.get_attribute("placeholder"),
+                    "aria-label": await el.get_attribute("aria-label"),
+                    "name": await el.get_attribute("name"),
+                    "class": (await el.get_attribute("class") or "")[:80],
+                    "visible": await el.is_visible(),
+                }
+                print(f"  [{i}] {info}")
+            except Exception:
+                pass
+
+        # Dump 所有可见 button (取前 30 个, 太多会刷屏)
+        print(f"\n----- 所有可见 <button> 元素 (前 30) -----")
+        buttons = await page.locator("button:visible").all()
+        for i, el in enumerate(buttons[:30]):
+            try:
+                text = (await el.inner_text() or "").strip()[:30]
+                info = {
+                    "text": text,
+                    "aria-label": await el.get_attribute("aria-label"),
+                    "class": (await el.get_attribute("class") or "")[:60],
+                }
+                print(f"  [{i}] {info}")
+            except Exception:
+                pass
+
+        # Dump 顶级可见的 div 里带 "上传"/"发布"/"标题" 等字眼的 (有些平台用 div + onclick 不是 button)
+        print(f"\n----- 含关键词的可见元素 -----")
+        keywords = ["上传", "发布", "标题", "描述", "标签", "话题", "添加", "拖拽", "拖到"]
+        for kw in keywords:
+            try:
+                els = await page.locator(f"text={kw}").all()
+                if els:
+                    print(f"  '{kw}' × {len(els)}:")
+                    for j, el in enumerate(els[:5]):
+                        try:
+                            tag = await el.evaluate("e => e.tagName")
+                            text = (await el.inner_text() or "").strip()[:40]
+                            print(f"    [{j}] <{tag.lower()}> '{text}'")
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+        print(f"\n========== 探测结束 (Edge 窗口 5 秒后自动关) ==========\n")
+        await page.wait_for_timeout(5000)
     finally:
         await context.close()
         await pw.stop()
