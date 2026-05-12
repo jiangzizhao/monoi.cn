@@ -5,6 +5,52 @@ import { searchPexels } from '../services/pexels'
 import { searchPixabay } from '../services/pixabay'
 import type { ChoiceOption, FootageSentenceItem, MessageBlock } from '../types'
 
+/**
+ * 把一个 ASR segment 按 word-level 停顿二次拆分.
+ * whisper 默认 segment 拆得粗 (1.5-2s 以上停顿才拆), 跟"人说话节奏"对不齐.
+ *
+ * 拆点规则: word.end → next_word.start ≥ gapThreshold 且当前 buf 至少 minDuration 长.
+ * 例如 "我跟你说啊 这个减肥这件事 真的不是节食搞定的" 之间的小停顿 (0.3-0.5s)
+ * 会被识别为切点, 拆成 3 镜素材, 每镜配不同 b-roll, 剪辑感比合并成一镜强.
+ */
+function splitSegmentByPause(
+  seg: { text: string; start: number; end: number; words?: { start: number; end: number; word: string }[] },
+  gapThreshold: number = 0.25,
+  minDuration: number = 1.0,
+): { text: string; start: number; end: number }[] {
+  if (!seg.words || seg.words.length === 0) {
+    return [{ text: seg.text, start: seg.start, end: seg.end }]
+  }
+  const result: { text: string; start: number; end: number }[] = []
+  let buf: { start: number; end: number; word: string }[] = []
+
+  const flush = () => {
+    if (buf.length === 0) return
+    result.push({
+      text: buf.map(w => w.word).join(''),
+      start: buf[0].start,
+      end: buf[buf.length - 1].end,
+    })
+    buf = []
+  }
+
+  for (const w of seg.words) {
+    if (buf.length === 0) {
+      buf.push(w)
+      continue
+    }
+    const prevEnd = buf[buf.length - 1].end
+    const gap = w.start - prevEnd
+    const bufDuration = prevEnd - buf[0].start
+    if (gap >= gapThreshold && bufDuration >= minDuration) {
+      flush()
+    }
+    buf.push(w)
+  }
+  flush()
+  return result
+}
+
 function findLastScriptPrompt(messages: { role: string; blocks: MessageBlock[] }[]) {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i]
@@ -368,6 +414,9 @@ export function useChat() {
       // 自动从最近的口播视频接 segments 做素材匹配 (跳过拆句, 跟时间戳严格对齐)
       if (text === '__auto_footage_from_video__') {
         // 从对话里找最近一个 video_player.data 拿 kept_segments
+        // 然后用 word-level 停顿做二次拆 — whisper ASR 默认按"长停顿(1.5-2s+)"拆 segment, 太粗,
+        // 跟"人说话节奏"不一致. 这里用 word.end → next_word.start ≥ 0.25s 的小停顿做切点,
+        // 但 segment 至少 1s 才拆 (避免拆太碎一镜素材太短)
         let segments: { text: string; start: number; end: number }[] | null = null
         for (let i = conv.messages.length - 1; i >= 0; i--) {
           const msg = conv.messages[i]
@@ -376,7 +425,7 @@ export function useChat() {
             if (block.type === 'video_player') {
               const ks = (block as any).data?.kept_segments
               if (Array.isArray(ks) && ks.length > 0) {
-                segments = ks.map((s: any) => ({ text: s.text, start: s.start, end: s.end }))
+                segments = ks.flatMap((s: any) => splitSegmentByPause(s, 0.25, 1.0))
                 break
               }
             }
