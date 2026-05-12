@@ -12,7 +12,7 @@
 
 import asyncio
 import sys
-from social_publisher import EDGE_PROFILE_DIR, check_login, open_login_window, debug_page, inspect_upload_page, inspect_after_upload
+from social_publisher import EDGE_PROFILE_DIR, check_login, open_login_window, debug_page, inspect_upload_page, inspect_after_upload, publish_xhs, publish_douyin
 
 
 async def main():
@@ -46,6 +46,25 @@ async def main():
             return
         print(f"[publisher] 上传 {video} 到 {platform}, 等表单渲染再 dump (不点发布)")
         await inspect_after_upload(platform, video)
+    elif cmd == "publish":
+        platform = sys.argv[2] if len(sys.argv) > 2 else "xhs"
+        video = sys.argv[3] if len(sys.argv) > 3 else None
+        title = sys.argv[4] if len(sys.argv) > 4 else "测试标题"
+        desc = sys.argv[5] if len(sys.argv) > 5 else "测试描述"
+        tags_str = sys.argv[6] if len(sys.argv) > 6 else ""
+        tags = [t.strip() for t in tags_str.split(",") if t.strip()]
+        if not video:
+            print('用法: python test_publisher.py publish xhs D:\\v.mp4 "标题" "描述" "标签1,标签2"')
+            return
+        print(f"[publisher] 发布到 {platform}: {video}")
+        if platform == "xhs":
+            result = await publish_xhs(video, title, desc, tags)
+        elif platform == "douyin":
+            result = await publish_douyin(video, title, desc, tags)
+        else:
+            print(f"未知平台: {platform}")
+            return
+        print(f"\n[result] {result}")
     else:
         print(f"未知命令: {cmd}")
         print(__doc__)

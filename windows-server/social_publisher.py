@@ -549,3 +549,131 @@ async def inspect_after_upload(platform: str, video_path: str):
             await pw.stop()
         except Exception:
             pass
+
+
+# ===================== 真发布流程 (档 B: 自动上传 + 自动填表, 不点发布) =====================
+
+
+async def publish_xhs(
+    video_path: str,
+    title: str = "",
+    description: str = "",
+    tags=None,
+    wait_close_timeout: int = 600,
+):
+    """小红书: 开 Edge → 上传 → 填标题/描述/标签 → 停在发布按钮前 → 等用户审稿点发布或关窗口.
+
+    Args:
+      video_path: 视频本地路径
+      title: 标题 (建议 < 20 字, 太长 XHS 会截)
+      description: 描述
+      tags: 标签 list, 会以 ' #tag1 #tag2 ' 追加到描述末尾
+      wait_close_timeout: 等用户操作的最长秒数 (默认 10 分钟超时强关)
+
+    返回: { success: bool, detail: str }
+    """
+    if not os.path.exists(video_path):
+        return {"success": False, "detail": f"视频不存在: {video_path}"}
+    size_mb = os.path.getsize(video_path) / 1024 / 1024
+    if size_mb < 0.1:
+        return {"success": False, "detail": f"视频太小 ({size_mb:.2f} MB), 可能空文件"}
+
+    tags = tags or []
+    detail_msgs: list = []
+
+    def step(msg: str):
+        print(f"[publish_xhs] {msg}")
+        detail_msgs.append(msg)
+
+    pw, context = await launch_edge_persistent(headless=False)
+    try:
+        page = await context.new_page()
+        await page.goto(PLATFORM_URLS["xhs"], wait_until="domcontentloaded", timeout=30000)
+        await page.wait_for_timeout(5000)
+
+        if "login" in page.url.lower():
+            step("✗ 跳到登录页, cookie 失效. 在弹出的 Edge 里重新登一次")
+            try:
+                await page.wait_for_event("close", timeout=wait_close_timeout * 1000)
+            except Exception:
+                pass
+            return {"success": False, "detail": " | ".join(detail_msgs)}
+
+        # 1. 喂视频
+        step(f"上传 {os.path.basename(video_path)} ({size_mb:.1f} MB)")
+        file_input = page.locator("input.upload-input").first
+        await file_input.set_input_files(video_path)
+
+        # 2. 等表单 (标题框出现)
+        step("等表单渲染 (最多 5 分钟)...")
+        title_input = page.locator('input[placeholder*="标题"]').first
+        form_rendered = False
+        try:
+            await title_input.wait_for(state="visible", timeout=300_000)
+            form_rendered = True
+            step("✓ 表单已渲染")
+        except Exception:
+            step("✗ 5 分钟没等到标题框, 视频上传可能失败")
+
+        # 3. 填表 (拟人化)
+        if form_rendered and title:
+            await random_sleep(800, 2000)
+            await mouse_jitter(page)
+            await human_type(title_input, title)
+            step(f"标题已填: {title}")
+
+        if form_rendered and (description or tags):
+            await random_sleep(800, 2000)
+            desc_editor = page.locator("div.tiptap.ProseMirror").first
+            if await desc_editor.count() > 0:
+                await desc_editor.click()
+                await random_sleep(300, 700)
+                full = description.strip()
+                if tags:
+                    if full:
+                        full += "\n"
+                    full += " ".join(f"#{t.strip()}" for t in tags if t.strip())
+                # 逐字输入, 换行用 keyboard.press("Enter")
+                for ch in full:
+                    if ch == "\n":
+                        await page.keyboard.press("Enter")
+                        await asyncio.sleep(random.uniform(0.05, 0.15))
+                    else:
+                        await page.keyboard.type(ch, delay=random.uniform(30, 90))
+                step(f"描述+标签已填 ({len(full)} 字)")
+            else:
+                step("✗ 没找到描述编辑器 (div.tiptap.ProseMirror)")
+
+        # 4. 拟人收尾
+        if form_rendered:
+            await mouse_jitter(page, n=2)
+            await random_sleep(1000, 2000)
+            step("✓ 已停在发布按钮前. 你在 Edge 窗口审稿 → 点'发布' → 关 Edge")
+
+        # 5. 等用户操作
+        step(f"等你操作, 最多 {wait_close_timeout} 秒...")
+        try:
+            await page.wait_for_event("close", timeout=wait_close_timeout * 1000)
+            step("Edge 已关, 流程结束")
+        except Exception:
+            step(f"等了 {wait_close_timeout} 秒没操作, 强制关 Edge")
+
+        return {"success": True, "detail": " | ".join(detail_msgs)}
+
+    except Exception as e:
+        step(f"!! 异常: {type(e).__name__}: {e}")
+        return {"success": False, "detail": " | ".join(detail_msgs)}
+    finally:
+        try:
+            await context.close()
+        except Exception:
+            pass
+        try:
+            await pw.stop()
+        except Exception:
+            pass
+
+
+# 占位: 等抖音 dump 拿到再实现
+async def publish_douyin(*args, **kwargs):
+    return {"success": False, "detail": "抖音 publish 还没实现, 等 inspect-after dump 拿到再写"}
