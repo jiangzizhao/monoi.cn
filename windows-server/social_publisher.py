@@ -442,12 +442,7 @@ async def inspect_after_upload(platform: str, video_path: str):
         # 额外等 5 秒让动画结束
         await page.wait_for_timeout(5000)
 
-        # 截图
-        shot_path = os.path.join(os.path.dirname(__file__), f"inspect_{platform}_after.png")
-        await page.screenshot(path=shot_path, full_page=True)
-        log(f"\n截图: {shot_path}")
-
-        # Dump 完整 DOM
+        # Dump 完整 DOM (这是核心信息, 优先做; 截图放最后, 失败不影响 dump)
         log(f"\n----- 所有 <input> 元素 -----")
         for i, el in enumerate((await page.locator("input").all())[:40]):
             try:
@@ -522,6 +517,14 @@ async def inspect_after_upload(platform: str, video_path: str):
                             pass
             except Exception:
                 pass
+
+        # 截图放最后, wrap try (抖音字体加载慢, full_page screenshot 容易 timeout)
+        try:
+            shot_path = os.path.join(os.path.dirname(__file__), f"inspect_{platform}_after.png")
+            await page.screenshot(path=shot_path, full_page=False, timeout=10000)
+            log(f"\n截图: {shot_path}")
+        except Exception as e:
+            log(f"\n!! 截图失败 (不影响 dump): {type(e).__name__}: {e}")
 
         log(f"\n========== 探测结束 ==========")
         log("Edge 窗口 60 秒后自动关 (或你手动关). 视频留在平台草稿, 用完到 creator 后台删")
