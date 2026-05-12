@@ -49,6 +49,13 @@
 
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+  /* 兜底: 防止任何子元素 (长 URL/word 含表情/图片等) 撑大 body 让整页可横向滑.
+     根本治理是找到具体溢出元素并 break-words/overflow-hidden, 这里先保整体不抖. */
+  html, body {
+    overflow-x: hidden;
+    max-width: 100vw;
+  }
+
   html, body, #root {
     height: 100%;
     background: var(--bg);
