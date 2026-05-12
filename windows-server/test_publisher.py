@@ -12,7 +12,7 @@
 
 import asyncio
 import sys
-from social_publisher import EDGE_PROFILE_DIR, check_login, open_login_window, debug_page, inspect_upload_page
+from social_publisher import EDGE_PROFILE_DIR, check_login, open_login_window, debug_page, inspect_upload_page, inspect_after_upload
 
 
 async def main():
@@ -38,6 +38,14 @@ async def main():
         platform = sys.argv[2] if len(sys.argv) > 2 else "xhs"
         print(f"[publisher] 探测 {platform} 上传页 DOM (给我看 dump 输出, 我写实际 selector)")
         await inspect_upload_page(platform)
+    elif cmd == "inspect-after":
+        platform = sys.argv[2] if len(sys.argv) > 2 else "xhs"
+        video = sys.argv[3] if len(sys.argv) > 3 else None
+        if not video:
+            print("用法: python test_publisher.py inspect-after xhs D:\\path\\to\\video.mp4")
+            return
+        print(f"[publisher] 上传 {video} 到 {platform}, 等表单渲染再 dump (不点发布)")
+        await inspect_after_upload(platform, video)
     else:
         print(f"未知命令: {cmd}")
         print(__doc__)

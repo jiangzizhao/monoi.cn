@@ -258,10 +258,21 @@ async def inspect_upload_page(platform: str):
 
     给我看 dump 输出, 我才能写准 publish_xhs / publish_douyin 的实际 selector.
     用户在 Windows 上跑: python test_publisher.py inspect xhs (或 douyin)
+
+    输出 3 个文件 (都在脚本同目录):
+      - inspect_<platform>.png         全页截图
+      - inspect_<platform>_dump.txt   完整 dump 文本 (给我贴这个)
     """
     if platform not in PLATFORM_URLS:
         print(f"未知平台: {platform}")
         return
+
+    # 收集到 list, 最后一次性 print + 写文件 (这样 cmd 里也能看, 文件也有备份)
+    lines: list[str] = []
+
+    def log(msg: str = ""):
+        print(msg)
+        lines.append(msg)
 
     pw, context = await launch_edge_persistent(headless=False)
     try:
@@ -270,17 +281,15 @@ async def inspect_upload_page(platform: str):
         # 上传页 SPA 渲染慢, 给 15 秒充分加载
         await page.wait_for_timeout(15000)
 
-        print(f"\n========== {platform} 上传页 DOM 探测 ==========")
-        print(f"最终 URL: {page.url}")
-        print(f"页面标题: {await page.title()}")
+        log(f"========== {platform} 上传页 DOM 探测 ==========")
+        log(f"最终 URL: {page.url}")
+        log(f"页面标题: {await page.title()}")
 
-        # 截图 (帮我视觉对照)
         screenshot_path = os.path.join(os.path.dirname(__file__), f"inspect_{platform}.png")
         await page.screenshot(path=screenshot_path, full_page=True)
-        print(f"截图 (full page): {screenshot_path}")
+        log(f"截图 (full page): {screenshot_path}")
 
-        # Dump 所有 input
-        print(f"\n----- 所有 <input> 元素 -----")
+        log(f"\n----- 所有 <input> 元素 -----")
         inputs = await page.locator("input").all()
         for i, el in enumerate(inputs[:30]):
             try:
@@ -292,12 +301,11 @@ async def inspect_upload_page(platform: str):
                     "class": (await el.get_attribute("class") or "")[:80],
                     "visible": await el.is_visible(),
                 }
-                print(f"  [{i}] {info}")
+                log(f"  [{i}] {info}")
             except Exception as e:
-                print(f"  [{i}] (读取失败: {e})")
+                log(f"  [{i}] (读取失败: {e})")
 
-        # Dump 所有 textarea
-        print(f"\n----- 所有 <textarea> 元素 -----")
+        log(f"\n----- 所有 <textarea> 元素 -----")
         textareas = await page.locator("textarea").all()
         for i, el in enumerate(textareas[:10]):
             try:
@@ -308,12 +316,11 @@ async def inspect_upload_page(platform: str):
                     "class": (await el.get_attribute("class") or "")[:80],
                     "visible": await el.is_visible(),
                 }
-                print(f"  [{i}] {info}")
+                log(f"  [{i}] {info}")
             except Exception:
                 pass
 
-        # Dump 所有可见 button (取前 30 个, 太多会刷屏)
-        print(f"\n----- 所有可见 <button> 元素 (前 30) -----")
+        log(f"\n----- 所有可见 <button> 元素 (前 30) -----")
         buttons = await page.locator("button:visible").all()
         for i, el in enumerate(buttons[:30]):
             try:
@@ -323,30 +330,204 @@ async def inspect_upload_page(platform: str):
                     "aria-label": await el.get_attribute("aria-label"),
                     "class": (await el.get_attribute("class") or "")[:60],
                 }
-                print(f"  [{i}] {info}")
+                log(f"  [{i}] {info}")
             except Exception:
                 pass
 
-        # Dump 顶级可见的 div 里带 "上传"/"发布"/"标题" 等字眼的 (有些平台用 div + onclick 不是 button)
-        print(f"\n----- 含关键词的可见元素 -----")
+        log(f"\n----- 含关键词的可见元素 -----")
         keywords = ["上传", "发布", "标题", "描述", "标签", "话题", "添加", "拖拽", "拖到"]
         for kw in keywords:
             try:
                 els = await page.locator(f"text={kw}").all()
                 if els:
-                    print(f"  '{kw}' × {len(els)}:")
+                    log(f"  '{kw}' × {len(els)}:")
                     for j, el in enumerate(els[:5]):
                         try:
                             tag = await el.evaluate("e => e.tagName")
                             text = (await el.inner_text() or "").strip()[:40]
-                            print(f"    [{j}] <{tag.lower()}> '{text}'")
+                            log(f"    [{j}] <{tag.lower()}> '{text}'")
                         except Exception:
                             pass
             except Exception:
                 pass
 
-        print(f"\n========== 探测结束 (Edge 窗口 5 秒后自动关) ==========\n")
-        await page.wait_for_timeout(5000)
+        log(f"\n========== 探测结束 ==========")
+        # Edge 窗口保持 60 秒 (够你看页面长什么样), 或者你自己关 Edge 提前结束
+        log("Edge 窗口 60 秒后自动关, 你也可以提前手动关掉")
+        try:
+            await page.wait_for_event("close", timeout=60000)
+        except Exception:
+            pass
     finally:
         await context.close()
         await pw.stop()
+
+    # 写文件 (在 finally 外, 确保即使中途出错也会写已收集的部分)
+    dump_path = os.path.join(os.path.dirname(__file__), f"inspect_{platform}_dump.txt")
+    try:
+        with open(dump_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+        print(f"\n>>> dump 已写入: {dump_path}")
+        print(f">>> 把这个文件的内容复制贴给我 (notepad 打开 Ctrl+A Ctrl+C 即可)")
+    except Exception as e:
+        print(f">>> 写 dump 文件失败: {e}")
+
+
+async def inspect_after_upload(platform: str, video_path: str):
+    """上传一个视频到 creator 页, 等表单渲染完, 再 dump 出现的 input/textarea/button.
+
+    用户跑: python test_publisher.py inspect-after xhs D:\\monoi-server\\some.mp4
+    输出: inspect_<platform>_after_dump.txt
+
+    注意: 上传后**不点发布**, 视频会停在平台草稿状态, 用户自己去 creator 后台清掉.
+    """
+    if platform not in PLATFORM_URLS:
+        print(f"未知平台: {platform}")
+        return
+    if not os.path.exists(video_path):
+        print(f"视频文件不存在: {video_path}")
+        return
+
+    lines: list[str] = []
+
+    def log(msg: str = ""):
+        print(msg)
+        lines.append(msg)
+
+    pw, context = await launch_edge_persistent(headless=False)
+    try:
+        page = await context.new_page()
+        await page.goto(PLATFORM_URLS[platform], wait_until="domcontentloaded", timeout=30000)
+        # 等初始页加载完 (上传按钮出现)
+        await page.wait_for_timeout(10000)
+
+        log(f"========== {platform} 上传后 DOM 探测 ==========")
+        log(f"视频: {video_path} ({os.path.getsize(video_path) / 1024 / 1024:.1f} MB)")
+        log(f"上传前 URL: {page.url}")
+
+        # set_input_files 直接喂给 file input (隐藏可见都能用)
+        file_input = page.locator('input[type="file"]').first
+        try:
+            await file_input.set_input_files(video_path)
+            log("✓ 文件已喂给 file input, 等表单渲染...")
+        except Exception as e:
+            log(f"✗ set_input_files 失败: {e}")
+            return
+
+        # 等上传 + 表单出现 (轮询 textarea 出现 = 上传完进入填表阶段; 最多等 5 分钟)
+        log("\n----- 轮询等待表单渲染 (textarea / 多 input 出现) -----")
+        upload_ready = False
+        for i in range(60):  # 60 × 5s = 5 分钟
+            await page.wait_for_timeout(5000)
+            ta_count = await page.locator("textarea").count()
+            input_count = await page.locator("input:visible").count()
+            log(f"  [{i*5+5}s] textarea={ta_count}, visible input={input_count}, url={page.url[:80]}")
+            if ta_count >= 1 or input_count >= 3:
+                upload_ready = True
+                log("  → 表单看起来渲染了, 停止轮询")
+                break
+
+        if not upload_ready:
+            log("✗ 等了 5 分钟表单还没出来, 可能上传卡了, 把截图给我看")
+
+        # 额外等 5 秒让动画结束
+        await page.wait_for_timeout(5000)
+
+        # 截图
+        shot_path = os.path.join(os.path.dirname(__file__), f"inspect_{platform}_after.png")
+        await page.screenshot(path=shot_path, full_page=True)
+        log(f"\n截图: {shot_path}")
+
+        # Dump 完整 DOM
+        log(f"\n----- 所有 <input> 元素 -----")
+        for i, el in enumerate((await page.locator("input").all())[:40]):
+            try:
+                info = {
+                    "type": await el.get_attribute("type"),
+                    "placeholder": await el.get_attribute("placeholder"),
+                    "aria-label": await el.get_attribute("aria-label"),
+                    "name": await el.get_attribute("name"),
+                    "class": (await el.get_attribute("class") or "")[:80],
+                    "value": (await el.get_attribute("value") or "")[:40],
+                    "visible": await el.is_visible(),
+                }
+                log(f"  [{i}] {info}")
+            except Exception as e:
+                log(f"  [{i}] err: {e}")
+
+        log(f"\n----- 所有 <textarea> 元素 -----")
+        for i, el in enumerate((await page.locator("textarea").all())[:10]):
+            try:
+                info = {
+                    "placeholder": await el.get_attribute("placeholder"),
+                    "aria-label": await el.get_attribute("aria-label"),
+                    "name": await el.get_attribute("name"),
+                    "class": (await el.get_attribute("class") or "")[:80],
+                    "visible": await el.is_visible(),
+                }
+                log(f"  [{i}] {info}")
+            except Exception:
+                pass
+
+        # contentEditable div (小红书的描述可能是 div 不是 textarea)
+        log(f"\n----- contentEditable 元素 (可能是富文本描述框) -----")
+        for i, el in enumerate((await page.locator("[contenteditable='true']:visible").all())[:10]):
+            try:
+                placeholder = await el.get_attribute("data-placeholder") or await el.get_attribute("placeholder")
+                info = {
+                    "tag": await el.evaluate("e => e.tagName"),
+                    "placeholder/data-placeholder": placeholder,
+                    "aria-label": await el.get_attribute("aria-label"),
+                    "class": (await el.get_attribute("class") or "")[:80],
+                }
+                log(f"  [{i}] {info}")
+            except Exception:
+                pass
+
+        log(f"\n----- 所有可见 <button> 元素 (前 40) -----")
+        for i, el in enumerate((await page.locator("button:visible").all())[:40]):
+            try:
+                text = (await el.inner_text() or "").strip()[:40]
+                info = {
+                    "text": text,
+                    "aria-label": await el.get_attribute("aria-label"),
+                    "class": (await el.get_attribute("class") or "")[:60],
+                }
+                log(f"  [{i}] {info}")
+            except Exception:
+                pass
+
+        log(f"\n----- 含关键词的可见元素 -----")
+        keywords = ["发布", "标题", "描述", "正文", "标签", "话题", "封面", "添加", "更多", "保存", "草稿"]
+        for kw in keywords:
+            try:
+                els = await page.locator(f"text={kw}").all()
+                if els:
+                    log(f"  '{kw}' × {len(els)}:")
+                    for j, el in enumerate(els[:5]):
+                        try:
+                            tag = await el.evaluate("e => e.tagName")
+                            text = (await el.inner_text() or "").strip()[:50]
+                            log(f"    [{j}] <{tag.lower()}> '{text}'")
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+        log(f"\n========== 探测结束 ==========")
+        log("Edge 窗口 60 秒后自动关 (或你手动关). 视频留在平台草稿, 用完到 creator 后台删")
+        try:
+            await page.wait_for_event("close", timeout=60000)
+        except Exception:
+            pass
+    finally:
+        await context.close()
+        await pw.stop()
+
+    dump_path = os.path.join(os.path.dirname(__file__), f"inspect_{platform}_after_dump.txt")
+    try:
+        with open(dump_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+        print(f"\n>>> dump 已写入: {dump_path}")
+    except Exception as e:
+        print(f">>> 写 dump 文件失败: {e}")
