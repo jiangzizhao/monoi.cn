@@ -677,6 +677,126 @@ async def publish_xhs(
             pass
 
 
-# 占位: 等抖音 dump 拿到再实现
-async def publish_douyin(*args, **kwargs):
-    return {"success": False, "detail": "抖音 publish 还没实现, 等 inspect-after dump 拿到再写"}
+async def publish_douyin(
+    video_path: str,
+    title: str = "",
+    description: str = "",
+    tags=None,
+    wait_close_timeout: int = 600,
+):
+    """抖音: 开 Edge → 上传 → 填标题/描述/标签 → 停在'发布'按钮前 → 等用户审稿点发布或关窗口.
+
+    跟 publish_xhs 同结构, 差异只在 selector:
+    - 标题: input[placeholder*='作品标题']
+    - 描述: div.editor-comp-publish[contenteditable='true']
+    """
+    if not os.path.exists(video_path):
+        return {"success": False, "detail": f"视频不存在: {video_path}"}
+    size_mb = os.path.getsize(video_path) / 1024 / 1024
+    if size_mb < 0.1:
+        return {"success": False, "detail": f"视频太小 ({size_mb:.2f} MB), 可能空文件"}
+
+    tags = tags or []
+    detail_msgs: list = []
+
+    def step(msg: str):
+        print(f"[publish_douyin] {msg}")
+        detail_msgs.append(msg)
+
+    pw, context = await launch_edge_persistent(headless=False)
+    try:
+        page = await context.new_page()
+        await page.goto(PLATFORM_URLS["douyin"], wait_until="domcontentloaded", timeout=30000)
+        await page.wait_for_timeout(5000)
+
+        # 抖音登录态判断: URL 含 login 或者跳出 creator 后台
+        if "login" in page.url.lower() or "creator.douyin.com" not in page.url:
+            step("✗ 跳到登录页或主站, cookie 失效. 在弹出的 Edge 里重新登一次")
+            try:
+                await page.wait_for_event("close", timeout=wait_close_timeout * 1000)
+            except Exception:
+                pass
+            return {"success": False, "detail": " | ".join(detail_msgs)}
+
+        # 1. 喂视频 (抖音 file input visible=True, 直接 set_input_files)
+        step(f"上传 {os.path.basename(video_path)} ({size_mb:.1f} MB)")
+        file_input = page.locator('input[type="file"]').first
+        await file_input.set_input_files(video_path)
+
+        # 2. 等标题框出现 (跳到 /post/video 后表单渲染)
+        step("等表单渲染 (最多 5 分钟)...")
+        title_input = page.locator('input[placeholder*="作品标题"]').first
+        form_rendered = False
+        try:
+            await title_input.wait_for(state="visible", timeout=300_000)
+            form_rendered = True
+            step("✓ 表单已渲染")
+        except Exception:
+            step("✗ 5 分钟没等到标题框")
+
+        # 3. 填标题
+        if form_rendered and title:
+            await random_sleep(800, 2000)
+            await mouse_jitter(page)
+            # 抖音默认标题用文件名填了, 先清空
+            try:
+                await title_input.click()
+                await page.keyboard.press("Control+A")
+                await asyncio.sleep(0.2)
+                await page.keyboard.press("Delete")
+                await asyncio.sleep(0.3)
+            except Exception:
+                pass
+            await human_type(title_input, title)
+            step(f"标题已填: {title}")
+
+        # 4. 填描述+标签 (contentEditable div, 抖音用 editor-comp-publish 这个组件)
+        if form_rendered and (description or tags):
+            await random_sleep(800, 2000)
+            desc_editor = page.locator("div.editor-comp-publish[contenteditable='true']").first
+            if await desc_editor.count() > 0:
+                await desc_editor.click()
+                await random_sleep(300, 700)
+                full = description.strip()
+                if tags:
+                    if full:
+                        full += "\n"
+                    full += " ".join(f"#{t.strip()}" for t in tags if t.strip())
+                for ch in full:
+                    if ch == "\n":
+                        await page.keyboard.press("Enter")
+                        await asyncio.sleep(random.uniform(0.05, 0.15))
+                    else:
+                        await page.keyboard.type(ch, delay=random.uniform(30, 90))
+                step(f"描述+标签已填 ({len(full)} 字)")
+            else:
+                step("✗ 没找到描述编辑器 (div.editor-comp-publish)")
+
+        # 5. 拟人收尾
+        if form_rendered:
+            await mouse_jitter(page, n=2)
+            await random_sleep(1000, 2000)
+            step("✓ 已停在'发布'按钮前. 你在 Edge 窗口审稿 → 点'发布' → 关 Edge")
+
+        # 6. 等用户操作
+        step(f"等你操作, 最多 {wait_close_timeout} 秒...")
+        try:
+            await page.wait_for_event("close", timeout=wait_close_timeout * 1000)
+            step("Edge 已关, 流程结束")
+        except Exception:
+            step(f"等了 {wait_close_timeout} 秒没操作, 强制关 Edge")
+
+        return {"success": True, "detail": " | ".join(detail_msgs)}
+
+    except Exception as e:
+        step(f"!! 异常: {type(e).__name__}: {e}")
+        return {"success": False, "detail": " | ".join(detail_msgs)}
+    finally:
+        try:
+            await context.close()
+        except Exception:
+            pass
+        try:
+            await pw.stop()
+        except Exception:
+            pass
