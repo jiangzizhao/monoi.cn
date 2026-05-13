@@ -33,7 +33,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (typeof req.body === 'string') {
           body = req.body
         } else if (Buffer.isBuffer(req.body)) {
-          body = req.body
+          body = new Uint8Array(req.body)
         } else {
           body = JSON.stringify(req.body)
         }
@@ -42,7 +42,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // 没有解析的 body，自己读 raw 流（multipart 文件上传 / 二进制）
         const raw = await readRawBody(req)
         if (raw.length > 0) {
-          body = raw
+          body = new Uint8Array(raw)
           headers['Content-Type'] = reqCT || 'application/json'
           if (reqCT.includes('multipart/form-data')) {
             headers['Content-Length'] = String(raw.length)
