@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, Copy, Check, Crown, Zap, Gem, Gift, ChevronDown, ChevronUp, X,
@@ -9,11 +9,12 @@ import { QRCodeCanvas } from 'qrcode.react'
 import {
   fetchPlans, fetchMyCredits, fetchMySubscription, fetchMyReferralCode,
   fetchMyReferrerStatus, fetchMyReferrerBalance, fetchCreditLog,
-  fetchMyProfile, updateProfile, changePassword, fetchMyReferralRecords,
+  fetchMyProfile, updateProfile, changePassword, fetchMyReferralRecords, rebindPhone,
   type PlansResponse, type PlanConfig, type CreditBalance, type UserSubscription,
   type ReferralCode, type ReferrerStatus, type ReferrerBalance, type CreditLogEntry,
   type UserProfile, type ReferredUser, type CommissionDetail,
 } from '../services/billing'
+import { sendSmsCode } from '../lib/auth'
 import { isLoggedIn } from '../lib/auth'
 
 
@@ -263,6 +264,9 @@ function ProfileTab({ me, sub, credits, refCode, plans, onReload }: {
   const [username, setUsername] = useState(me?.username || '')
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
+  const [uploading, setUploading] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
+  const directBase = (import.meta as any).env?.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'
 
   const save = async () => {
     if (!username.trim() || username.length < 2) { setMsg('用户名至少 2 个字符'); return }
@@ -279,6 +283,37 @@ function ProfileTab({ me, sub, credits, refCode, plans, onReload }: {
     }
   }
 
+  const uploadAvatar = async (file: File) => {
+    if (!file.type.startsWith('image/')) { setMsg('请选图片文件'); return }
+    if (file.size > 5 * 1024 * 1024) { setMsg('图片太大 (>5MB)'); return }
+    setUploading(true)
+    setMsg('')
+    try {
+      const signRes = await fetch(directBase + '/api/oss/sign-upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: file.name, content_type: file.type }),
+      })
+      if (!signRes.ok) throw new Error('签名失败')
+      const { put_url, oss_key, content_type } = await signRes.json()
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest()
+        xhr.onload = () => { (xhr.status >= 200 && xhr.status < 300) ? resolve() : reject(new Error(`PUT ${xhr.status}`)) }
+        xhr.onerror = () => reject(new Error('上传失败'))
+        xhr.open('PUT', put_url)
+        xhr.setRequestHeader('Content-Type', content_type)
+        xhr.send(file)
+      })
+      await updateProfile({ avatar_oss_key: oss_key })
+      setMsg('头像已更新')
+      onReload()
+    } catch (e: any) {
+      setMsg(e.message || '上传失败')
+    } finally {
+      setUploading(false)
+    }
+  }
+
   const curTier = sub?.tier || 'free'
   const TierIcon = TIER_ICON[curTier]
   const curPlan = curTier === 'free' ? plans?.free : plans?.plans[curTier]
@@ -288,12 +323,29 @@ function ProfileTab({ me, sub, credits, refCode, plans, onReload }: {
       {/* 头像区 */}
       <div className="p-6 rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] flex items-center gap-5">
         <div className="relative">
-          <div className="w-20 h-20 rounded-full bg-[var(--text)] text-[var(--bg)] flex items-center justify-center text-2xl font-bold">
-            {me?.username?.[0]?.toUpperCase() || 'M'}
+          <div className="w-20 h-20 rounded-full bg-[var(--text)] text-[var(--bg)] flex items-center justify-center text-2xl font-bold overflow-hidden">
+            {me?.avatar_url ? (
+              <img src={me.avatar_url} alt="" className="w-full h-full object-cover"/>
+            ) : (
+              <span>{me?.username?.[0]?.toUpperCase() || 'M'}</span>
+            )}
           </div>
-          <button title="上传头像 (功能待开发)" className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-[var(--bg-card)] border border-[var(--border)] flex items-center justify-center text-[var(--text-2)] hover:bg-[var(--bg-hover)] cursor-pointer">
+          <button
+            onClick={() => fileRef.current?.click()}
+            disabled={uploading}
+            title="上传头像 (jpg/png/webp ≤5MB)"
+            className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-[var(--bg-card)] border border-[var(--border)] flex items-center justify-center text-[var(--text-2)] hover:bg-[var(--bg-hover)] cursor-pointer disabled:opacity-50"
+          >
             <Camera size={13}/>
           </button>
+          <input
+            ref={fileRef} type="file" accept="image/*" className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              if (f) uploadAvatar(f)
+              if (fileRef.current) fileRef.current.value = ''
+            }}
+          />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
@@ -922,6 +974,7 @@ function SecurityTab({ me, onReload }: { me: UserProfile | null; onReload: () =>
   const [confirmPwd, setConfirmPwd] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [msg, setMsg] = useState('')
+  const [rebindOpen, setRebindOpen] = useState(false)
 
   const submit = async () => {
     setMsg('')
@@ -961,9 +1014,14 @@ function SecurityTab({ me, onReload }: { me: UserProfile | null; onReload: () =>
       </div>
 
       <div className="p-5 rounded-2xl border border-[var(--border)] bg-[var(--bg-card)]">
-        <div className="text-base font-semibold mb-3">手机号换绑</div>
-        <div className="text-sm text-[var(--text-2)] mb-2">当前手机号: <span className="font-mono">{me?.phone_masked || '-'}</span></div>
-        <div className="text-xs text-[var(--text-3)]">需要双因素验证 (新旧手机都收验证码), 功能开发中</div>
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-base font-semibold">手机号换绑</div>
+          <button onClick={() => setRebindOpen(true)} className="text-xs text-[var(--text-2)] hover:text-[var(--text)] underline cursor-pointer">
+            换绑手机号
+          </button>
+        </div>
+        <div className="text-sm text-[var(--text-2)] mb-1">当前手机号: <span className="font-mono">{me?.phone_masked || '-'}</span></div>
+        <div className="text-[11px] text-[var(--text-3)]">需要双因素验证 (新旧手机都要收验证码), 防止账号被盗</div>
       </div>
 
       <div className="p-5 rounded-2xl border border-[var(--border)] bg-[var(--bg-card)]">
@@ -977,6 +1035,139 @@ function SecurityTab({ me, onReload }: { me: UserProfile | null; onReload: () =>
           <span className="text-xs text-[var(--text-3)]">未绑定 (V2 开放)</span>
         </div>
       </div>
+
+      {/* 手机号换绑 弹窗 */}
+      {rebindOpen && <RebindPhoneModal currentPhone={me?.phone || ''} onClose={() => setRebindOpen(false)} onDone={onReload}/>}
     </>
+  )
+}
+
+
+// ========== 手机号换绑 modal ==========
+
+function RebindPhoneModal({ currentPhone, onClose, onDone }: {
+  currentPhone: string; onClose: () => void; onDone: () => void
+}) {
+  const [newPhone, setNewPhone] = useState('')
+  const [newCode, setNewCode] = useState('')
+  const [oldCode, setOldCode] = useState('')
+  const [newCdwn, setNewCdwn] = useState(0)
+  const [oldCdwn, setOldCdwn] = useState(0)
+  const [submitting, setSubmitting] = useState(false)
+  const [msg, setMsg] = useState('')
+
+  useEffect(() => {
+    if (newCdwn <= 0) return
+    const t = setTimeout(() => setNewCdwn(c => c - 1), 1000)
+    return () => clearTimeout(t)
+  }, [newCdwn])
+  useEffect(() => {
+    if (oldCdwn <= 0) return
+    const t = setTimeout(() => setOldCdwn(c => c - 1), 1000)
+    return () => clearTimeout(t)
+  }, [oldCdwn])
+
+  const validPhone = (p: string) => /^1\d{10}$/.test(p)
+
+  const sendNew = async () => {
+    setMsg('')
+    if (!validPhone(newPhone)) { setMsg('新手机号格式不对'); return }
+    try {
+      const r = await sendSmsCode(newPhone, 'rebind_phone')
+      setNewCdwn(60)
+      setMsg(r.dev_code ? `新手机验证码已发 (mock: ${r.dev_code})` : '新手机验证码已发送')
+    } catch (e: any) { setMsg(e.message) }
+  }
+
+  const sendOld = async () => {
+    setMsg('')
+    if (!currentPhone) { setMsg('当前账号未绑定手机号, 不需要验证旧手机'); return }
+    try {
+      const r = await sendSmsCode(currentPhone, 'rebind_phone')
+      setOldCdwn(60)
+      setMsg(r.dev_code ? `旧手机验证码已发 (mock: ${r.dev_code})` : '旧手机验证码已发送')
+    } catch (e: any) { setMsg(e.message) }
+  }
+
+  const submit = async () => {
+    setMsg('')
+    if (!validPhone(newPhone)) { setMsg('新手机号格式不对'); return }
+    if (newCode.length !== 6) { setMsg('新手机验证码 6 位'); return }
+    if (currentPhone && oldCode.length !== 6) { setMsg('旧手机验证码 6 位'); return }
+    setSubmitting(true)
+    try {
+      await rebindPhone(newPhone, newCode, oldCode || newCode)
+      setMsg('换绑成功')
+      onDone()
+      setTimeout(onClose, 800)
+    } catch (e: any) {
+      setMsg(e.message || '换绑失败')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} className="relative bg-[var(--bg-card)] border border-[var(--border)] rounded-2xl shadow-ios-lg w-full max-w-md p-6 flex flex-col gap-3">
+        <button onClick={onClose} className="absolute top-4 right-4 p-1 rounded text-[var(--text-3)] hover:bg-[var(--bg-hover)] cursor-pointer"><X size={14}/></button>
+        <div className="text-base font-semibold">换绑手机号</div>
+        <div className="text-xs text-[var(--text-3)]">需双因素验证: 新手机 + 旧手机各收一条验证码</div>
+
+        {/* 新手机号 */}
+        <div className="flex flex-col gap-1.5 mt-2">
+          <label className="text-xs text-[var(--text-2)]">新手机号</label>
+          <div className="flex gap-2">
+            <input
+              type="tel" value={newPhone}
+              onChange={e => setNewPhone(e.target.value.replace(/\D/g, '').slice(0, 11))}
+              placeholder="11 位手机号" maxLength={11}
+              className="flex-1 bg-[var(--bg-input)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[var(--text-3)]"
+            />
+            <button onClick={sendNew} disabled={newCdwn > 0 || !validPhone(newPhone)}
+              className="px-3 rounded-lg text-xs border border-[var(--border)] hover:bg-[var(--bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap">
+              {newCdwn > 0 ? `${newCdwn}s 后重发` : '发送验证码'}
+            </button>
+          </div>
+          <input
+            type="text" value={newCode}
+            onChange={e => setNewCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+            placeholder="新手机验证码 (6 位)" maxLength={6}
+            className="bg-[var(--bg-input)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[var(--text-3)]"
+          />
+        </div>
+
+        {/* 旧手机号 (如果有) */}
+        {currentPhone ? (
+          <div className="flex flex-col gap-1.5 mt-2">
+            <label className="text-xs text-[var(--text-2)]">旧手机号 {currentPhone.slice(0,3)}****{currentPhone.slice(-4)}</label>
+            <div className="flex gap-2">
+              <input
+                type="text" value={oldCode}
+                onChange={e => setOldCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                placeholder="旧手机验证码 (6 位)" maxLength={6}
+                className="flex-1 bg-[var(--bg-input)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[var(--text-3)]"
+              />
+              <button onClick={sendOld} disabled={oldCdwn > 0}
+                className="px-3 rounded-lg text-xs border border-[var(--border)] hover:bg-[var(--bg-hover)] disabled:opacity-40 cursor-pointer whitespace-nowrap">
+                {oldCdwn > 0 ? `${oldCdwn}s 后重发` : '发送验证码'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="text-[11px] text-[var(--text-3)] mt-2">你当前账号还未绑定手机号, 跳过旧手机验证</div>
+        )}
+
+        {msg && <div className={`text-xs mt-2 ${msg.includes('成功') || msg.includes('已发') ? 'text-green-500' : 'text-red-400'}`}>{msg}</div>}
+
+        <div className="flex justify-end gap-2 mt-3">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-[var(--text-2)] hover:bg-[var(--bg-hover)] cursor-pointer">取消</button>
+          <button onClick={submit} disabled={submitting}
+            className="px-4 py-2 rounded-lg bg-[var(--text)] text-[var(--bg)] text-sm hover:opacity-80 disabled:opacity-40 cursor-pointer">
+            {submitting ? '换绑中' : '确认换绑'}
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }

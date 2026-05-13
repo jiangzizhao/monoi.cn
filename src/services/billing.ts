@@ -207,6 +207,7 @@ export interface UserProfile {
   phone?: string
   phone_masked: string
   avatar_oss_key?: string
+  avatar_url?: string        // 后端签好的 6 小时 GET URL
   is_admin: number
   created_at: string
 }

@@ -515,6 +515,15 @@ def get_me(request: Request):
     if not row:
         raise HTTPException(404, '用户不存在')
     d = dict(row)
+    # 头像签名 URL (avatar_oss_key 是裸 key, 签 6 小时 GET URL 给前端)
+    if d.get('avatar_oss_key'):
+        try:
+            from oss_helper import oss_sign_get
+            d['avatar_url'] = oss_sign_get(d['avatar_oss_key'], expires=6 * 3600)
+        except Exception:
+            d['avatar_url'] = ''
+    else:
+        d['avatar_url'] = ''
     # 手机号脱敏 (前 3 + 后 4)
     if d.get('phone'):
         p = d['phone']
