@@ -33,7 +33,8 @@ const MODULE_OPTIONS: Record<string, { id: string; label: string; desc: string }
   '口播': [
     { id: '__narration_video__', label: '口播剪辑', desc: '上传口播视频自动去气口去重复' },
     { id: '__digital_human__', label: '数字人', desc: '上传形象视频+音频自动对口型' },
-    { id: '我想用AI生成口播视频', label: 'AI生成', desc: '根据文案自动生成' },
+    // AI 生成 暂时下线
+    // { id: '我想用AI生成口播视频', label: 'AI生成', desc: '根据文案自动生成' },
   ],
   '素材': [
     { id: '__form_footage__', label: '智能匹配素材', desc: '粘贴文案, AI 拆句生成画面词搜素材' },
