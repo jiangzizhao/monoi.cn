@@ -161,6 +161,29 @@ def init_db():
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    # 给已有 users 表加 phone / avatar_oss_key / is_admin (老 schema 兼容, ALTER 失败说明列已存在)
+    for col_def in [
+        "ALTER TABLE users ADD COLUMN phone TEXT",
+        "ALTER TABLE users ADD COLUMN avatar_oss_key TEXT",
+        "ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0",
+    ]:
+        try:
+            conn.execute(col_def)
+        except sqlite3.OperationalError:
+            pass  # 列已存在
+    # 短信验证码表 (mock 模式存 6 位随机, 5 分钟过期)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS sms_codes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            phone TEXT NOT NULL,
+            code TEXT NOT NULL,
+            purpose TEXT NOT NULL DEFAULT 'register',
+            created_at REAL NOT NULL,
+            expires_at REAL NOT NULL,
+            used INTEGER DEFAULT 0
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_sms_codes_phone ON sms_codes(phone, created_at DESC)")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS voice_presets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -277,7 +300,13 @@ class RegisterRequest(BaseModel):
     username: str
     email: str
     password: str
-    referral_code: Optional[str] = None      # 可选: 通过谁的推广码注册
+    phone: str                                # 必填手机号 (中国格式 11 位)
+    sms_code: str                             # 6 位短信验证码
+    referral_code: Optional[str] = None       # 可选: 推广码
+
+class SendSmsRequest(BaseModel):
+    phone: str
+    purpose: str = 'register'                 # register / reset_password / rebind_phone
 
 class LoginRequest(BaseModel):
     email: str
@@ -320,17 +349,101 @@ def create_token(user_id: int, username: str):
 def row_to_dict(row: sqlite3.Row) -> dict:
     return dict(row)
 
+import random
+import time as _time
+
+# 短信验证码 mock 模式 (Phase 2 接阿里云后改成真发送)
+SMS_MOCK_MODE = True
+SMS_CODE_TTL_SECONDS = 5 * 60     # 5 分钟过期
+SMS_RESEND_COOLDOWN = 60          # 同手机号 60 秒不能重发
+
+
+def _validate_phone(phone: str) -> bool:
+    """中国手机号 1xxxxxxxxxx"""
+    return bool(phone and len(phone) == 11 and phone.startswith('1') and phone.isdigit())
+
+
+def _gen_sms_code() -> str:
+    return f"{random.randint(0, 999999):06d}"
+
+
+@app.post("/api/send-sms")
+def send_sms_code(req: SendSmsRequest):
+    """发送短信验证码. mock 模式下: 控制台 print + 响应返回 dev_code 字段方便测试."""
+    if not _validate_phone(req.phone):
+        raise HTTPException(400, "手机号格式不对, 需要 11 位数字以 1 开头")
+    if req.purpose not in ('register', 'reset_password', 'rebind_phone', 'login'):
+        raise HTTPException(400, f"未知用途: {req.purpose}")
+
+    now = _time.time()
+    conn = get_db()
+    # 频率限制: 同手机号 60 秒内只能发一次
+    recent = conn.execute(
+        "SELECT created_at FROM sms_codes WHERE phone = ? ORDER BY created_at DESC LIMIT 1",
+        (req.phone,)
+    ).fetchone()
+    if recent and now - recent[0] < SMS_RESEND_COOLDOWN:
+        wait = int(SMS_RESEND_COOLDOWN - (now - recent[0]))
+        conn.close()
+        raise HTTPException(429, f"请求过频, {wait} 秒后再试")
+
+    code = _gen_sms_code()
+    conn.execute("""
+        INSERT INTO sms_codes (phone, code, purpose, created_at, expires_at, used)
+        VALUES (?, ?, ?, ?, ?, 0)
+    """, (req.phone, code, req.purpose, now, now + SMS_CODE_TTL_SECONDS))
+    conn.commit()
+    conn.close()
+
+    print(f"[sms-mock] {req.phone} 收到验证码: {code} (用途: {req.purpose}, 5 分钟有效)", flush=True)
+
+    result = {"success": True, "message": "验证码已发送 (mock 模式)"}
+    if SMS_MOCK_MODE:
+        result["dev_code"] = code   # mock 模式响应里返回 code, 方便前端测试; 生产模式不返回
+    return result
+
+
+def _verify_sms_code(phone: str, code: str, purpose: str) -> bool:
+    """验证短信验证码. 验过即标记 used = 1."""
+    conn = get_db()
+    now = _time.time()
+    row = conn.execute("""
+        SELECT id FROM sms_codes
+        WHERE phone = ? AND code = ? AND purpose = ?
+          AND used = 0 AND expires_at >= ?
+        ORDER BY created_at DESC LIMIT 1
+    """, (phone, code, purpose, now)).fetchone()
+    if not row:
+        conn.close()
+        return False
+    conn.execute("UPDATE sms_codes SET used = 1 WHERE id = ?", (row[0],))
+    conn.commit()
+    conn.close()
+    return True
+
+
 @app.post("/api/register")
 def register(req: RegisterRequest):
     if len(req.username) < 2:
-        raise HTTPException(400, "用户名至少2个字符")
+        raise HTTPException(400, "用户名至少 2 个字符")
     if len(req.password) < 6:
-        raise HTTPException(400, "密码至少6位")
+        raise HTTPException(400, "密码至少 6 位")
+    if not _validate_phone(req.phone):
+        raise HTTPException(400, "手机号格式不对")
+    if not _verify_sms_code(req.phone, req.sms_code, 'register'):
+        raise HTTPException(400, "验证码错误或已过期")
+
     conn = get_db()
     try:
+        # 手机号唯一性 (用代码强制, ALTER ADD COLUMN 没法加 UNIQUE 约束)
+        existing = conn.execute("SELECT id FROM users WHERE phone = ?", (req.phone,)).fetchone()
+        if existing:
+            raise HTTPException(400, "手机号已注册")
         hashed = hash_password(req.password)
-        cursor = conn.execute("INSERT INTO users (username, email, password) VALUES (?, ?, ?)",
-                              (req.username, req.email, hashed))
+        cursor = conn.execute(
+            "INSERT INTO users (username, email, password, phone) VALUES (?, ?, ?, ?)",
+            (req.username, req.email, hashed, req.phone)
+        )
         new_user_id = cursor.lastrowid
         conn.commit()
     except sqlite3.IntegrityError:
@@ -338,16 +451,14 @@ def register(req: RegisterRequest):
     finally:
         conn.close()
 
-    # 商业化: 给新用户建推广员状态 (拿到推广码) + 绑定推广关系 (如果有 referral_code)
+    # 商业化: 给新用户建推广员状态 (拿到推广码) + 绑定推广关系 + 50 体验积分
     try:
         billing.ensure_referrer_status(new_user_id)
         if req.referral_code:
             billing.bind_referrer(new_user_id, req.referral_code.strip().upper())
-        # 给免费用户 50 体验积分 (一次性)
         billing.add_credits(new_user_id, FREE_PLAN_INIT_CREDITS, 'subscription_grant',
                              feature='free_signup', to_monthly=False)
     except Exception as e:
-        # 推广/积分初始化失败不影响注册主流程
         print(f"[register] billing 初始化失败 user={new_user_id}: {e}", flush=True)
 
     return {"success": True, "message": "注册成功"}

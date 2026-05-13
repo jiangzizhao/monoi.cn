@@ -9,8 +9,15 @@ async function proxyRequest(path: string, body: object) {
   return data
 }
 
-export async function register(username: string, email: string, password: string) {
-  return proxyRequest('/api/register', { username, email, password })
+export async function register(
+  username: string, email: string, password: string,
+  phone: string, sms_code: string, referral_code?: string,
+) {
+  return proxyRequest('/api/register', { username, email, password, phone, sms_code, referral_code })
+}
+
+export async function sendSmsCode(phone: string, purpose: 'register' | 'reset_password' | 'rebind_phone' | 'login') {
+  return proxyRequest('/api/send-sms', { phone, purpose })
 }
 
 export async function login(email: string, password: string) {
