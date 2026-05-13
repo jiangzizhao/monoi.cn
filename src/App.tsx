@@ -6,6 +6,7 @@ import Landing from './pages/Landing'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import Account from './pages/Account'
+import Admin from './pages/Admin'
 import { isLoggedIn } from './lib/auth'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -86,6 +87,11 @@ export default function App() {
           <Route path="/app/account" element={
             <ProtectedRoute>
               <Account/>
+            </ProtectedRoute>
+          }/>
+          <Route path="/admin" element={
+            <ProtectedRoute>
+              <Admin/>
             </ProtectedRoute>
           }/>
           <Route path="*" element={<Navigate to="/" replace/>}/>

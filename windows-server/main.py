@@ -295,6 +295,10 @@ billing.init_billing_tables()
 app.include_router(billing.router)
 app.include_router(billing.referral_router)
 
+# 管理员后台
+import admin
+app.include_router(admin.router)
+
 
 class RegisterRequest(BaseModel):
     username: str
@@ -450,6 +454,14 @@ def register(req: RegisterRequest):
         raise HTTPException(400, "用户名或邮箱已存在")
     finally:
         conn.close()
+
+    # 第一个注册的用户自动是 admin (创业期方便, 后续上线该删掉)
+    if new_user_id == 1:
+        conn = get_db()
+        conn.execute("UPDATE users SET is_admin = 1 WHERE id = 1")
+        conn.commit()
+        conn.close()
+        print(f"[register] user_id=1 自动设为 admin", flush=True)
 
     # 商业化: 给新用户建推广员状态 (拿到推广码) + 绑定推广关系 + 50 体验积分
     try:

@@ -1,7 +1,9 @@
-import { Plus, Trash2, MessageSquare, User, LogOut } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Plus, Trash2, MessageSquare, User, LogOut, Shield } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useChatStore } from '../../store/chatStore'
-import { getUsername, logout } from '../../lib/auth'
+import { getUsername, logout, isLoggedIn } from '../../lib/auth'
+import { fetchMyProfile } from '../../services/billing'
 
 function timeAgo(ts: number) {
   const diff = Date.now() - ts
@@ -15,6 +17,11 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
   const { conversations, activeId, setActiveId, newConversation, deleteConversation } = useChatStore()
   const nav = useNavigate()
   const username = getUsername()
+  const [isAdmin, setIsAdmin] = useState(false)
+
+  useEffect(() => {
+    if (isLoggedIn()) fetchMyProfile().then(p => setIsAdmin(!!p.is_admin)).catch(() => {})
+  }, [])
 
   const handleLogout = () => {
     logout()
@@ -82,6 +89,14 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
           <span className="flex-1 truncate">{username || '账户'}</span>
           <span className="text-[10px] text-[var(--text-3)]">账户中心</span>
         </Link>
+        {isAdmin && (
+          <Link to="/admin" onClick={onClose}
+            className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-[var(--text-2)] hover:bg-[var(--bg-hover)] hover:text-[var(--text)] cursor-pointer transition-colors">
+            <Shield size={14}/>
+            <span className="flex-1 truncate">管理后台</span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500 text-white">admin</span>
+          </Link>
+        )}
         <button onClick={handleLogout}
           className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-[var(--text-3)] hover:bg-[var(--bg-hover)] hover:text-red-400 cursor-pointer transition-colors">
           <LogOut size={14}/> 退出登录
