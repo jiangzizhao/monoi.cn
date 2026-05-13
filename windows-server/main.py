@@ -487,6 +487,134 @@ def verify(payload: dict):
     except JWTError:
         raise HTTPException(401, "无效或过期的token")
 
+
+def _user_id_from_request(request) -> int:
+    """从 Authorization Bearer 解 user_id (JWT). 失败抛 401."""
+    auth = request.headers.get('authorization') or request.headers.get('Authorization') or ''
+    if not auth.startswith('Bearer '):
+        raise HTTPException(401, '未登录')
+    token = auth[7:]
+    try:
+        data = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        return int(data['sub'])
+    except Exception:
+        raise HTTPException(401, '无效或过期的 token')
+
+
+@app.get("/api/me")
+def get_me(request: Request):
+    """当前用户基础信息 (用户名/邮箱/手机/头像/注册时间/admin 标记)."""
+    user_id = _user_id_from_request(request)
+    conn = get_db()
+    conn.row_factory = sqlite3.Row
+    row = conn.execute(
+        "SELECT id, username, email, phone, avatar_oss_key, is_admin, created_at FROM users WHERE id = ?",
+        (user_id,)
+    ).fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(404, '用户不存在')
+    d = dict(row)
+    # 手机号脱敏 (前 3 + 后 4)
+    if d.get('phone'):
+        p = d['phone']
+        d['phone_masked'] = p[:3] + '****' + p[-4:] if len(p) == 11 else p
+    else:
+        d['phone_masked'] = ''
+    return d
+
+
+class UpdateProfileRequest(BaseModel):
+    username: Optional[str] = None
+    avatar_oss_key: Optional[str] = None
+
+
+@app.post("/api/me/update")
+def update_profile(req: UpdateProfileRequest, request: Request):
+    """改用户名 / 头像. 邮箱手机号走单独的换绑流程."""
+    user_id = _user_id_from_request(request)
+    updates = []
+    params = []
+    if req.username is not None:
+        if len(req.username) < 2:
+            raise HTTPException(400, "用户名至少 2 个字符")
+        updates.append("username = ?")
+        params.append(req.username)
+    if req.avatar_oss_key is not None:
+        updates.append("avatar_oss_key = ?")
+        params.append(req.avatar_oss_key)
+    if not updates:
+        raise HTTPException(400, "没有需要更新的字段")
+    params.append(user_id)
+    conn = get_db()
+    try:
+        conn.execute(f"UPDATE users SET {', '.join(updates)} WHERE id = ?", params)
+        conn.commit()
+    except sqlite3.IntegrityError:
+        raise HTTPException(400, "用户名已被占用")
+    finally:
+        conn.close()
+    return {"success": True}
+
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
+
+
+@app.post("/api/me/change-password")
+def change_password(req: ChangePasswordRequest, request: Request):
+    user_id = _user_id_from_request(request)
+    if len(req.new_password) < 6:
+        raise HTTPException(400, "新密码至少 6 位")
+    conn = get_db()
+    try:
+        row = conn.execute("SELECT password FROM users WHERE id = ?", (user_id,)).fetchone()
+        if not row or not verify_password(req.old_password, row[0]):
+            raise HTTPException(400, "原密码错误")
+        new_hash = hash_password(req.new_password)
+        conn.execute("UPDATE users SET password = ? WHERE id = ?", (new_hash, user_id))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"success": True, "message": "密码已修改"}
+
+
+class RebindPhoneRequest(BaseModel):
+    new_phone: str
+    new_phone_code: str        # 新手机号收到的验证码
+    old_phone_code: str        # 旧手机号收到的验证码 (双因素, 防被盗)
+
+
+@app.post("/api/me/rebind-phone")
+def rebind_phone(req: RebindPhoneRequest, request: Request):
+    user_id = _user_id_from_request(request)
+    if not _validate_phone(req.new_phone):
+        raise HTTPException(400, "新手机号格式不对")
+    conn = get_db()
+    row = conn.execute("SELECT phone FROM users WHERE id = ?", (user_id,)).fetchone()
+    old_phone = row[0] if row else None
+    conn.close()
+
+    # 验证两个验证码
+    if not _verify_sms_code(req.new_phone, req.new_phone_code, 'rebind_phone'):
+        raise HTTPException(400, "新手机验证码错误或已过期")
+    if old_phone and not _verify_sms_code(old_phone, req.old_phone_code, 'rebind_phone'):
+        raise HTTPException(400, "旧手机验证码错误或已过期")
+
+    # 检查新手机号未被其他用户占用
+    conn = get_db()
+    existing = conn.execute(
+        "SELECT id FROM users WHERE phone = ? AND id != ?", (req.new_phone, user_id)
+    ).fetchone()
+    if existing:
+        conn.close()
+        raise HTTPException(400, "新手机号已被其他账号绑定")
+    conn.execute("UPDATE users SET phone = ? WHERE id = ?", (req.new_phone, user_id))
+    conn.commit()
+    conn.close()
+    return {"success": True, "message": "手机号已换绑"}
+
 class FetchRequest(BaseModel):
     url: str
 

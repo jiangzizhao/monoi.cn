@@ -166,3 +166,32 @@ export async function fetchMyCommissions(limit = 50) {
 export async function submitWithdraw(amount_yuan: number, payment_method: 'alipay' | 'wechat', account_info: string) {
   return post('/api/referral/withdraw', { amount_yuan, payment_method, account_info })
 }
+
+// ============== 用户资料 ==============
+
+export interface UserProfile {
+  id: number
+  username: string
+  email: string
+  phone?: string
+  phone_masked: string
+  avatar_oss_key?: string
+  is_admin: number
+  created_at: string
+}
+
+export async function fetchMyProfile(): Promise<UserProfile> {
+  return get('/api/me')
+}
+
+export async function updateProfile(data: { username?: string; avatar_oss_key?: string }) {
+  return post('/api/me/update', data)
+}
+
+export async function changePassword(old_password: string, new_password: string) {
+  return post('/api/me/change-password', { old_password, new_password })
+}
+
+export async function rebindPhone(new_phone: string, new_phone_code: string, old_phone_code: string) {
+  return post('/api/me/rebind-phone', { new_phone, new_phone_code, old_phone_code })
+}

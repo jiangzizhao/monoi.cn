@@ -12,7 +12,7 @@ export default function Register() {
   const [phone, setPhone] = useState('')
   const [smsCode, setSmsCode] = useState('')
   const [password, setPassword] = useState('')
-  const [referralCode, setReferralCode] = useState(refFromUrl)
+  const referralCode = refFromUrl                          // 只通过 URL ?ref= 绑定, 不再 UI 输入
   const [error, setError] = useState('')
   const [info, setInfo] = useState('')
   const [loading, setLoading] = useState(false)
@@ -137,14 +137,7 @@ export default function Register() {
             />
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <label className="text-sm text-[var(--text-2)]">推广码 <span className="text-[10px] text-[var(--text-3)]">(选填, 注册送 30 积分)</span></label>
-            <input
-              type="text" value={referralCode} onChange={e => setReferralCode(e.target.value.toUpperCase())}
-              placeholder="例: M1ABCD"
-              className="bg-[var(--bg-input)] border border-[var(--border)] rounded-xl px-4 py-2.5 text-sm text-[var(--text)] placeholder:text-[var(--text-3)] focus:outline-none focus:border-[var(--text-3)] transition-colors font-mono"
-            />
-          </div>
+          {/* 推广码不再 UI 输入, 只通过 URL ?ref= 自动绑定 (顶部已有金色提示) */}
 
           {error && <p className="text-sm text-red-400 text-center">{error}</p>}
           {info && <p className="text-xs text-green-500 text-center">{info}</p>}
