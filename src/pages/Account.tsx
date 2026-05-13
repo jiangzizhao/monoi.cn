@@ -414,17 +414,14 @@ function MembershipTab({ sub, plans, credits, onUpgrade }: {
             const isMax = tier === 'max_monthly'
             const isFlagship = tier === 'flagship_yearly'
             return (
-              <div key={tier} className={`relative p-4 rounded-2xl border-2 flex flex-col gap-3 ${
-                isCurrent ? 'border-[var(--text)] bg-[var(--bg-hover)]' :
-                isMax ? 'border-amber-400 bg-[var(--bg-card)]' :
-                isFlagship ? 'border-purple-500 bg-[var(--bg-card)]' :
-                'border-[var(--border)] bg-[var(--bg-card)]'
+              <div key={tier} className={`relative p-4 rounded-2xl border-2 flex flex-col gap-3 bg-[var(--bg-card)] ${
+                isCurrent ? 'border-[var(--text)] bg-[var(--bg-hover)]' : 'border-[var(--border)]'
               }`}>
-                {isMax && !isCurrent && <Badge color="bg-amber-400 text-black">⭐ 最受欢迎</Badge>}
-                {isFlagship && !isCurrent && <Badge color="bg-purple-500 text-white">💎 工作室专属</Badge>}
+                {isMax && !isCurrent && <Badge color="bg-[var(--text)] text-[var(--bg)]">最受欢迎</Badge>}
+                {isFlagship && !isCurrent && <Badge color="bg-[var(--text)] text-[var(--bg)]">工作室专属</Badge>}
                 {isCurrent && <Badge color="bg-[var(--text)] text-[var(--bg)]">✓ 当前</Badge>}
                 <div className="flex items-center gap-2">
-                  <Icon size={18} className={isFlagship ? 'text-purple-500' : isMax ? 'text-amber-400' : 'text-[var(--text-2)]'}/>
+                  <Icon size={18} className="text-[var(--text-2)]"/>
                   <span className="text-base font-semibold">{p.name}</span>
                 </div>
                 <div className="text-2xl font-semibold">
@@ -439,9 +436,7 @@ function MembershipTab({ sub, plans, credits, onUpgrade }: {
                 <button onClick={() => !isCurrent && onUpgrade(tier)} disabled={isCurrent}
                   className={`mt-1 py-2.5 rounded-xl text-sm font-medium transition-all cursor-pointer ${
                     isCurrent ? 'bg-[var(--bg-hover)] text-[var(--text-3)] cursor-not-allowed' :
-                    isMax ? 'bg-amber-400 text-black hover:opacity-90' :
-                    isFlagship ? 'bg-purple-500 text-white hover:opacity-90' :
-                    tier === 'free' ? 'bg-[var(--bg-hover)] text-[var(--text-2)]' :
+                    tier === 'free' ? 'bg-[var(--bg-hover)] text-[var(--text-2)] hover:bg-[var(--bg-hover)]' :
                     'bg-[var(--text)] text-[var(--bg)] hover:opacity-80'
                   }`}>
                   {isCurrent ? '当前使用' : tier === 'free' ? '免费版' : `开通 ${p.name}`}
@@ -464,10 +459,9 @@ function MembershipTab({ sub, plans, credits, onUpgrade }: {
               <thead className="bg-[var(--bg-hover)]">
                 <tr>
                   <th className="text-left px-4 py-2.5 font-medium text-[var(--text-2)]">功能</th>
-                  {TIER_ORDER.map(t => {
-                    const isMax = t === 'max_monthly'
-                    return <th key={t} className={`text-center px-3 py-2.5 font-medium ${isMax ? 'text-amber-500' : 'text-[var(--text-2)]'}`}>{TIER_LABEL[t]}</th>
-                  })}
+                  {TIER_ORDER.map(t => (
+                    <th key={t} className="text-center px-3 py-2.5 font-medium text-[var(--text-2)]">{TIER_LABEL[t]}</th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
