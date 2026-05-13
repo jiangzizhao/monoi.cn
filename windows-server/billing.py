@@ -44,40 +44,70 @@ PLANS = {
         'price_yuan': 99,
         'period_days': 30,
         'monthly_credits': 1500,
-        'credit_pack_rate': 15,        # 加买积分 ¥1=15 (1.5x 标准)
-        'digital_human_quota': 30,      # 月配额, 超出走积分扣
+        'credit_pack_rate': 15,                       # 加买积分 ¥1=15 (1.5x 标准)
+        'digital_human_quota': 30,                    # 月配额
+        'max_video_minutes': 15,                      # 单视频最长时长
+        'max_resolution': '720p',                     # 视频导出最高清晰度
         'clone_voice_slots': 1,
+        'multi_platform_accounts': 2,                 # 抖音 1 + 小红书 1
+        'team_seats': 0,
         'priority_gpu': False,
         'commercial_license': False,
+        'transferable_license': False,                # 转售/代理授权
+        'vip_support': False,
+        'early_access': False,                        # 提前体验新功能
+        'api_access': False,
+        'unlimited_duration': False,                  # 不限时长
+        'referral_boost': False,                      # 推广分成提升 (旗舰跨过认证门槛)
         'watermark': False,
+        'support_response_hours': 24,
     },
     'max_monthly': {
         'name': 'Max',
         'price_yuan': 199,
         'period_days': 30,
         'monthly_credits': 4000,
-        'credit_pack_rate': 20,        # ¥1=20 (2x)
+        'credit_pack_rate': 20,                       # ¥1=20 (2x)
         'digital_human_quota': 100,
+        'max_video_minutes': 30,
+        'max_resolution': '1080p',
         'clone_voice_slots': 3,
+        'multi_platform_accounts': 4,                 # 抖音 2 + 小红书 2
+        'team_seats': 0,
         'priority_gpu': True,
         'commercial_license': True,
-        'multi_platform_account': True,
+        'transferable_license': False,
+        'vip_support': False,
+        'early_access': False,
+        'api_access': False,
+        'unlimited_duration': False,
+        'referral_boost': False,
         'watermark': False,
+        'support_response_hours': 12,
     },
     'flagship_yearly': {
         'name': '旗舰年卡',
         'price_yuan': 2980,
         'period_days': 365,
-        'monthly_credits': 5000,        # 每月均匀, 入账时按月入而不是一次性 60000
+        'monthly_credits': 5000,                      # 每月入账, 不是一次性 60000
         'yearly_total_credits': 60000,
-        'credit_pack_rate': 25,        # ¥1=25 (2.5x)
+        'credit_pack_rate': 25,                       # ¥1=25 (2.5x)
         'digital_human_quota': 300,
+        'max_video_minutes': 60,
+        'max_resolution': '4K',
         'clone_voice_slots': 5,
+        'multi_platform_accounts': 5,                 # 任意平台
+        'team_seats': 3,                              # 主账号 + 2 协作
         'priority_gpu': True,
         'commercial_license': True,
-        'multi_platform_account': True,
-        'team_seats': True,
+        'transferable_license': True,                 # 代理给客户合法
+        'vip_support': True,                          # VIP 微信 1v1
+        'early_access': True,
+        'api_access': True,                           # V2 优先开 API
+        'unlimited_duration': True,                   # 不限单视频时长
+        'referral_boost': True,                       # 帮推一次性 30% 现金
         'watermark': False,
+        'support_response_hours': 1,
     },
 }
 
@@ -86,13 +116,24 @@ PLANS = {
 FREE_PLAN = {
     'name': '免费',
     'price_yuan': 0,
-    'monthly_credits': 50,           # 一次性, 注册时给
-    'credit_pack_rate': 10,           # ¥1=10 标准
+    'monthly_credits': 50,                            # 一次性, 注册时给
+    'credit_pack_rate': 10,                           # ¥1=10 标准
     'digital_human_quota': 3,
+    'max_video_minutes': 5,
+    'max_resolution': '480p',
     'clone_voice_slots': 0,
+    'multi_platform_accounts': 1,
+    'team_seats': 0,
     'priority_gpu': False,
     'commercial_license': False,
-    'watermark': True,
+    'transferable_license': False,
+    'vip_support': False,
+    'early_access': False,
+    'api_access': False,
+    'unlimited_duration': False,
+    'referral_boost': False,
+    'watermark': True,                                # 带 monoi 水印
+    'support_response_hours': 48,
 }
 
 
