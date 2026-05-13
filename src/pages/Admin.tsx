@@ -507,7 +507,7 @@ function OrdersTab() {
                       o.status === 'pending' ? 'bg-amber-100 text-amber-700' :
                       'bg-red-100 text-red-700'
                     }`}>
-                      {o.status}
+                      {o.status === 'paid' ? '已支付' : o.status === 'pending' ? '待支付' : o.status === 'refunded' ? '已退款' : o.status}
                     </span>
                   </td>
                 </tr>
@@ -547,10 +547,15 @@ function WithdrawalsTab() {
   return (
     <>
       <div className="flex gap-2">
-        {['pending', 'approved', 'paid', 'rejected'].map(s => (
-          <button key={s} onClick={() => setStatus(s)}
-            className={`px-3 py-1.5 rounded-lg text-xs cursor-pointer ${status === s ? 'bg-[var(--text)] text-[var(--bg)]' : 'bg-[var(--bg-hover)] text-[var(--text-2)]'}`}>
-            {s}
+        {[
+          { k: 'pending', l: '待审核' },
+          { k: 'approved', l: '已批准' },
+          { k: 'paid', l: '已打款' },
+          { k: 'rejected', l: '已拒绝' },
+        ].map(s => (
+          <button key={s.k} onClick={() => setStatus(s.k)}
+            className={`px-3 py-1.5 rounded-lg text-xs cursor-pointer ${status === s.k ? 'bg-[var(--text)] text-[var(--bg)]' : 'bg-[var(--bg-hover)] text-[var(--text-2)]'}`}>
+            {s.l}
           </button>
         ))}
       </div>

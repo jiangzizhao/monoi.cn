@@ -9,6 +9,11 @@ import time
 import uuid
 from typing import Optional
 
+# 离线模式: 模型本地已下载, 不再每次启动联网验证 (国内访问 huggingface SSL 不稳,
+# 默认会重试 5 次浪费 20+ 秒). 必须在 import torch/transformers 之前设.
+os.environ.setdefault('HF_HUB_OFFLINE', '1')
+os.environ.setdefault('TRANSFORMERS_OFFLINE', '1')
+
 INDEX_DIR = r"D:\monoi-server\models\index-tts"
 sys.path.insert(0, INDEX_DIR)
 
