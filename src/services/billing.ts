@@ -13,12 +13,21 @@ export interface PlanConfig {
   yearly_total_credits?: number
   credit_pack_rate: number
   digital_human_quota: number
+  max_video_minutes: number          // 单视频最长时长
+  max_resolution: string             // 480p / 720p / 1080p / 4K
   clone_voice_slots: number
+  multi_platform_accounts: number    // 平台账号数
+  team_seats: number                 // 团队子账号
   priority_gpu: boolean
   commercial_license: boolean
-  multi_platform_account?: boolean
-  team_seats?: boolean
+  transferable_license: boolean      // 转售授权
+  vip_support: boolean               // VIP 1v1
+  early_access: boolean              // 提前体验
+  api_access: boolean                // V2 API
+  unlimited_duration: boolean        // 不限时长
+  referral_boost: boolean            // 推广分成提升
   watermark: boolean
+  support_response_hours: number     // 客服响应小时
 }
 
 export interface CreditPack {
