@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Copy, Check, Crown, Zap, Gem, Gift, ChevronDown, ChevronUp, X } from 'lucide-react'
+import { ArrowLeft, Copy, Check, Crown, Zap, Gem, Gift, ChevronDown, ChevronUp, X, QrCode, Download } from 'lucide-react'
+import { QRCodeCanvas } from 'qrcode.react'
 import {
   fetchPlans, fetchMyCredits, fetchMySubscription, fetchMyReferralCode,
   fetchMyReferrerStatus, fetchMyReferrerBalance, fetchCreditLog,
@@ -131,6 +132,7 @@ export default function Account() {
   const [upgradeDialog, setUpgradeDialog] = useState<string | null>(null)
   const [compareOpen, setCompareOpen] = useState(true)        // 详细对比表默认展开
   const [faqOpen, setFaqOpen] = useState<number | null>(null)
+  const [qrOpen, setQrOpen] = useState(false)                 // 二维码弹窗
 
   useEffect(() => {
     if (!isLoggedIn()) { nav('/login'); return }
@@ -372,6 +374,9 @@ export default function Account() {
               <button onClick={copyLink} className="px-4 py-2 rounded-lg bg-[var(--text)] text-[var(--bg)] text-sm hover:opacity-80 cursor-pointer inline-flex items-center justify-center gap-1.5">
                 {copied ? <><Check size={14}/> 已复制</> : <><Copy size={14}/> 复制链接</>}
               </button>
+              <button onClick={() => setQrOpen(true)} className="px-4 py-2 rounded-lg border border-[var(--border)] text-[var(--text-2)] text-sm hover:bg-[var(--bg-hover)] cursor-pointer inline-flex items-center justify-center gap-1.5">
+                <QrCode size={14}/> 二维码
+              </button>
             </div>
             <div className="mt-3 grid grid-cols-3 gap-3 text-xs text-[var(--text-2)]">
               <div>
@@ -433,6 +438,40 @@ export default function Account() {
           </div>
         )}
       </div>
+
+      {/* 推广二维码弹窗 */}
+      {qrOpen && refCode && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={() => setQrOpen(false)}>
+          <div onClick={e => e.stopPropagation()} className="relative bg-white text-black rounded-2xl shadow-ios-lg w-full max-w-xs p-6 flex flex-col items-center gap-4">
+            <button onClick={() => setQrOpen(false)} className="absolute top-3 right-3 p-1 rounded text-gray-400 hover:bg-gray-100 cursor-pointer"><X size={14}/></button>
+            <div className="text-sm font-medium">我的推广二维码</div>
+            <div id="monoi-qr-wrap" className="p-3 bg-white rounded-lg border border-gray-200">
+              <QRCodeCanvas value={refCode.link} size={220} level="M" includeMargin={false}/>
+            </div>
+            <div className="text-xs text-gray-600 text-center break-all px-2 font-mono">{refCode.link}</div>
+            <div className="text-[11px] text-gray-500 text-center leading-relaxed">
+              分享到朋友圈, 别人扫码注册即绑定为你的下线<br/>
+              注册成功双方各得 30 积分
+            </div>
+            <button
+              onClick={() => {
+                // 截图 QR 区域为 PNG 下载
+                const wrap = document.getElementById('monoi-qr-wrap')
+                const canvas = wrap?.querySelector('canvas')
+                if (!canvas) return
+                const url = (canvas as HTMLCanvasElement).toDataURL('image/png')
+                const a = document.createElement('a')
+                a.href = url
+                a.download = `monoi-推广-${refCode.referral_code}.png`
+                a.click()
+              }}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-black text-white text-xs hover:opacity-80 cursor-pointer"
+            >
+              <Download size={12}/> 保存图片
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 升级/购买对话框 (V1: 引导客服微信) */}
       {upgradeDialog && (
