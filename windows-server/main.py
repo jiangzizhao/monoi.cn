@@ -2539,3 +2539,8 @@ def serve_digital_human_video(name: str):
     if not os.path.exists(file_path):
         raise HTTPException(404, "视频未找到")
     return FileResponse(file_path, media_type="video/mp4")
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=18765)
