@@ -831,6 +831,83 @@ def my_commissions(request: Request, limit: int = 50):
     return [dict(r) for r in rows]
 
 
+@referral_router.get("/records")
+def my_referral_records(request: Request, limit: int = 100):
+    """推广明细: 我推广出去的用户列表 + 每笔佣金详情 (注册/首单/续费)."""
+    user_id = get_current_user_id(request)
+    conn = get_db()
+
+    # 1. 我推广出去的所有用户
+    referred = conn.execute("""
+        SELECT rb.user_id, rb.bound_at, u.username, u.phone
+        FROM referral_binding rb
+        JOIN users u ON u.id = rb.user_id
+        WHERE rb.referrer_id = ?
+        ORDER BY rb.bound_at DESC
+        LIMIT ?
+    """, (user_id, limit)).fetchall()
+
+    # 2. 这些用户是否付费过 (统计每人累计金额)
+    user_ids = [r['user_id'] for r in referred]
+    user_paid: dict = {}
+    if user_ids:
+        placeholders = ','.join('?' * len(user_ids))
+        order_rows = conn.execute(f"""
+            SELECT user_id, SUM(amount_yuan) as total_amount, COUNT(*) as order_count
+            FROM billing_orders
+            WHERE user_id IN ({placeholders}) AND status = 'paid'
+            GROUP BY user_id
+        """, user_ids).fetchall()
+        for r in order_rows:
+            user_paid[r['user_id']] = {
+                'total_amount': r['total_amount'] or 0,
+                'order_count': r['order_count'] or 0,
+            }
+
+    # 3. 我的佣金流水 (含买家信息)
+    commissions = conn.execute("""
+        SELECT cl.id, cl.order_id, cl.commission_type, cl.renewal_month_index,
+               cl.credits, cl.cash_yuan, cl.status, cl.created_at,
+               bo.product_code, bo.amount_yuan as order_amount, bo.user_id as buyer_id,
+               u.username as buyer_username, u.phone as buyer_phone
+        FROM commission_log cl
+        LEFT JOIN billing_orders bo ON bo.id = cl.order_id
+        LEFT JOIN users u ON u.id = bo.user_id
+        WHERE cl.beneficiary_user_id = ?
+        ORDER BY cl.created_at DESC LIMIT ?
+    """, (user_id, limit)).fetchall()
+
+    conn.close()
+
+    def mask(p):
+        return (p[:3] + '****' + p[-4:]) if p and len(p) == 11 else (p or '-')
+
+    return {
+        'referred_users': [{
+            'user_id': r['user_id'],
+            'bound_at': r['bound_at'],
+            'username': r['username'],
+            'phone_masked': mask(r['phone']),
+            'total_paid_amount': user_paid.get(r['user_id'], {}).get('total_amount', 0),
+            'order_count': user_paid.get(r['user_id'], {}).get('order_count', 0),
+        } for r in referred],
+        'commissions': [{
+            'id': c['id'],
+            'order_id': c['order_id'],
+            'commission_type': c['commission_type'],
+            'renewal_month_index': c['renewal_month_index'],
+            'credits': c['credits'],
+            'cash_yuan': c['cash_yuan'],
+            'status': c['status'],
+            'created_at': c['created_at'],
+            'product_code': c['product_code'],
+            'order_amount': c['order_amount'],
+            'buyer_username': c['buyer_username'],
+            'buyer_phone_masked': mask(c['buyer_phone']),
+        } for c in commissions],
+    }
+
+
 @referral_router.get("/balance")
 def my_referrer_balance(request: Request):
     user_id = get_current_user_id(request)

@@ -163,6 +163,37 @@ export async function fetchMyCommissions(limit = 50) {
   return get(`/api/referral/commissions?limit=${limit}`)
 }
 
+export interface ReferredUser {
+  user_id: number
+  bound_at: number
+  username: string
+  phone_masked: string
+  total_paid_amount: number
+  order_count: number
+}
+
+export interface CommissionDetail {
+  id: number
+  order_id: string
+  commission_type: 'register_bonus' | 'first_order' | 'renewal'
+  renewal_month_index?: number
+  credits: number
+  cash_yuan: number
+  status: 'pending' | 'settled' | 'cancelled_refund'
+  created_at: number
+  product_code?: string
+  order_amount?: number
+  buyer_username?: string
+  buyer_phone_masked?: string
+}
+
+export async function fetchMyReferralRecords(limit = 100): Promise<{
+  referred_users: ReferredUser[]
+  commissions: CommissionDetail[]
+}> {
+  return get(`/api/referral/records?limit=${limit}`)
+}
+
 export async function submitWithdraw(amount_yuan: number, payment_method: 'alipay' | 'wechat', account_info: string) {
   return post('/api/referral/withdraw', { amount_yuan, payment_method, account_info })
 }

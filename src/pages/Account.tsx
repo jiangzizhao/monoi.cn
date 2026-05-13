@@ -3,15 +3,16 @@ import { useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, Copy, Check, Crown, Zap, Gem, Gift, ChevronDown, ChevronUp, X,
   QrCode, Download, User, Wallet, History, Share2, Shield, Edit2, Camera,
+  TrendingUp, ArrowRight,
 } from 'lucide-react'
 import { QRCodeCanvas } from 'qrcode.react'
 import {
   fetchPlans, fetchMyCredits, fetchMySubscription, fetchMyReferralCode,
   fetchMyReferrerStatus, fetchMyReferrerBalance, fetchCreditLog,
-  fetchMyProfile, updateProfile, changePassword,
+  fetchMyProfile, updateProfile, changePassword, fetchMyReferralRecords,
   type PlansResponse, type PlanConfig, type CreditBalance, type UserSubscription,
   type ReferralCode, type ReferrerStatus, type ReferrerBalance, type CreditLogEntry,
-  type UserProfile,
+  type UserProfile, type ReferredUser, type CommissionDetail,
 } from '../services/billing'
 import { isLoggedIn } from '../lib/auth'
 
@@ -662,6 +663,14 @@ function ReferralTab({ refCode, refStatus, refBalance, onShowQr }: {
   onShowQr: () => void
 }) {
   const [copied, setCopied] = useState(false)
+  const [records, setRecords] = useState<{ referred_users: ReferredUser[]; commissions: CommissionDetail[] } | null>(null)
+  const [guideOpen, setGuideOpen] = useState(false)
+  const [subTab, setSubTab] = useState<'users' | 'commissions'>('users')
+
+  useEffect(() => {
+    fetchMyReferralRecords(100).then(setRecords).catch(console.warn)
+  }, [])
+
   const copy = () => {
     if (!refCode) return
     navigator.clipboard.writeText(refCode.link).then(() => {
@@ -669,8 +678,31 @@ function ReferralTab({ refCode, refStatus, refBalance, onShowQr }: {
     })
   }
   if (!refCode || !refStatus) return null
+
   return (
     <>
+      {/* 广告位 banner — 拉拢推广动机 */}
+      <button
+        onClick={() => setGuideOpen(true)}
+        className="text-left w-full p-5 rounded-2xl bg-gradient-to-r from-[var(--text)] to-[var(--text)]/80 text-[var(--bg)] hover:opacity-95 cursor-pointer transition-opacity"
+      >
+        <div className="flex items-center gap-4">
+          <div className="flex-1">
+            <div className="flex items-center gap-2 mb-1">
+              <TrendingUp size={16}/>
+              <span className="text-xs opacity-80">推广激励</span>
+            </div>
+            <div className="text-xl font-bold mb-1">邀请 1 人付费, 月入 ¥60</div>
+            <div className="text-xs opacity-80">推广 Max 月卡, 30% 持续分成 · 月推 20 人月入 ¥6000</div>
+          </div>
+          <div className="hidden sm:flex items-center gap-1 text-sm opacity-80">
+            <span>查看推广技巧</span>
+            <ArrowRight size={14}/>
+          </div>
+        </div>
+      </button>
+
+      {/* 推广码 + 链接 + 二维码 + 累计 */}
       <div className="p-5 rounded-2xl border border-[var(--border)] bg-[var(--bg-card)]">
         <div className="flex items-center justify-between mb-3">
           <div className="text-base font-semibold">我的推广</div>
@@ -695,11 +727,90 @@ function ReferralTab({ refCode, refStatus, refBalance, onShowQr }: {
         </div>
         {refStatus.level === 'normal' && (
           <div className="mt-3 text-[11px] text-[var(--text-3)] leading-relaxed">
-            💡 普通用户推荐拿积分奖励. 累计带来 5 个付费用户或 ¥500 流水后, 自动升级为认证推广员 (拿现金 30% 首单 + 10%×3 月续费). 月推 20 人或 ¥3000 流水升核心合伙人 (50% + 15%×3 月).
+            💡 普通用户推荐拿积分奖励. 累计带来 5 个付费用户或 ¥500 流水后自动升级为认证推广员 (现金 30% 首单 + 10%×3 月续费). 月推 20 人或 ¥3000 流水升核心合伙人.
           </div>
         )}
       </div>
 
+      {/* 推广明细 */}
+      <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] overflow-hidden">
+        <div className="flex border-b border-[var(--border)]">
+          <button onClick={() => setSubTab('users')}
+            className={`px-4 py-2.5 text-sm cursor-pointer transition-colors ${subTab === 'users' ? 'text-[var(--text)] border-b-2 border-[var(--text)]' : 'text-[var(--text-3)]'}`}>
+            推广用户 ({records?.referred_users.length || 0})
+          </button>
+          <button onClick={() => setSubTab('commissions')}
+            className={`px-4 py-2.5 text-sm cursor-pointer transition-colors ${subTab === 'commissions' ? 'text-[var(--text)] border-b-2 border-[var(--text)]' : 'text-[var(--text-3)]'}`}>
+            佣金记录 ({records?.commissions.length || 0})
+          </button>
+        </div>
+
+        {subTab === 'users' && (
+          records?.referred_users.length ? (
+            <div className="divide-y divide-[var(--border-subtle)]">
+              <div className="px-5 py-2 grid grid-cols-4 gap-2 text-[10px] text-[var(--text-3)] uppercase bg-[var(--bg-hover)]">
+                <span>用户</span>
+                <span>注册时间</span>
+                <span className="text-center">订单数</span>
+                <span className="text-right">累计付费</span>
+              </div>
+              {records.referred_users.map(u => (
+                <div key={u.user_id} className="px-5 py-3 grid grid-cols-4 gap-2 text-xs items-center">
+                  <div>
+                    <div className="text-[var(--text)]">{u.username}</div>
+                    <div className="text-[10px] text-[var(--text-3)] font-mono">{u.phone_masked}</div>
+                  </div>
+                  <span className="text-[var(--text-3)] text-[10px]">{fmtTime(u.bound_at)}</span>
+                  <span className="text-center text-[var(--text-2)]">{u.order_count || '-'}</span>
+                  <span className={`text-right ${u.total_paid_amount > 0 ? 'text-green-500 font-medium' : 'text-[var(--text-3)]'}`}>
+                    {u.total_paid_amount > 0 ? `¥${u.total_paid_amount.toFixed(2)}` : '未付费'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="px-5 py-8 text-center text-sm text-[var(--text-3)]">还没人通过你的推广码注册. 分享链接给好友试试 ↑</div>
+          )
+        )}
+
+        {subTab === 'commissions' && (
+          records?.commissions.length ? (
+            <div className="divide-y divide-[var(--border-subtle)]">
+              <div className="px-5 py-2 grid grid-cols-12 gap-2 text-[10px] text-[var(--text-3)] uppercase bg-[var(--bg-hover)]">
+                <span className="col-span-3">时间</span>
+                <span className="col-span-2">类型</span>
+                <span className="col-span-3">关联用户/订单</span>
+                <span className="col-span-2 text-right">收益</span>
+                <span className="col-span-2 text-center">状态</span>
+              </div>
+              {records.commissions.map(c => {
+                const typeLabel = c.commission_type === 'register_bonus' ? '注册奖励' :
+                  c.commission_type === 'first_order' ? '首单' : `续费 ${c.renewal_month_index || 1}/3`
+                return (
+                  <div key={c.id} className="px-5 py-3 grid grid-cols-12 gap-2 text-xs items-center">
+                    <span className="col-span-3 text-[10px] text-[var(--text-3)]">{fmtTime(c.created_at)}</span>
+                    <span className="col-span-2 text-[var(--text-2)]">{typeLabel}</span>
+                    <div className="col-span-3 min-w-0">
+                      <div className="text-[var(--text)] truncate">{c.buyer_username || '-'}</div>
+                      {c.product_code && <div className="text-[10px] text-[var(--text-3)] truncate">{c.product_code}</div>}
+                    </div>
+                    <span className="col-span-2 text-right text-green-500 font-medium">
+                      {c.cash_yuan > 0 ? `¥${c.cash_yuan.toFixed(2)}` : `+${c.credits} 积分`}
+                    </span>
+                    <span className="col-span-2 text-center text-[10px] text-[var(--text-3)]">
+                      {c.status === 'settled' ? '已结算' : c.status === 'pending' ? '待结算' : '已撤销'}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            <div className="px-5 py-8 text-center text-sm text-[var(--text-3)]">还没有佣金记录</div>
+          )
+        )}
+      </div>
+
+      {/* 推广规则表 */}
       <div className="p-5 rounded-2xl border border-[var(--border)] bg-[var(--bg-card)]">
         <div className="text-sm font-medium mb-2">推广规则</div>
         <table className="w-full text-xs">
@@ -733,6 +844,62 @@ function ReferralTab({ refCode, refStatus, refBalance, onShowQr }: {
           </tbody>
         </table>
       </div>
+
+      {/* 推广技巧 modal */}
+      {guideOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={() => setGuideOpen(false)}>
+          <div onClick={e => e.stopPropagation()} className="relative bg-[var(--bg-card)] border border-[var(--border)] rounded-2xl shadow-ios-lg w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 flex flex-col gap-4">
+            <button onClick={() => setGuideOpen(false)} className="absolute top-4 right-4 p-1 rounded text-[var(--text-3)] hover:bg-[var(--bg-hover)] cursor-pointer"><X size={14}/></button>
+            <div className="text-lg font-semibold">推广技巧 + 话术</div>
+
+            <section className="text-sm text-[var(--text-2)] leading-relaxed space-y-3">
+              <div>
+                <div className="font-medium text-[var(--text)] mb-1.5">💡 推广哪一档最赚</div>
+                <p className="text-xs">主推 <b className="text-[var(--text)]">Max ¥199/月</b> — 30% 持续分成, 每带 1 人月入 ¥60, 月卡续费每月持续拿. 比一次性卖年卡更稳.</p>
+              </div>
+
+              <div>
+                <div className="font-medium text-[var(--text)] mb-1.5">📋 朋友圈文案模板</div>
+                <div className="bg-[var(--bg-input)] rounded-lg p-3 text-xs leading-relaxed font-mono">
+                  "做短视频苦于没素材/没文案/没数字人? <br/>
+                  monoi 一站搞定: AI 文案 + 配音 + 数字人 + 自动剪辑 + 一键发布. <br/>
+                  我自己用了 1 个月效率翻 3 倍, 大家可以试试 → [我的推广链接]"
+                </div>
+              </div>
+
+              <div>
+                <div className="font-medium text-[var(--text)] mb-1.5">🎯 哪些人是目标用户</div>
+                <ul className="text-xs space-y-1 list-disc ml-5">
+                  <li>抖音/小红书新手博主 (没时间剪辑)</li>
+                  <li>口播创作者 (要做数字人解放真人出镜)</li>
+                  <li>知识付费/课程讲师 (批量生产口播课)</li>
+                  <li>带货达人 (一天发 5-10 条视频)</li>
+                  <li>MCN / 内容工作室 (旗舰用户大单)</li>
+                </ul>
+              </div>
+
+              <div>
+                <div className="font-medium text-[var(--text)] mb-1.5">📈 升级路径</div>
+                <ul className="text-xs space-y-1">
+                  <li>普通用户 → 累计带来 <b>5 付费用户</b> 或 <b>¥500 流水</b> → 自动升 <b>认证推广员</b> (现金分成)</li>
+                  <li>认证推广员 → 月推 <b>20 人</b> 或 <b>¥3000 流水</b> → 自动升 <b>核心合伙人</b> (50% 首单 + 15%×3 续费)</li>
+                </ul>
+              </div>
+
+              <div>
+                <div className="font-medium text-[var(--text)] mb-1.5">💰 提现说明</div>
+                <ul className="text-xs space-y-1 list-disc ml-5">
+                  <li>认证推广员 / 核心合伙人, 现金余额 <b>≥ ¥100</b> 可申请提现</li>
+                  <li>提现方式: 微信 / 支付宝, 1-3 个工作日到账</li>
+                  <li>异常订单 (3 月内退费率 &gt; 30%) 不计入佣金</li>
+                </ul>
+              </div>
+            </section>
+
+            <button onClick={() => setGuideOpen(false)} className="self-end px-4 py-2 rounded-lg bg-[var(--text)] text-[var(--bg)] text-sm hover:opacity-80 cursor-pointer">知道了</button>
+          </div>
+        </div>
+      )}
     </>
   )
 }
