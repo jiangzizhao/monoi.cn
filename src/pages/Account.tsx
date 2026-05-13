@@ -468,13 +468,15 @@ function MembershipTab({ sub, plans, credits, onUpgrade }: {
             const isFlagship = tier === 'flagship_yearly'
             return (
               <div key={tier} className={`relative p-4 rounded-2xl border-2 flex flex-col gap-3 bg-[var(--bg-card)] ${
-                isCurrent ? 'border-[var(--text)] bg-[var(--bg-hover)]' : 'border-[var(--border)]'
+                isCurrent ? 'border-[var(--text)] bg-[var(--bg-hover)]' :
+                isMax ? 'border-amber-400' :
+                'border-[var(--border)]'
               }`}>
-                {isMax && !isCurrent && <Badge color="bg-[var(--text)] text-[var(--bg)]">最受欢迎</Badge>}
+                {isMax && !isCurrent && <Badge color="bg-amber-400 text-black">最受欢迎</Badge>}
                 {isFlagship && !isCurrent && <Badge color="bg-[var(--text)] text-[var(--bg)]">工作室专属</Badge>}
                 {isCurrent && <Badge color="bg-[var(--text)] text-[var(--bg)]">✓ 当前</Badge>}
                 <div className="flex items-center gap-2">
-                  <Icon size={18} className="text-[var(--text-2)]"/>
+                  <Icon size={18} className={isMax ? 'text-amber-500' : 'text-[var(--text-2)]'}/>
                   <span className="text-base font-semibold">{p.name}</span>
                 </div>
                 <div className="text-2xl font-semibold">
