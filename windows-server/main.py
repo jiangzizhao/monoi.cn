@@ -356,10 +356,20 @@ def row_to_dict(row: sqlite3.Row) -> dict:
 import random
 import time as _time
 
-# 短信验证码 mock 模式 (Phase 2 接阿里云后改成真发送)
-SMS_MOCK_MODE = True
-SMS_CODE_TTL_SECONDS = 5 * 60     # 5 分钟过期
-SMS_RESEND_COOLDOWN = 60          # 同手机号 60 秒不能重发
+# 短信验证码: env 齐了走阿里云真发送, 没齐 (开发期) 走 mock 控制台打印
+# 想强制 mock (即使 env 齐了) 设环境变量 SMS_FORCE_MOCK=1
+try:
+    import sms_aliyun as _sms_aliyun
+    _SMS_REAL_ENABLED = _sms_aliyun.is_configured()
+except Exception as _e:
+    _SMS_REAL_ENABLED = False
+    print(f"[sms] aliyun 模块加载失败, 走 mock: {_e}", flush=True)
+
+SMS_MOCK_MODE = (os.getenv('SMS_FORCE_MOCK') == '1') or not _SMS_REAL_ENABLED
+SMS_CODE_TTL_SECONDS = 5 * 60
+SMS_RESEND_COOLDOWN = 60
+
+print(f"[sms] mode = {'MOCK (控制台打印)' if SMS_MOCK_MODE else 'REAL (阿里云)'}", flush=True)
 
 
 def _validate_phone(phone: str) -> bool:
@@ -399,12 +409,19 @@ def send_sms_code(req: SendSmsRequest):
     conn.commit()
     conn.close()
 
-    print(f"[sms-mock] {req.phone} 收到验证码: {code} (用途: {req.purpose}, 5 分钟有效)", flush=True)
-
-    result = {"success": True, "message": "验证码已发送 (mock 模式)"}
     if SMS_MOCK_MODE:
-        result["dev_code"] = code   # mock 模式响应里返回 code, 方便前端测试; 生产模式不返回
-    return result
+        # 开发模式: 控制台打印 + 响应里返 dev_code 方便测试
+        print(f"[sms-mock] {req.phone} 收到验证码: {code} (用途: {req.purpose}, 5 分钟有效)", flush=True)
+        return {"success": True, "message": "验证码已发送 (mock 模式)", "dev_code": code}
+
+    # 真发送: 调阿里云 SDK
+    ok, err = _sms_aliyun.send_sms_code(req.phone, code, req.purpose)
+    if not ok:
+        # 真发送失败 fallback: 控制台打印 code + 报错给前端
+        print(f"[sms-real] 发送失败 {req.phone}: {err} | code={code} (本地仍能验, 但用户收不到)", flush=True)
+        raise HTTPException(500, f"短信发送失败: {err}")
+    print(f"[sms-real] 已发送给 {req.phone} (用途: {req.purpose})", flush=True)
+    return {"success": True, "message": "验证码已发送, 5 分钟内有效"}
 
 
 def _verify_sms_code(phone: str, code: str, purpose: str) -> bool:
