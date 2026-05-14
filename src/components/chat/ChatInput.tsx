@@ -73,6 +73,18 @@ export function ChatInput({ moduleMenu, onModuleClick, onModuleMenuClose }: Prop
   const { isGenerating, conversations, activeId } = useChatStore()
   const { send, stop } = useChat()
 
+  // 注册时通过首页大输入框输入的 prompt, localStorage 一次性带过来, 这里预填到 input
+  // (用户进 /app 看到自己之前的 prompt 已经写好, 改改就能发)
+  useEffect(() => {
+    const pending = localStorage.getItem('pending_prompt')
+    if (pending) {
+      setText(pending)
+      localStorage.removeItem('pending_prompt')
+      // 滚动 textarea 到焦点 + 自适应高度
+      setTimeout(() => textRef.current?.focus(), 100)
+    }
+  }, [])
+
   // 监听 useChat 派发的"打开表单"事件 (从消息气泡里的选项按钮触发, 比如合成完成后点"生成封面")
   useEffect(() => {
     const handler = (e: Event) => {
