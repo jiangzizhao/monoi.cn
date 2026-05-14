@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Plus, Trash2, MessageSquare, User, LogOut, Shield } from 'lucide-react'
+import { Plus, Trash2, MessageSquare, LogOut, Shield } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useChatStore } from '../../store/chatStore'
 import { getUsername, logout, isLoggedIn } from '../../lib/auth'
-import { fetchMyProfile } from '../../services/billing'
+import { fetchMyProfile, type UserProfile } from '../../services/billing'
 
 function timeAgo(ts: number) {
   const diff = Date.now() - ts
@@ -17,10 +17,11 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
   const { conversations, activeId, setActiveId, newConversation, deleteConversation } = useChatStore()
   const nav = useNavigate()
   const username = getUsername()
-  const [isAdmin, setIsAdmin] = useState(false)
+  const [me, setMe] = useState<UserProfile | null>(null)
+  const isAdmin = !!me?.is_admin
 
   useEffect(() => {
-    if (isLoggedIn()) fetchMyProfile().then(p => setIsAdmin(!!p.is_admin)).catch(() => {})
+    if (isLoggedIn()) fetchMyProfile().then(setMe).catch(() => {})
   }, [])
 
   const handleLogout = () => {
@@ -85,8 +86,14 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
       <div className="border-t border-[var(--border)] px-2 py-2 flex flex-col gap-0.5">
         <Link to="/app/account" onClick={onClose}
           className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-[var(--text-2)] hover:bg-[var(--bg-hover)] hover:text-[var(--text)] cursor-pointer transition-colors">
-          <User size={14}/>
-          <span className="flex-1 truncate">{username || '账户'}</span>
+          <div className="w-6 h-6 rounded-full bg-[var(--text)] text-[var(--bg)] flex items-center justify-center text-[10px] font-bold overflow-hidden flex-shrink-0">
+            {me?.avatar_url ? (
+              <img src={me.avatar_url} alt="" className="w-full h-full object-cover"/>
+            ) : (
+              <span>{(me?.username || username)?.[0]?.toUpperCase() || 'M'}</span>
+            )}
+          </div>
+          <span className="flex-1 truncate">{me?.username || username || '账户'}</span>
           <span className="text-[10px] text-[var(--text-3)]">账户中心</span>
         </Link>
         {isAdmin && (

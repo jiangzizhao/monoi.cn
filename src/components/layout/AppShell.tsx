@@ -1,16 +1,23 @@
 import { useState, useEffect, useRef } from 'react'
-import { Menu, Plus, User } from 'lucide-react'
+import { Menu, Plus } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { ChatContainer } from '../chat/ChatContainer'
 import { ChatInput } from '../chat/ChatInput'
 import { useChatStore } from '../../store/chatStore'
+import { fetchMyProfile, type UserProfile } from '../../services/billing'
+import { isLoggedIn } from '../../lib/auth'
 
 export function AppShell() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [moduleMenu, setModuleMenu] = useState<string | null>(null)
+  const [me, setMe] = useState<UserProfile | null>(null)
   const { newConversation } = useChatStore()
   const initRef = useRef(false)
+
+  useEffect(() => {
+    if (isLoggedIn()) fetchMyProfile().then(setMe).catch(() => {})
+  }, [])
 
   useEffect(() => {
     if (initRef.current) return
@@ -52,8 +59,14 @@ export function AppShell() {
             <button onClick={() => newConversation()} className="p-2 rounded-lg text-[var(--text-2)] hover:bg-[var(--bg-hover)] cursor-pointer transition-colors" title="新对话">
               <Plus size={20}/>
             </button>
-            <Link to="/app/account" className="p-2 rounded-lg text-[var(--text-2)] hover:bg-[var(--bg-hover)] cursor-pointer transition-colors" title="账户中心">
-              <User size={20}/>
+            <Link to="/app/account" className="p-1 rounded-full hover:opacity-80 cursor-pointer transition-opacity" title="账户中心">
+              <div className="w-8 h-8 rounded-full bg-[var(--text)] text-[var(--bg)] flex items-center justify-center text-xs font-bold overflow-hidden">
+                {me?.avatar_url ? (
+                  <img src={me.avatar_url} alt="" className="w-full h-full object-cover"/>
+                ) : (
+                  <span>{me?.username?.[0]?.toUpperCase() || 'M'}</span>
+                )}
+              </div>
             </Link>
           </div>
         </div>
