@@ -491,6 +491,29 @@ def login(req: LoginRequest):
     finally:
         conn.close()
 
+
+class LoginSmsRequest(BaseModel):
+    phone: str
+    sms_code: str
+
+
+@app.post("/api/login-sms")
+def login_sms(req: LoginSmsRequest):
+    """手机号 + 短信验证码登录 (mock 模式下 sms_code 跟发送时的 dev_code 一致)"""
+    if not _validate_phone(req.phone):
+        raise HTTPException(400, "手机号格式不对")
+    if not _verify_sms_code(req.phone, req.sms_code, 'login'):
+        raise HTTPException(401, "验证码错误或已过期")
+    conn = get_db()
+    try:
+        row = conn.execute("SELECT id, username FROM users WHERE phone = ?", (req.phone,)).fetchone()
+        if not row:
+            raise HTTPException(404, "手机号未注册, 请先注册账号")
+        token = create_token(row[0], row[1])
+        return {"success": True, "token": token, "username": row[1]}
+    finally:
+        conn.close()
+
 @app.post("/api/verify")
 def verify(payload: dict):
     try:

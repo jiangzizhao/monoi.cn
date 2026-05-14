@@ -27,6 +27,13 @@ export async function login(email: string, password: string) {
   return data
 }
 
+export async function loginSms(phone: string, sms_code: string) {
+  const data = await proxyRequest('/api/login-sms', { phone, sms_code })
+  localStorage.setItem('monoi_token', data.token)
+  localStorage.setItem('monoi_username', data.username)
+  return data
+}
+
 export function logout() {
   localStorage.removeItem('monoi_token')
   localStorage.removeItem('monoi_username')
