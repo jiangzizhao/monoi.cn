@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Sparkles, ArrowRight, Play, MessageSquare, Mic, Video, Film, Scissors, Image as ImageIcon,
-  Send, ChevronDown, ChevronUp, Check,
+  Send, ChevronDown, ChevronUp, Check, PencilLine,
 } from 'lucide-react'
 
 
@@ -17,11 +17,11 @@ const PLACEHOLDER_PROMPTS = [
 ]
 
 const STEPS = [
-  { emoji: '💬', title: '输入想法', desc: '一句话告诉 monoi 你要做什么主题' },
-  { emoji: '📝', title: 'AI 写文案', desc: '自动生成爆款结构的口播稿' },
-  { emoji: '🎙️', title: '配音 / 数字人', desc: '选音色 · 克隆你的声音 · 数字人念稿' },
-  { emoji: '✂️', title: '智能剪辑', desc: '自动找素材 · 配字幕 · 加封面' },
-  { emoji: '📤', title: '一键发布', desc: '直接发到抖音 / 小红书' },
+  { Icon: MessageSquare, title: '输入想法', desc: '一句话告诉 monoi 你要做什么主题' },
+  { Icon: PencilLine,    title: 'AI 写文案', desc: '自动生成爆款结构的口播稿' },
+  { Icon: Mic,           title: '配音 / 数字人', desc: '选音色 · 克隆你的声音 · 数字人念稿' },
+  { Icon: Scissors,      title: '智能剪辑', desc: '自动找素材 · 配字幕 · 加封面' },
+  { Icon: Send,          title: '一键发布', desc: '直接发到抖音 / 小红书' },
 ]
 
 const FEATURES = [
@@ -220,7 +220,9 @@ export default function Landing() {
           {STEPS.map((s, i) => (
             <div key={i} className="flex-1 flex sm:flex-col items-center gap-3 sm:gap-2 w-full">
               <div className="flex flex-col items-center flex-shrink-0">
-                <div className="text-3xl sm:text-4xl mb-1 sm:mb-2">{s.emoji}</div>
+                <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-[var(--bg-card)] border border-[var(--border)] flex items-center justify-center mb-1 sm:mb-2">
+                  <s.Icon size={22} className="text-[var(--text-2)]" strokeWidth={1.6}/>
+                </div>
                 <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-[var(--text)] text-[var(--bg)] flex items-center justify-center text-xs font-bold">{i+1}</div>
               </div>
               <div className="flex-1 text-left sm:text-center">
