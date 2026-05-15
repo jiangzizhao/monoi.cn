@@ -37,6 +37,9 @@ export async function loginSms(phone: string, sms_code: string) {
 export function logout() {
   localStorage.removeItem('monoi_token')
   localStorage.removeItem('monoi_username')
+  // 不主动清 vm-chat-store-{user_id} 的 localStorage 数据 — 留着这个用户下次登回来恢复
+  // 但是要 force 整页 reload, 否则 zustand 内存里还有上一个用户的 conversations
+  window.location.href = '/login'
 }
 
 export function getToken() {

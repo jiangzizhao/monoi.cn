@@ -1,6 +1,26 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { persist, createJSONStorage } from 'zustand/middleware'
 import type { Conversation, ChatMessage, MessageBlock } from '../types'
+
+// 当前登录用户的 user_id (从 JWT 解出来), 没登录返 'anon'
+function getCurrentUserId(): string {
+  try {
+    const token = localStorage.getItem('monoi_token') || ''
+    if (!token) return 'anon'
+    const payload = JSON.parse(atob(token.split('.')[1]))
+    return String(payload.sub || 'anon')
+  } catch {
+    return 'anon'
+  }
+}
+
+// 自定义 localStorage 包装: key 自动加 user_id 后缀, 实现"每个用户独立 chat 历史"
+// 例如 vm-chat-store-1 (Tina), vm-chat-store-2 (老k), 切换账号互不污染
+const userScopedStorage = {
+  getItem: (name: string) => localStorage.getItem(`${name}-${getCurrentUserId()}`),
+  setItem: (name: string, value: string) => localStorage.setItem(`${name}-${getCurrentUserId()}`, value),
+  removeItem: (name: string) => localStorage.removeItem(`${name}-${getCurrentUserId()}`),
+}
 
 function newConvId() { return `conv_${Date.now()}_${Math.random().toString(36).slice(2, 7)}` }
 
@@ -281,6 +301,7 @@ export const useChatStore = create<ChatState>()(
     }),
     {
       name: 'vm-chat-store',
+      storage: createJSONStorage(() => userScopedStorage),
       merge: (persistedState, currentState) => ({
         ...currentState,
         ...normalizePersistedState(persistedState),

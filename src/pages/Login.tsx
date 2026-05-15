@@ -48,7 +48,8 @@ export default function Login() {
         if (smsCode.length !== 6) throw new Error('验证码 6 位')
         await loginSms(phone, smsCode)
       }
-      nav('/app')
+      // force full reload, 让 chatStore 用新 user_id 重新 hydrate localStorage
+      window.location.href = '/app'
     } catch (err: any) {
       setError(err.message)
     } finally { setLoading(false) }
