@@ -151,7 +151,7 @@ export function MessageBubble({ message, ...props }: Props) {
 
   return (
     <div className="flex items-start gap-3 msg-enter">
-      <div className="w-8 h-8 rounded-xl bg-[var(--text)] flex items-center justify-center text-[var(--bg)] text-sm font-bold flex-shrink-0 mt-0.5">M</div>
+      <img src="/logo.png" alt="monoi" className="w-8 h-8 rounded-xl object-contain flex-shrink-0 mt-0.5"/>
       <div className="flex-1 min-w-0 flex flex-col gap-3">
         {message.blocks.map((block, i) => (
           <Block key={i} block={block} msgId={message.id} blockIdx={i} props={{ message, ...props }}/>

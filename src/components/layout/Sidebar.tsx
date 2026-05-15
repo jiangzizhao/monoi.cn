@@ -44,7 +44,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-4 border-b border-[var(--border)]">
         <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-lg bg-[var(--text)] flex items-center justify-center text-[var(--bg)] text-xs font-bold">M</div>
+          <img src="/logo.png" alt="monoi" className="w-7 h-7 rounded-lg object-contain"/>
           <span className="text-sm font-semibold text-[var(--text)]">monoi</span>
         </div>
         <button onClick={handleNew}

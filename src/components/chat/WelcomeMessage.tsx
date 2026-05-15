@@ -2,7 +2,7 @@ export function WelcomeMessage() {
   return (
     <div className="flex flex-col items-start gap-4 msg-enter">
       <div className="flex items-start gap-3">
-        <div className="w-8 h-8 rounded-xl bg-[var(--text)] flex items-center justify-center text-[var(--bg)] text-sm font-bold flex-shrink-0 mt-0.5">M</div>
+        <img src="/logo.png" alt="monoi" className="w-8 h-8 rounded-xl object-contain flex-shrink-0 mt-0.5"/>
         <div className="flex flex-col gap-1.5 pt-1">
           <p className="text-[var(--text)] leading-relaxed">
             你好！我是 monoi，帮你完成口播视频的全流程制作。

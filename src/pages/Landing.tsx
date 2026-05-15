@@ -120,7 +120,7 @@ export default function Landing() {
       }`}>
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-[var(--text)] flex items-center justify-center text-[var(--bg)] font-bold text-sm">M</div>
+            <img src="/logo.png" alt="monoi" className="w-8 h-8 rounded-xl object-contain"/>
             <span className="font-semibold">monoi</span>
           </div>
           <div className="hidden sm:flex items-center gap-6 text-sm text-[var(--text-2)]">
@@ -367,7 +367,7 @@ export default function Landing() {
         </div>
         <div className="border-t border-[var(--border-subtle)] pt-6 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-lg bg-[var(--text)] flex items-center justify-center text-[var(--bg)] font-bold text-[10px]">M</div>
+            <img src="/logo.png" alt="monoi" className="w-6 h-6 rounded-lg object-contain"/>
             <span className="text-xs text-[var(--text-3)]">© 2026 monoi · 专为中文创作者</span>
           </div>
           <div className="text-xs text-[var(--text-3)]">

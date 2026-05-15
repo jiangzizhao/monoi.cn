@@ -74,7 +74,7 @@ export default function Register() {
     <div className="min-h-screen bg-[var(--bg)] flex items-center justify-center px-4 py-8">
       <div className="w-full max-w-sm">
         <div className="flex flex-col items-center mb-8">
-          <div className="w-10 h-10 rounded-xl bg-[var(--text)] flex items-center justify-center text-[var(--bg)] font-bold mb-3">M</div>
+          <img src="/logo.png" alt="monoi" className="w-12 h-12 mb-3 object-contain"/>
           <h1 className="text-xl font-semibold text-[var(--text)]">注册 monoi</h1>
           <p className="text-sm text-[var(--text-3)] mt-1">免费开始你的创作</p>
           {refFromUrl && (
