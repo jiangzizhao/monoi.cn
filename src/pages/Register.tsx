@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { register, sendSmsCode } from '../lib/auth'
+import { runCaptcha } from '../lib/captcha'
 
 export default function Register() {
   const nav = useNavigate()
@@ -36,11 +37,21 @@ export default function Register() {
     }
     setSendingCode(true)
     try {
-      const r = await sendSmsCode(phone, 'register')
-      setCooldown(60)
-      setInfo(r.dev_code ? `验证码已发送 (mock: ${r.dev_code})` : '验证码已发送, 5 分钟内有效')
-    } catch (e: any) {
-      setError(e.message || '发送失败')
+      const r = await runCaptcha<{ dev_code?: string }>(async (param) => {
+        try {
+          const res = await sendSmsCode(phone, 'register', param)
+          return { captchaPassed: true, bizOk: true, data: res }
+        } catch (e: any) {
+          const msg = String(e?.message || '发送失败')
+          return { captchaPassed: !msg.includes('人机验证'), bizOk: false, error: msg }
+        }
+      })
+      if (r.ok) {
+        setCooldown(60)
+        setInfo(r.data?.dev_code ? `验证码已发送 (mock: ${r.data.dev_code})` : '验证码已发送, 5 分钟内有效')
+      } else {
+        setError(r.error || '发送失败')
+      }
     } finally {
       setSendingCode(false)
     }

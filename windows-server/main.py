@@ -184,6 +184,12 @@ def init_db():
         )
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_sms_codes_phone ON sms_codes(phone, created_at DESC)")
+    # 老 schema 兼容: 给 sms_codes 加 client_ip 列 (按 IP 限流, 防脚本批量烧短信费)
+    try:
+        conn.execute("ALTER TABLE sms_codes ADD COLUMN client_ip TEXT")
+    except sqlite3.OperationalError:
+        pass  # 列已存在
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_sms_codes_ip ON sms_codes(client_ip, created_at DESC)")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS voice_presets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -310,7 +316,8 @@ class RegisterRequest(BaseModel):
 
 class SendSmsRequest(BaseModel):
     phone: str
-    purpose: str = 'register'                 # register / reset_password / rebind_phone
+    purpose: str = 'register'                 # register / reset_password / rebind_phone / login
+    captcha_verify_param: Optional[str] = None  # 阿里云 Captcha 2.0 滑块完成后前端 SDK 返回的字符串
 
 class LoginRequest(BaseModel):
     email: str
@@ -368,8 +375,29 @@ except Exception as _e:
 SMS_MOCK_MODE = (os.getenv('SMS_FORCE_MOCK') == '1') or not _SMS_REAL_ENABLED
 SMS_CODE_TTL_SECONDS = 5 * 60
 SMS_RESEND_COOLDOWN = 60
+# IP 限流: 同一个 IP 1 小时内最多发 SMS_IP_LIMIT_PER_HOUR 次, 防脚本批量烧短信费 (¥0.045/条)
+SMS_IP_WINDOW_SECONDS = 3600
+SMS_IP_LIMIT_PER_HOUR = int(os.getenv('SMS_IP_LIMIT_PER_HOUR', '5'))
+
+# 阿里云人机验证 (Captcha 2.0): env 齐了 send-sms 必须先过滑块, 没齐 (开发期) skip 校验
+try:
+    import captcha_aliyun as _captcha_aliyun
+    _CAPTCHA_ENABLED = _captcha_aliyun.is_configured()
+except Exception as _e:
+    _CAPTCHA_ENABLED = False
+    print(f"[captcha] aliyun 模块加载失败, 跳过校验: {_e}", flush=True)
 
 print(f"[sms] mode = {'MOCK (控制台打印)' if SMS_MOCK_MODE else 'REAL (阿里云)'}", flush=True)
+print(f"[captcha] mode = {'REAL (阿里云人机验证)' if _CAPTCHA_ENABLED else 'OFF (env 没配, send-sms 不强制滑块)'}", flush=True)
+
+
+def _client_ip_from_request(request: Request) -> str:
+    """优先从 X-Forwarded-For 拿真实 IP (Vercel + NATAPP 两层代理后, request.client.host 是上游 IP).
+    取最左边的 (即真实客户端 IP). 取不到 fallback 到 request.client.host."""
+    xff = request.headers.get('x-forwarded-for') or request.headers.get('x-real-ip') or ''
+    if xff:
+        return xff.split(',')[0].strip()
+    return (request.client.host if request.client else '') or 'unknown'
 
 
 def _validate_phone(phone: str) -> bool:
@@ -382,16 +410,27 @@ def _gen_sms_code() -> str:
 
 
 @app.post("/api/send-sms")
-def send_sms_code(req: SendSmsRequest):
-    """发送短信验证码. mock 模式下: 控制台 print + 响应返回 dev_code 字段方便测试."""
+def send_sms_code(req: SendSmsRequest, request: Request):
+    """发送短信验证码. mock 模式下: 控制台 print + 响应返回 dev_code 字段方便测试.
+    防滥用: ① 同手机号 60s 冷却 ② 同 IP 1 小时上限 ③ env 配了的话过阿里云人机验证."""
     if not _validate_phone(req.phone):
         raise HTTPException(400, "手机号格式不对, 需要 11 位数字以 1 开头")
     if req.purpose not in ('register', 'reset_password', 'rebind_phone', 'login'):
         raise HTTPException(400, f"未知用途: {req.purpose}")
 
+    client_ip = _client_ip_from_request(request)
+
+    # 阿里云人机验证: env 配了就强制要 token + 校验; 没配 (开发期) skip
+    if _CAPTCHA_ENABLED:
+        if not req.captcha_verify_param:
+            raise HTTPException(400, "请先完成滑块验证")
+        ok, err = _captcha_aliyun.verify(req.captcha_verify_param)
+        if not ok:
+            raise HTTPException(403, f"人机验证未通过: {err}")
+
     now = _time.time()
     conn = get_db()
-    # 频率限制: 同手机号 60 秒内只能发一次
+    # 频率限制 1: 同手机号 60 秒内只能发一次
     recent = conn.execute(
         "SELECT created_at FROM sms_codes WHERE phone = ? ORDER BY created_at DESC LIMIT 1",
         (req.phone,)
@@ -401,11 +440,21 @@ def send_sms_code(req: SendSmsRequest):
         conn.close()
         raise HTTPException(429, f"请求过频, {wait} 秒后再试")
 
+    # 频率限制 2: 同 IP 1 小时内最多 SMS_IP_LIMIT_PER_HOUR 次
+    ip_count_row = conn.execute(
+        "SELECT COUNT(*) FROM sms_codes WHERE client_ip = ? AND created_at > ?",
+        (client_ip, now - SMS_IP_WINDOW_SECONDS),
+    ).fetchone()
+    if ip_count_row and ip_count_row[0] >= SMS_IP_LIMIT_PER_HOUR:
+        conn.close()
+        print(f"[sms] IP 限流命中 ip={client_ip} count={ip_count_row[0]} (window={SMS_IP_WINDOW_SECONDS}s)", flush=True)
+        raise HTTPException(429, f"该网络段请求次数过多, 请 1 小时后再试")
+
     code = _gen_sms_code()
     conn.execute("""
-        INSERT INTO sms_codes (phone, code, purpose, created_at, expires_at, used)
-        VALUES (?, ?, ?, ?, ?, 0)
-    """, (req.phone, code, req.purpose, now, now + SMS_CODE_TTL_SECONDS))
+        INSERT INTO sms_codes (phone, code, purpose, created_at, expires_at, used, client_ip)
+        VALUES (?, ?, ?, ?, ?, 0, ?)
+    """, (req.phone, code, req.purpose, now, now + SMS_CODE_TTL_SECONDS, client_ip))
     conn.commit()
     conn.close()
 

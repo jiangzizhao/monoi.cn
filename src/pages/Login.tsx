@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { login, loginSms, sendSmsCode } from '../lib/auth'
+import { runCaptcha } from '../lib/captcha'
 
 type Mode = 'email' | 'sms'
 
@@ -30,10 +31,23 @@ export default function Login() {
     if (!validatePhone(phone)) { setError('请输入正确的 11 位手机号'); return }
     setSendingCode(true)
     try {
-      const r = await sendSmsCode(phone, 'login')
-      setCooldown(60)
-      setInfo(r.dev_code ? `验证码已发送 (mock: ${r.dev_code})` : '验证码已发送, 5 分钟内有效')
-    } catch (e: any) { setError(e.message || '发送失败') } finally { setSendingCode(false) }
+      // 包一层 runCaptcha — env 配了就先弹滑块, 没配直接执行业务
+      const r = await runCaptcha<{ dev_code?: string }>(async (param) => {
+        try {
+          const res = await sendSmsCode(phone, 'login', param)
+          return { captchaPassed: true, bizOk: true, data: res }
+        } catch (e: any) {
+          const msg = String(e?.message || '发送失败')
+          return { captchaPassed: !msg.includes('人机验证'), bizOk: false, error: msg }
+        }
+      })
+      if (r.ok) {
+        setCooldown(60)
+        setInfo(r.data?.dev_code ? `验证码已发送 (mock: ${r.data.dev_code})` : '验证码已发送, 5 分钟内有效')
+      } else {
+        setError(r.error || '发送失败')
+      }
+    } finally { setSendingCode(false) }
   }
 
   const handleSubmit = async (e: React.FormEvent) => {

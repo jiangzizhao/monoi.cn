@@ -16,8 +16,12 @@ export async function register(
   return proxyRequest('/api/register', { username, email, password, phone, sms_code, referral_code })
 }
 
-export async function sendSmsCode(phone: string, purpose: 'register' | 'reset_password' | 'rebind_phone' | 'login') {
-  return proxyRequest('/api/send-sms', { phone, purpose })
+export async function sendSmsCode(
+  phone: string,
+  purpose: 'register' | 'reset_password' | 'rebind_phone' | 'login',
+  captchaVerifyParam?: string,
+) {
+  return proxyRequest('/api/send-sms', { phone, purpose, captcha_verify_param: captchaVerifyParam || null })
 }
 
 export async function login(email: string, password: string) {

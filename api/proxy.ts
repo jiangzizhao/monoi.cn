@@ -23,9 +23,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const url = `${API_URL}${path}`
   const reqCT = (req.headers['content-type'] as string) || ''
 
+  // Vercel 自动给 req.headers['x-forwarded-for'] 塞了真实客户端 IP (最左边).
+  // 转发给后端, 后端用来做 IP 限流 (否则后端只看到 Vercel/NATAPP 的 IP, 限流无效).
+  const fwd = (req.headers['x-forwarded-for'] as string) || (req.headers['x-real-ip'] as string) || ''
+  const clientIp = fwd ? fwd.split(',')[0].trim() : ''
+
   try {
     let body: BodyInit | undefined
     const headers: Record<string, string> = {}
+    if (clientIp) {
+      headers['X-Forwarded-For'] = clientIp
+      headers['X-Real-IP'] = clientIp
+    }
 
     if (req.method && req.method !== 'GET' && req.method !== 'HEAD') {
       // 优先用 Vercel 自动解析的 req.body（JSON 请求）
