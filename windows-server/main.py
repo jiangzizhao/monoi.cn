@@ -412,25 +412,22 @@ def _gen_sms_code() -> str:
 @app.post("/api/send-sms")
 def send_sms_code(req: SendSmsRequest, request: Request):
     """发送短信验证码. mock 模式下: 控制台 print + 响应返回 dev_code 字段方便测试.
-    防滥用: ① 同手机号 60s 冷却 ② 同 IP 1 小时上限 ③ env 配了的话过阿里云人机验证."""
+    防滥用按 "免费 → 花钱" 顺序检查, 攻击者撞前面任一关卡都不会让阿里云扣钱:
+      ① 手机号格式 (代码, 0)
+      ② 同手机号 60s 冷却 (查 SQLite, 0)
+      ③ 同 IP 1 小时上限 (查 SQLite, 0)
+      ④ 阿里云人机验证 (¥0.001/次, 走到这才花钱)
+      ⑤ 阿里云发短信 (¥0.045/次, 最贵, 最后)"""
     if not _validate_phone(req.phone):
         raise HTTPException(400, "手机号格式不对, 需要 11 位数字以 1 开头")
     if req.purpose not in ('register', 'reset_password', 'rebind_phone', 'login'):
         raise HTTPException(400, f"未知用途: {req.purpose}")
 
     client_ip = _client_ip_from_request(request)
-
-    # 阿里云人机验证: env 配了就强制要 token + 校验; 没配 (开发期) skip
-    if _CAPTCHA_ENABLED:
-        if not req.captcha_verify_param:
-            raise HTTPException(400, "请先完成滑块验证")
-        ok, err = _captcha_aliyun.verify(req.captcha_verify_param)
-        if not ok:
-            raise HTTPException(403, f"人机验证未通过: {err}")
-
     now = _time.time()
     conn = get_db()
-    # 频率限制 1: 同手机号 60 秒内只能发一次
+
+    # ② 频率限制: 同手机号 60s 内只能发一次
     recent = conn.execute(
         "SELECT created_at FROM sms_codes WHERE phone = ? ORDER BY created_at DESC LIMIT 1",
         (req.phone,)
@@ -440,7 +437,7 @@ def send_sms_code(req: SendSmsRequest, request: Request):
         conn.close()
         raise HTTPException(429, f"请求过频, {wait} 秒后再试")
 
-    # 频率限制 2: 同 IP 1 小时内最多 SMS_IP_LIMIT_PER_HOUR 次
+    # ③ 频率限制: 同 IP 1 小时内最多 SMS_IP_LIMIT_PER_HOUR 次
     ip_count_row = conn.execute(
         "SELECT COUNT(*) FROM sms_codes WHERE client_ip = ? AND created_at > ?",
         (client_ip, now - SMS_IP_WINDOW_SECONDS),
@@ -448,7 +445,18 @@ def send_sms_code(req: SendSmsRequest, request: Request):
     if ip_count_row and ip_count_row[0] >= SMS_IP_LIMIT_PER_HOUR:
         conn.close()
         print(f"[sms] IP 限流命中 ip={client_ip} count={ip_count_row[0]} (window={SMS_IP_WINDOW_SECONDS}s)", flush=True)
-        raise HTTPException(429, f"该网络段请求次数过多, 请 1 小时后再试")
+        raise HTTPException(429, "该网络段请求次数过多, 请 1 小时后再试")
+
+    # ④ 阿里云人机验证: env 配了就强制要 token + 校验; 没配 (开发期) skip
+    # 故意放在 ②③ 之后, 让 IP 限流先挡掉脚本攻击, 避免被刷 ¥0.001/次的 verify 调用
+    if _CAPTCHA_ENABLED:
+        if not req.captcha_verify_param:
+            conn.close()
+            raise HTTPException(400, "请先完成滑块验证")
+        ok, err = _captcha_aliyun.verify(req.captcha_verify_param)
+        if not ok:
+            conn.close()
+            raise HTTPException(403, f"人机验证未通过: {err}")
 
     code = _gen_sms_code()
     conn.execute("""
