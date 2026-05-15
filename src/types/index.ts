@@ -70,6 +70,17 @@ export interface KeptSegmentLite {
   words?: { start: number; end: number; word: string }[]
 }
 
+export interface JianyingDraftPayload {
+  narration_oss_key: string
+  output_ratio: string                       // '9:16' / '16:9' / '3:4' / '1:1'
+  shots: {
+    start: number
+    end: number
+    text: string                              // 该镜对应字幕
+    assets: { url: string; oss_key?: string; duration: number }[]
+  }[]
+}
+
 export interface VideoResult {
   video_url: string         // 完整 URL 或形如 /api/digital-human/video/xxx
   duration_ms?: number
@@ -80,6 +91,7 @@ export interface VideoResult {
   text_preview?: string
   kept_segments?: KeptSegmentLite[]   // 剪辑后视频的 segments (口播视频专用, 用于自动匹配素材)
   narration_oss_key?: string          // 剪辑后口播视频的 OSS key (合成时后端用)
+  jianying_payload?: JianyingDraftPayload  // 有此字段 → VideoPlayer 显示"导出剪映草稿"按钮
 }
 
 export type MessageBlock =

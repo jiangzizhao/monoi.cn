@@ -126,6 +126,24 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
       // 把成品视频注入对话, 立刻关弹窗 — 结果已经在对话流里, 弹窗里不再重复展示
       const convId = chatStore.activeId
       if (convId) {
+        // 构造 jianying_payload: 后续 VideoPlayer 里的"导出剪映草稿"按钮点击时直接拿这个调端点
+        // 用原始 narrationOssKey (口播视频) 而非 output_oss_key (合成后成品), 这样剪映草稿是按句分段的
+        const jianyingPayload = narrationOssKey ? {
+          narration_oss_key: narrationOssKey,
+          output_ratio: outputRatio,
+          shots: segmentTimes.map((seg, i) => ({
+            start: seg.start,
+            end: seg.end,
+            text: items[i]?.text || '',
+            assets: (selected[i] || [])
+              .filter(a => a.oss_key || (a.preview_url && /\.(mp4|mov|webm|mkv)(\?|$)/i.test(a.preview_url)))
+              .map(a => ({
+                url: a.oss_key ? '' : (a.preview_url || ''),
+                oss_key: a.oss_key,
+                duration: a.duration || 0,
+              })),
+          })),
+        } : undefined
         const msg = makeAssistantMsg([
           {
             type: 'video_player',
@@ -135,6 +153,7 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
               audio_label: '一键合成',
               source: 'ai_generated' as const,
               narration_oss_key: data.output_oss_key,   // 给封面/后续模块用
+              jianying_payload: jianyingPayload,
             },
           },
           { type: 'text', content: '成品视频已合成' },

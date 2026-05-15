@@ -121,6 +121,8 @@ function normalizeBlock(block: unknown): MessageBlock | null {
       const data = isRecord(block.data) ? block.data : {}
       const url = asString(data.video_url)
       if (!url) return null
+      // jianying_payload 完整结构由后端 endpoint 校验, 这里只确认是个 object 就保留
+      const jp = isRecord(data.jianying_payload) ? data.jianying_payload as any : undefined
       return {
         type: 'video_player',
         data: {
@@ -135,6 +137,7 @@ function normalizeBlock(block: unknown): MessageBlock | null {
           text_preview: asString(data.text_preview) || undefined,
           kept_segments: Array.isArray(data.kept_segments) ? data.kept_segments as any : undefined,
           narration_oss_key: asString(data.narration_oss_key) || undefined,
+          jianying_payload: jp && Array.isArray(jp.shots) ? jp : undefined,
         },
       }
     }

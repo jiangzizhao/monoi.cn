@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { Play, Pause, Download, Loader2 } from 'lucide-react'
+import { Play, Pause, Download, Loader2, FileBox } from 'lucide-react'
 import type { VideoResult } from '../../types'
 
 function resolveUrl(raw: string) {
@@ -15,6 +15,11 @@ export function VideoPlayer({ data }: { data: VideoResult }) {
   const [playing, setPlaying] = useState(false)
   const [progress, setProgress] = useState(0)
   const [downloading, setDownloading] = useState(false)
+  // 剪映草稿导出状态 (有 jianying_payload 才显示按钮)
+  const [exportingDraft, setExportingDraft] = useState(false)
+  const [draftUrl, setDraftUrl] = useState<string | null>(null)
+  const [draftError, setDraftError] = useState('')
+  const [draftSizeMB, setDraftSizeMB] = useState<number | null>(null)
 
   const url = resolveUrl(data.video_url)
   const durationSec = data.duration_ms ? data.duration_ms / 1000 : undefined
@@ -30,6 +35,28 @@ export function VideoPlayer({ data }: { data: VideoResult }) {
     const v = videoRef.current
     if (!v || !v.duration) return
     setProgress((v.currentTime / v.duration) * 100)
+  }
+
+  const handleExportDraft = async () => {
+    if (exportingDraft || !data.jianying_payload) return
+    setExportingDraft(true)
+    setDraftError('')
+    try {
+      const directBase = import.meta.env.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'
+      const res = await fetch(directBase + '/api/voice/compose-jianying-draft', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data.jianying_payload),
+      })
+      const j = await res.json()
+      if (!res.ok || !j.success) throw new Error(j.detail || j.error || `导出失败 (${res.status})`)
+      setDraftUrl(j.download_url)
+      setDraftSizeMB(j.zip_size ? Math.round(j.zip_size / 1024 / 1024 * 10) / 10 : null)
+    } catch (e: any) {
+      setDraftError(e.message || '导出失败')
+    } finally {
+      setExportingDraft(false)
+    }
   }
 
   // fetch + blob 触发下载, 绕开 <a download> 跨源失效
@@ -112,6 +139,38 @@ export function VideoPlayer({ data }: { data: VideoResult }) {
           {downloading ? <Loader2 size={14} className="animate-spin"/> : <Download size={14}/>}
         </button>
       </div>
+
+      {data.jianying_payload && (
+        <div className="border-t border-[var(--border)] pt-3 flex flex-col gap-2">
+          {!draftUrl ? (
+            <button
+              onClick={handleExportDraft}
+              disabled={exportingDraft}
+              className="self-start flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs text-[var(--text-2)] border border-[var(--border)] hover:text-[var(--text)] hover:bg-[var(--bg-hover)] disabled:opacity-50 disabled:cursor-wait cursor-pointer transition-colors"
+              title="生成剪映草稿 zip, 解压到剪映草稿目录就能在剪映里继续编辑"
+            >
+              {exportingDraft ? <Loader2 size={12} className="animate-spin"/> : <FileBox size={12}/>}
+              {exportingDraft ? '正在打包草稿 (拉素材+组装, 约 30-60 秒)' : '导出剪映草稿 (按句分段)'}
+            </button>
+          ) : (
+            <div className="flex flex-col gap-1.5 text-xs">
+              <a href={draftUrl} target="_blank" rel="noopener noreferrer"
+                className="self-start flex items-center gap-2 px-3 py-1.5 rounded-lg text-[var(--text)] border border-[var(--border)] hover:bg-[var(--bg-hover)] transition-colors">
+                <Download size={12}/>
+                下载草稿 zip{draftSizeMB ? ` (${draftSizeMB} MB)` : ''}
+              </a>
+              <p className="text-[var(--text-3)] leading-relaxed">
+                解压到剪映草稿目录后, 打开剪映就能看到一条按句分段的时间线 (视频/音频/字幕 3 轨道).
+                <br/>
+                Win: <code className="text-[10px] bg-[var(--bg-hover)] px-1 rounded">%LOCALAPPDATA%\JianyingPro\User Data\Projects\com.lveditor.draft\</code>
+                <br/>
+                Mac: <code className="text-[10px] bg-[var(--bg-hover)] px-1 rounded">~/Movies/JianyingPro/User Data/Projects/com.lveditor.draft/</code>
+              </p>
+            </div>
+          )}
+          {draftError && <p className="text-xs text-red-400">{draftError}</p>}
+        </div>
+      )}
     </div>
   )
 }

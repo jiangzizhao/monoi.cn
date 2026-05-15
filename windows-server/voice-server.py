@@ -1147,6 +1147,134 @@ def compose_footage(req: ComposeRequest):
         except: pass
 
 
+# ============== 一键导出剪映草稿 (按句分段 3 轨道) ==============
+
+
+class JianyingDraftAsset(BaseModel):
+    url: str = ''                  # 公网 URL (Pexels/Pixabay) — oss_key 优先
+    oss_key: Optional[str] = None
+    duration: float = 0.0
+
+
+class JianyingDraftShot(BaseModel):
+    start: float                   # 在 narration 里的起始秒
+    end: float
+    text: str = ''                 # 该镜对应字幕 (空字符串 = 不加字幕段)
+    assets: list[JianyingDraftAsset]   # 一镜可能多素材, V1 只取第一个有效的
+
+
+class JianyingDraftRequest(BaseModel):
+    narration_oss_key: str
+    shots: list[JianyingDraftShot]
+    output_ratio: str = '9:16'
+    draft_name: Optional[str] = None    # 不传则按时间戳自动生成
+
+
+@app.post('/compose-jianying-draft')
+def compose_jianying_draft(req: JianyingDraftRequest):
+    """合成剪映草稿 zip: 拉口播视频 + 每镜首个有效素材, 用 pyJianYingDraft 拼 3 轨道, 打 zip 上传 OSS, 返签名 URL."""
+    import shutil
+    import subprocess
+    import tempfile
+    import urllib.request
+    from oss_helper import oss_download, oss_upload, oss_sign_get
+    import jianying_draft
+
+    if not req.shots:
+        raise HTTPException(400, 'shots 不能为空')
+
+    job_id = f"jydraft_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}"
+    draft_name = req.draft_name or f"monoi_{int(time.time())}"
+    work_dir = os.path.join(tempfile.gettempdir(), job_id)
+    os.makedirs(work_dir, exist_ok=True)
+
+    try:
+        # 1. 拉口播视频
+        narration_path = os.path.join(work_dir, 'narration.mp4')
+        try:
+            oss_download(req.narration_oss_key, narration_path)
+        except Exception as e:
+            err_str = str(e)
+            if 'NoSuchKey' in err_str or '404' in err_str:
+                raise HTTPException(410, '口播视频文件已过期 (超过 1 天 OSS 自动清理), 请回到口播剪辑重新生成一遍.')
+            raise HTTPException(400, f'OSS 下载口播失败: {err_str[:200]}')
+
+        # 2. 每镜下载首个有效素材 (跟 /compose-footage 同款逻辑)
+        shot_payloads = []
+        for si, shot in enumerate(req.shots):
+            local_path: Optional[str] = None
+            asset_dur = 0.0
+            for ai, asset in enumerate(shot.assets):
+                candidate = os.path.join(work_dir, f'asset_{si}_{ai}.mp4')
+                try:
+                    if asset.oss_key:
+                        oss_download(asset.oss_key, candidate)
+                    elif asset.url:
+                        ureq = urllib.request.Request(asset.url, headers={
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                            'Referer': 'https://www.pexels.com/' if 'pexels' in asset.url else 'https://pixabay.com/',
+                        })
+                        with urllib.request.urlopen(ureq, timeout=120) as resp, open(candidate, 'wb') as f:
+                            shutil.copyfileobj(resp, f)
+                    else:
+                        continue
+
+                    probe = subprocess.run(
+                        ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
+                         '-show_entries', 'stream=codec_name', '-of', 'default=nw=1:nk=1', candidate],
+                        capture_output=True, timeout=30,
+                    )
+                    if probe.returncode != 0 or not probe.stdout.strip():
+                        raise ValueError('下载文件不是有效视频')
+                    local_path = candidate
+                    asset_dur = float(asset.duration) or 0.0
+                    break  # 拿到第一个有效的就够了
+                except Exception as e:
+                    print(f"[jydraft] asset {si}/{ai} 拉失败: {e}", flush=True)
+                    try: os.unlink(candidate)
+                    except: pass
+
+            shot_payloads.append({
+                'start': shot.start,
+                'end': shot.end,
+                'text': shot.text,
+                'asset_path': local_path,
+                'asset_duration': asset_dur,
+            })
+
+        # 3. 跑 pyJianYingDraft 生成草稿 + 打 zip
+        try:
+            zip_path = jianying_draft.build_draft_zip(
+                work_dir=work_dir,
+                draft_name=draft_name,
+                narration_video_path=narration_path,
+                shots=shot_payloads,
+                output_ratio=req.output_ratio,
+            )
+        except RuntimeError as e:
+            raise HTTPException(500, str(e))
+
+        # 4. 上传 zip 到 OSS, 24h 签名 URL
+        out_oss_key = f"outputs/{job_id}.zip"
+        try:
+            oss_upload(out_oss_key, zip_path, content_type='application/zip')
+        except Exception as e:
+            raise HTTPException(500, f'OSS 上传失败: {e}')
+
+        zip_size = os.path.getsize(zip_path)
+        download_url = oss_sign_get(out_oss_key, expires=24 * 3600)
+        return {
+            'success': True,
+            'draft_name': draft_name,
+            'download_url': download_url,
+            'zip_size': zip_size,
+            'output_oss_key': out_oss_key,
+        }
+    finally:
+        try: shutil.rmtree(work_dir, ignore_errors=True)
+        except: pass
+
+
 # ============== 视频封面生成 (截帧 + drawtext 叠标题, 5 个内置模板, 4 种比例) ==============
 
 
