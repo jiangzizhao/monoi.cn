@@ -42,7 +42,8 @@ export default function Login() {
     setLoading(true)
     try {
       if (mode === 'email') {
-        await login(email, password)
+        // 邮箱去空格 + 小写, 跟后端 normalize 对齐 (避免大小写 / IME 多余空格导致登录失败)
+        await login(email.trim().toLowerCase(), password)
       } else {
         if (!validatePhone(phone)) throw new Error('手机号格式错误')
         if (smsCode.length !== 6) throw new Error('验证码 6 位')
@@ -115,6 +116,7 @@ export default function Login() {
                 <input
                   type="email" value={email} onChange={e => setEmail(e.target.value)}
                   placeholder="your@email.com" required
+                  autoCapitalize="off" autoCorrect="off" spellCheck={false} autoComplete="email"
                   className="bg-[var(--bg-input)] border border-[var(--border)] rounded-xl px-4 py-2.5 text-sm text-[var(--text)] placeholder:text-[var(--text-3)] focus:outline-none focus:border-[var(--text-3)] transition-colors"
                 />
               </div>
@@ -123,6 +125,7 @@ export default function Login() {
                 <input
                   type="password" value={password} onChange={e => setPassword(e.target.value)}
                   placeholder="输入密码" required
+                  autoCapitalize="off" autoCorrect="off" spellCheck={false} autoComplete="current-password"
                   className="bg-[var(--bg-input)] border border-[var(--border)] rounded-xl px-4 py-2.5 text-sm text-[var(--text)] placeholder:text-[var(--text-3)] focus:outline-none focus:border-[var(--text-3)] transition-colors"
                 />
               </div>

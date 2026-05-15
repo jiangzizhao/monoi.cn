@@ -454,6 +454,9 @@ def register(req: RegisterRequest):
     if not _verify_sms_code(req.phone, req.sms_code, 'register'):
         raise HTTPException(400, "验证码错误或已过期")
 
+    # 邮箱统一小写 + 去空格, 避免登录时大小写不匹配
+    email_norm = (req.email or '').strip().lower()
+
     conn = get_db()
     try:
         # 手机号唯一性 (用代码强制, ALTER ADD COLUMN 没法加 UNIQUE 约束)
@@ -463,7 +466,7 @@ def register(req: RegisterRequest):
         hashed = hash_password(req.password)
         cursor = conn.execute(
             "INSERT INTO users (username, email, password, phone) VALUES (?, ?, ?, ?)",
-            (req.username, req.email, hashed, req.phone)
+            (req.username, email_norm, hashed, req.phone)
         )
         new_user_id = cursor.lastrowid
         conn.commit()
@@ -497,12 +500,18 @@ FREE_PLAN_INIT_CREDITS = 50    # 免费用户注册一次性送的积分
 
 @app.post("/api/login")
 def login(req: LoginRequest):
+    # 邮箱大小写不敏感 (LOWER(email) = ?), 兼容历史里大小写不一致的注册数据
+    email_norm = (req.email or '').strip().lower()
     conn = get_db()
     try:
-        row = conn.execute("SELECT id, username, password FROM users WHERE email = ?",
-                           (req.email,)).fetchone()
-        if not row or not verify_password(req.password, row[2]):
-            raise HTTPException(401, "邮箱或密码错误")
+        row = conn.execute(
+            "SELECT id, username, password FROM users WHERE LOWER(email) = ?",
+            (email_norm,)
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "该邮箱未注册")
+        if not verify_password(req.password, row[2]):
+            raise HTTPException(401, "密码错误")
         token = create_token(row[0], row[1])
         return {"success": True, "token": token, "username": row[1]}
     finally:

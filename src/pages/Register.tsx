@@ -60,7 +60,8 @@ export default function Register() {
     }
     setLoading(true)
     try {
-      await register(username, email, password, phone, smsCode, referralCode || undefined)
+      // 邮箱去空格 + 小写, 跟后端 normalize 对齐 (避免大小写 / IME 多余空格)
+      await register(username.trim(), email.trim().toLowerCase(), password, phone, smsCode, referralCode || undefined)
       nav('/login')
     } catch (err: any) {
       setError(err.message)
@@ -124,6 +125,7 @@ export default function Register() {
             <input
               type="email" value={email} onChange={e => setEmail(e.target.value)}
               placeholder="your@email.com" required
+              autoCapitalize="off" autoCorrect="off" spellCheck={false} autoComplete="email"
               className="bg-[var(--bg-input)] border border-[var(--border)] rounded-xl px-4 py-2.5 text-sm text-[var(--text)] placeholder:text-[var(--text-3)] focus:outline-none focus:border-[var(--text-3)] transition-colors"
             />
           </div>
@@ -133,6 +135,7 @@ export default function Register() {
             <input
               type="password" value={password} onChange={e => setPassword(e.target.value)}
               placeholder="至少 6 位" required minLength={6}
+              autoCapitalize="off" autoCorrect="off" spellCheck={false} autoComplete="new-password"
               className="bg-[var(--bg-input)] border border-[var(--border)] rounded-xl px-4 py-2.5 text-sm text-[var(--text)] placeholder:text-[var(--text-3)] focus:outline-none focus:border-[var(--text-3)] transition-colors"
             />
           </div>
