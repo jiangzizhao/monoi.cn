@@ -47,30 +47,37 @@ def _get_client():
 
 
 def verify(captcha_verify_param: str) -> tuple[bool, Optional[str]]:
-    """校验前端传来的 captcha_verify_param. 返 (ok, err_msg)."""
+    """校验前端传来的 captcha_verify_param. 返 (ok, err_msg).
+    带 10s 超时 + 详细 print, 防 SDK 网络卡住整个请求超过 Vercel 60s 限制."""
     if not captcha_verify_param:
         return False, '滑块参数为空'
     if not is_configured():
-        # 没配 env 不该走到这里 (调用方应该先 is_configured() 判). 安全起见: 默认放过.
-        return True, None
+        return True, None  # 没配 env 默认放过 (调用方应先 is_configured 判)
+    print(f"[captcha] verify 开始, param 长度={len(captcha_verify_param)}", flush=True)
     try:
         from alibabacloud_captcha20230305 import models as captcha_models
+        from alibabacloud_tea_util import models as util_models
         client = _get_client()
         req = captcha_models.VerifyIntelligentCaptchaRequest(
             scene_id=os.getenv('ALIYUN_CAPTCHA_SCENE_ID'),
             captcha_verify_param=captcha_verify_param,
         )
-        resp = client.verify_intelligent_captcha(req)
-        # 阿里云返回结构: resp.body.result.verify_result (bool) + resp.body.result.verify_code (str)
+        # 10 秒超时 — 阿里云正常 100ms 内返, 卡住 = 网络/服务问题, 不能让它拖死整个 send-sms
+        runtime = util_models.RuntimeOptions(read_timeout=10000, connect_timeout=5000)
+        resp = client.verify_intelligent_captcha_with_options(req, runtime)
         body = getattr(resp, 'body', None)
         result = getattr(body, 'result', None) if body else None
         if result is None:
+            print(f"[captcha] 返回结构异常 body={body}", flush=True)
             return False, '阿里云返回结构异常'
         ok = bool(getattr(result, 'verify_result', False))
+        code = getattr(result, 'verify_code', '') or ''
+        print(f"[captcha] verify 返回: ok={ok} code={code}", flush=True)
         if ok:
             return True, None
-        code = getattr(result, 'verify_code', '') or ''
         return False, f'校验未通过 (code={code})'
     except Exception as e:
-        # 阿里云校验本身挂了 — 安全起见拒绝 (而不是放过), 否则故障期会被绕过
-        return False, f'阿里云校验调用失败: {str(e)[:200]}'
+        # 阿里云校验挂了 — 安全起见拒绝 (而非放过), 防故障期被绕过
+        err = str(e)[:300]
+        print(f"[captcha] verify 异常: {err}", flush=True)
+        return False, f'阿里云校验调用失败: {err}'
