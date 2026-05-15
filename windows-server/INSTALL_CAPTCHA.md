@@ -21,7 +21,7 @@
 
 1. 阿里云控制台 → RAM → 用户 → 创建 `monoi-captcha`
 2. 勾"使用永久 AccessKey 访问" → 拿 AccessKey ID + Secret
-3. 加权限: **AliyunCaptchaFullAccess** (只这一个)
+3. 加权限: **AliyunYundunAFSFullAccess** (只这一个)
 
 ## 3. 后端配 env (windows-server/.env)
 
