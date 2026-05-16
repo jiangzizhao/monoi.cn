@@ -162,7 +162,7 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
             question: '下一步',
             options: [
               { id: '__form_cover__', label: '生成封面', description: '截帧 + 模板, 输出多比例' },
-              { id: '__form_publish__', label: '去发布', description: '弹起 Edge 自动上传到小红书/抖音' },
+              { id: '__form_publish__', label: '去发布', description: '上传到小红书 / 抖音' },
               { id: '保留这段视频, 暂不做下一步', label: '保留视频', description: '稍后再决定' },
             ],
           },

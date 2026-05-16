@@ -46,7 +46,7 @@ const MODULE_OPTIONS: Record<string, { id: string; label: string; desc: string }
     { id: '__form_cover__', label: '生成封面', desc: '截帧 + 5 个模板, 输出多比例; 也能上传自传' },
   ],
   '发布': [
-    { id: '__form_publish__', label: '去发布', desc: '弹起 Edge 自动上传到小红书/抖音, 你审稿后点发布' },
+    { id: '__form_publish__', label: '去发布', desc: '上传到小红书 / 抖音, 你审稿后点发布' },
     { id: '帮我生成各平台的发布文案', label: '生成发布文案', desc: '让 AI 先为每平台生成标题描述标签' },
   ],
   '导出': [
