@@ -755,6 +755,22 @@ def my_credit_log(request: Request, limit: int = 50):
     return [dict(r) for r in rows]
 
 
+@router.get("/my-orders")
+def my_orders(request: Request, limit: int = 50):
+    """当前用户的订单列表 (支付订单 + 手工开通订单, 全状态都返)."""
+    user_id = get_current_user_id(request)
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT id, order_type, product_code, amount_yuan, credits_added,
+               status, payment_method, payment_channel, paid_at, refunded_at,
+               wx_transaction_id, created_at, expires_at
+        FROM billing_orders WHERE user_id = ?
+        ORDER BY created_at DESC LIMIT ?
+    """, (user_id, limit)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
 @router.post("/subscribe")
 def subscribe(req: SubscribeRequest, request: Request):
     """开通/续费套餐. V1 手工模式 (admin 后台触发); V2 接支付前会先创建 pending 订单 + 跳支付."""

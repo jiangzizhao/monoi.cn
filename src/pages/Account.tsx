@@ -8,10 +8,11 @@ import {
 import { QRCodeCanvas } from 'qrcode.react'
 import {
   fetchPlans, fetchMyCredits, fetchMySubscription, fetchMyReferralCode,
-  fetchMyReferrerStatus, fetchMyReferrerBalance, fetchCreditLog,
+  fetchMyReferrerStatus, fetchMyReferrerBalance, fetchCreditLog, fetchMyOrders,
   fetchMyProfile, updateProfile, changePassword, fetchMyReferralRecords, rebindPhone,
   type PlansResponse, type PlanConfig, type CreditBalance, type UserSubscription,
   type ReferralCode, type ReferrerStatus, type ReferrerBalance, type CreditLogEntry,
+  type OrderEntry,
   type UserProfile, type ReferredUser, type CommissionDetail,
 } from '../services/billing'
 import { sendSmsCode } from '../lib/auth'
@@ -126,6 +127,7 @@ export default function Account() {
   const [refStatus, setRefStatus] = useState<ReferrerStatus | null>(null)
   const [refBalance, setRefBalance] = useState<ReferrerBalance | null>(null)
   const [creditLog, setCreditLog] = useState<CreditLogEntry[]>([])
+  const [orders, setOrders] = useState<OrderEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
 
@@ -149,10 +151,30 @@ export default function Account() {
       fetchMyReferrerStatus().catch(e => { console.warn(e); return null }),
       fetchMyReferrerBalance().catch(e => { console.warn(e); return null }),
       fetchCreditLog(50).catch(e => { console.warn(e); return [] }),
-    ]).then(([p, m, c, s, rc, rs, rb, cl]) => {
-      setPlans(p); setMe(m); setCredits(c); setSub(s); setRefCode(rc); setRefStatus(rs); setRefBalance(rb); setCreditLog(cl as CreditLogEntry[])
+      fetchMyOrders(50).catch(e => { console.warn(e); return [] }),
+    ]).then(([p, m, c, s, rc, rs, rb, cl, od]) => {
+      setPlans(p); setMe(m); setCredits(c); setSub(s); setRefCode(rc); setRefStatus(rs); setRefBalance(rb)
+      setCreditLog(cl as CreditLogEntry[])
+      setOrders(od as OrderEntry[])
       setLoading(false)
     }).catch(e => { setErr(e.message || '加载失败'); setLoading(false) })
+  }
+
+  // 把 product_code (pack_99 / pro_monthly / max_monthly...) 转成友好名字 "体验包" / "Pro 月卡"
+  // 同时给 credit_log 里的 feature 字段 (voice_clone / digital_human / pack_99 等) 一个友好名
+  const friendlyName = (code?: string): string => {
+    if (!code) return '-'
+    if (plans?.credit_packs?.[code]) return plans.credit_packs[code].name
+    if (plans?.plans?.[code]) return plans.plans[code].name
+    if (code === 'free') return '免费版'
+    // 消耗类 feature 友好名
+    const featureMap: Record<string, string> = {
+      voice_preset: '预设音色配音', voice_clone: '克隆音色配音',
+      narration_clean: '口播剪辑导出', compose_no_dh: '一键合成', digital_human: '数字人合成',
+      script: '文案生成', footage_match: '素材匹配', cover_generate: '封面生成', publish: '自动发布',
+      free_signup: '注册赠送', subscription_grant: '会员月度积分', purchase: '加购积分包',
+    }
+    return featureMap[code] || code
   }
 
   if (loading) return <div className="min-h-screen flex items-center justify-center text-[var(--text-2)]">加载中...</div>
@@ -197,7 +219,7 @@ export default function Account() {
           {activeTab === 'profile' && <ProfileTab me={me} sub={sub} credits={credits} refCode={refCode} plans={plans} onReload={reloadAll}/>}
           {activeTab === 'membership' && <MembershipTab sub={sub} plans={plans} credits={credits} onUpgrade={t => setUpgradeDialog(t)}/>}
           {activeTab === 'credits' && <CreditsTab credits={credits} plans={plans} sub={sub} onBuyPack={c => setUpgradeDialog(c)}/>}
-          {activeTab === 'transactions' && <TransactionsTab creditLog={creditLog}/>}
+          {activeTab === 'transactions' && <TransactionsTab creditLog={creditLog} orders={orders} friendlyName={friendlyName}/>}
           {activeTab === 'referral' && <ReferralTab refCode={refCode} refStatus={refStatus} refBalance={refBalance} onShowQr={() => setQrOpen(true)}/>}
           {activeTab === 'security' && <SecurityTab me={me} onReload={reloadAll}/>}
         </div>
@@ -690,8 +712,19 @@ function CreditsTab({ credits, plans, sub, onBuyPack }: {
 
 // ========== Tab 4: 消费记录 ==========
 
-function TransactionsTab({ creditLog }: { creditLog: CreditLogEntry[] }) {
+function TransactionsTab({ creditLog, orders, friendlyName }: {
+  creditLog: CreditLogEntry[]; orders: OrderEntry[]; friendlyName: (code?: string) => string
+}) {
   const [subTab, setSubTab] = useState<'credit' | 'order'>('credit')
+  const STATUS_LABEL: Record<string, string> = {
+    pending: '待支付', paid: '已支付', expired: '已取消', refunded: '已退款',
+  }
+  const STATUS_COLOR: Record<string, string> = {
+    pending: 'text-amber-500', paid: 'text-green-500', expired: 'text-[var(--text-3)]', refunded: 'text-red-400',
+  }
+  const CHANNEL_LABEL: Record<string, string> = {
+    wechat: '微信支付', alipay: '支付宝', manual: '手工开通',
+  }
   return (
     <>
       <div className="flex border-b border-[var(--border)]">
@@ -716,7 +749,7 @@ function TransactionsTab({ creditLog }: { creditLog: CreditLogEntry[] }) {
                 <div key={log.id} className="px-5 py-3 flex items-center justify-between text-xs">
                   <div className="flex items-center gap-3">
                     <span className="text-[10px] text-[var(--text-3)] w-32">{fmtTime(log.created_at)}</span>
-                    <span className="text-[var(--text-2)]">{log.feature || log.source}</span>
+                    <span className="text-[var(--text-2)]">{friendlyName(log.feature || log.source)}</span>
                   </div>
                   <span className={log.delta > 0 ? 'text-green-500 font-medium' : 'text-red-400 font-medium'}>
                     {log.delta > 0 ? '+' : ''}{log.delta}
@@ -729,8 +762,29 @@ function TransactionsTab({ creditLog }: { creditLog: CreditLogEntry[] }) {
       )}
 
       {subTab === 'order' && (
-        <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] px-5 py-8 text-center text-sm text-[var(--text-3)]">
-          订单记录功能开发中, 等支付接通后这里会显示所有套餐 + 积分包订单
+        <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] overflow-hidden">
+          {orders.length === 0 ? (
+            <div className="px-5 py-8 text-center text-sm text-[var(--text-3)]">还没有订单</div>
+          ) : (
+            <div className="divide-y divide-[var(--border-subtle)]">
+              {orders.map(o => (
+                <div key={o.id} className="px-5 py-3.5 flex items-center justify-between gap-3 text-xs">
+                  <div className="flex flex-col gap-0.5 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-[var(--text)] font-medium">{friendlyName(o.product_code)}</span>
+                      <span className={`text-[10px] ${STATUS_COLOR[o.status] || 'text-[var(--text-3)]'}`}>· {STATUS_LABEL[o.status] || o.status}</span>
+                    </div>
+                    <div className="text-[10px] text-[var(--text-3)] flex items-center gap-2">
+                      <span>{fmtTime(o.created_at)}</span>
+                      {o.payment_channel && <span>· {CHANNEL_LABEL[o.payment_channel] || o.payment_channel}</span>}
+                      {o.credits_added ? <span>· +{o.credits_added} 积分</span> : null}
+                    </div>
+                  </div>
+                  <span className="text-base font-semibold text-[var(--text)] flex-shrink-0">¥{o.amount_yuan}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </>

@@ -137,6 +137,26 @@ export async function fetchCreditLog(limit = 50): Promise<CreditLogEntry[]> {
   return get(`/api/billing/credit-log?limit=${limit}`)
 }
 
+export interface OrderEntry {
+  id: string
+  order_type: string                // 'subscription' / 'credit_pack'
+  product_code: string              // 'pro_monthly' / 'pack_99' / ...
+  amount_yuan: number
+  credits_added?: number
+  status: string                    // 'pending' / 'paid' / 'expired' / 'refunded'
+  payment_method?: string
+  payment_channel?: string          // 'wechat' / 'alipay' / 'manual'
+  paid_at?: number
+  refunded_at?: number
+  wx_transaction_id?: string
+  created_at: number
+  expires_at?: number
+}
+
+export async function fetchMyOrders(limit = 50): Promise<OrderEntry[]> {
+  return get(`/api/billing/my-orders?limit=${limit}`)
+}
+
 export async function subscribe(tier: string): Promise<{ success: boolean; order_id: string; message: string }> {
   return post('/api/billing/subscribe', { tier, payment_method: 'manual' })
 }
