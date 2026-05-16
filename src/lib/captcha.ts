@@ -2,11 +2,10 @@
  * 阿里云人机验证 (Captcha 2.0) 前端封装 — 按官方文档:
  * https://help.aliyun.com/zh/captcha/web-and-h5-client-v2-architecture-access
  *
- * env (Vercel 上配, 跟后端 ALIYUN_CAPTCHA_SCENE_ID 同一个 SceneId):
- *   VITE_ALIYUN_CAPTCHA_SCENE_ID — 控制台 → 验证场景列表 → 该场景的"场景ID"
+ * env: VITE_ALIYUN_CAPTCHA_SCENE_ID — 控制台 → 验证场景列表 → 该场景的"场景ID"
  *
- * SDK 行为: 必须先 init (绑定一个 button selector), 后续通过点击该 button 触发滑块.
- * 我们用一个隐藏 button, init 一次, 每次 runCaptcha 时程序触发其 click.
+ * 关键: popup 模式必须有 button 字段绑事件, 但程序触发 button.click() 浏览器可能挡;
+ * 用 getInstance 拿到 instance 后调 instance.show() 直接触发更稳, 不依赖按钮点击.
  */
 
 const SDK_URL = 'https://o.alicdn.com/captcha-frontend/aliyunCaptcha/AliyunCaptcha.js'
@@ -14,7 +13,8 @@ const CONTAINER_ID = 'aliyun-captcha-container'
 const BUTTON_ID = 'aliyun-captcha-trigger'
 
 let _sdkLoading: Promise<void> | null = null
-let _initialized = false
+let _initPromise: Promise<void> | null = null
+let _instance: any = null
 
 function getSceneId(): string {
   return (import.meta as any).env?.VITE_ALIYUN_CAPTCHA_SCENE_ID || ''
@@ -49,7 +49,8 @@ function ensureDOM(): void {
     btn.id = BUTTON_ID
     btn.type = 'button'
     btn.setAttribute('aria-hidden', 'true')
-    btn.style.cssText = 'position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;opacity:0;pointer-events:none;'
+    // 不能加 pointer-events:none, SDK 用事件代理可能要靠它
+    btn.style.cssText = 'position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;opacity:0;'
     document.body.appendChild(btn)
   }
 }
@@ -67,38 +68,45 @@ export interface RunResult<T> {
   error?: string
 }
 
-// 单例 state — Captcha 2.0 SDK 只能 init 一次, 后续重新点 button 触发新 session.
 let _pendingResolve: ((r: RunResult<any>) => void) | null = null
 let _pendingOnVerified: ((p: string) => Promise<VerifyOutcome<any>>) | null = null
 let _captured: VerifyOutcome<any> | null = null
 
-async function ensureInit(): Promise<void> {
-  if (_initialized) return
-  await loadSDK()
-  ensureDOM()
-  ;(window as any).initAliyunCaptcha({
-    SceneId: getSceneId(),
-    mode: 'popup',
-    element: '#' + CONTAINER_ID,
-    button: '#' + BUTTON_ID,
-    captchaVerifyCallback: async (captchaVerifyParam: string) => {
-      if (!_pendingOnVerified) {
-        return { captchaResult: true, bizResult: false }
-      }
-      _captured = await _pendingOnVerified(captchaVerifyParam)
-      return { captchaResult: _captured.captchaPassed, bizResult: _captured.bizOk }
-    },
-    onBizResultCallback: (bizResult: boolean) => {
-      if (!_pendingResolve) return
-      const c = _captured || { captchaPassed: true, bizOk: bizResult }
-      _pendingResolve({ ok: c.bizOk, data: c.data, error: c.error })
-      _pendingResolve = null
-      _pendingOnVerified = null
-      _captured = null
-    },
-    language: 'cn',
-  })
-  _initialized = true
+function init(): Promise<void> {
+  if (_initPromise) return _initPromise
+  _initPromise = (async () => {
+    await loadSDK()
+    ensureDOM()
+    await new Promise<void>((resolve) => {
+      ;(window as any).initAliyunCaptcha({
+        SceneId: getSceneId(),
+        mode: 'popup',
+        element: '#' + CONTAINER_ID,
+        button: '#' + BUTTON_ID,
+        captchaVerifyCallback: async (captchaVerifyParam: string) => {
+          if (!_pendingOnVerified) {
+            return { captchaResult: true, bizResult: false }
+          }
+          _captured = await _pendingOnVerified(captchaVerifyParam)
+          return { captchaResult: _captured.captchaPassed, bizResult: _captured.bizOk }
+        },
+        onBizResultCallback: (bizResult: boolean) => {
+          if (!_pendingResolve) return
+          const c = _captured || { captchaPassed: true, bizOk: bizResult }
+          _pendingResolve({ ok: c.bizOk, data: c.data, error: c.error })
+          _pendingResolve = null
+          _pendingOnVerified = null
+          _captured = null
+        },
+        getInstance: (instance: any) => {
+          _instance = instance
+          resolve()    // 拿到 instance 才算 init 完成
+        },
+        language: 'cn',
+      })
+    })
+  })()
+  return _initPromise
 }
 
 /**
@@ -113,7 +121,7 @@ export async function runCaptcha<T>(
     return { ok: r.bizOk, data: r.data, error: r.error }
   }
   try {
-    await ensureInit()
+    await init()
   } catch (e: any) {
     return { ok: false, error: e?.message || 'SDK 初始化失败' }
   }
@@ -121,10 +129,13 @@ export async function runCaptcha<T>(
     _pendingResolve = resolve
     _pendingOnVerified = onVerified as any
     _captured = null
-    // 触发 hidden button click → SDK 弹出 captcha (popup 模式只能由 button click 触发)
-    setTimeout(() => {
+    // 直接调 instance.show() 触发, 不依赖 button click (浏览器可能挡程序触发的弹窗)
+    if (_instance && typeof _instance.show === 'function') {
+      _instance.show()
+    } else {
+      // fallback: 触发隐藏 button click
       const btn = document.getElementById(BUTTON_ID) as HTMLButtonElement | null
       btn?.click()
-    }, 0)
+    }
   })
 }
