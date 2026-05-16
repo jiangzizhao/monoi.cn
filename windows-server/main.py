@@ -2710,6 +2710,9 @@ def create_payment_order(req: CreatePayRequest, request: Request):
                 description=description,
             )
         except Exception as e:
+            import traceback
+            err_full = traceback.format_exc()
+            print(f"[pay] 微信下单失败 order={out_trade_no} 完整 traceback:\n{err_full}", flush=True)
             raise HTTPException(500, f"微信下单失败: {e}")
         code_url = wx_res['code_url']
         prepay_id = wx_res.get('prepay_id')
