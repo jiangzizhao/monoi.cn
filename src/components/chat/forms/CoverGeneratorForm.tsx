@@ -42,7 +42,8 @@ export function CoverGeneratorForm({ defaultVideoOssKey, defaultVideoUrl, onClos
   const [colorFill, setColorFill] = useState<string>('#000000')
   const [colorStroke, setColorStroke] = useState<string>('#FFFFFF')
   const [colorSubFill, setColorSubFill] = useState<string>('#000000')
-  const [position, setPosition] = useState<string>('')          // 9 宫格 id: tl/tc/tr/cl/cc/cr/bl/bc/br, 空走默认
+  const [position, setPosition] = useState<string>('')              // 主标题 9 宫格, 空走模板默认
+  const [positionSubtitle, setPositionSubtitle] = useState<string>('')  // 副标题 9 宫格, 空走主标题下方默认
   const [fontScale, setFontScale] = useState<number>(1.0)
 
   // 自传图作为源 (代替视频截帧, 但仍走相同叠字流程)
@@ -126,6 +127,7 @@ export function CoverGeneratorForm({ defaultVideoOssKey, defaultVideoUrl, onClos
         color_stroke: colorStroke || null,
         color_sub_fill: colorSubFill || null,
         position: position || null,
+        position_subtitle: positionSubtitle || null,
         font_scale: fontScale,
       }
       if (uploadedCover) {
@@ -368,22 +370,41 @@ export function CoverGeneratorForm({ defaultVideoOssKey, defaultVideoUrl, onClos
                   </label>
                 </div>
 
-                {/* 位置 9 宫格 (只对 youtube / minimal 模板生效) */}
-                <div className="flex flex-col gap-1">
-                  <span className="text-[10px] text-[var(--text-3)]">位置 (YouTube/极简 模板生效)</span>
-                  <div className="grid grid-cols-3 gap-1 w-fit">
-                    {['tl', 'tc', 'tr', 'cl', 'cc', 'cr', 'bl', 'bc', 'br'].map(p => (
-                      <button
-                        key={p}
-                        onClick={() => setPosition(p === position ? '' : p)}
-                        className={`w-8 h-8 rounded border text-xs transition-all cursor-pointer ${
-                          position === p
-                            ? 'bg-[var(--text)] text-[var(--bg)] border-[var(--text)]'
-                            : 'bg-[var(--bg-card)] text-[var(--text-3)] border-[var(--border)] hover:border-[var(--text-3)]'
-                        }`}
-                        title={p}
-                      >●</button>
-                    ))}
+                {/* 位置 9 宫格 — 主标题 + 副标题分开, 都点中按钮取消 (空 = 模板默认) */}
+                <div className="flex gap-6">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] text-[var(--text-3)]">主标题位置</span>
+                    <div className="grid grid-cols-3 gap-1 w-fit">
+                      {['tl', 'tc', 'tr', 'cl', 'cc', 'cr', 'bl', 'bc', 'br'].map(p => (
+                        <button
+                          key={p}
+                          onClick={() => setPosition(p === position ? '' : p)}
+                          className={`w-8 h-8 rounded border text-xs transition-all cursor-pointer ${
+                            position === p
+                              ? 'bg-[var(--text)] text-[var(--bg)] border-[var(--text)]'
+                              : 'bg-[var(--bg-card)] text-[var(--text-3)] border-[var(--border)] hover:border-[var(--text-3)]'
+                          }`}
+                          title={p}
+                        >●</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] text-[var(--text-3)]">副标题位置</span>
+                    <div className="grid grid-cols-3 gap-1 w-fit">
+                      {['tl', 'tc', 'tr', 'cl', 'cc', 'cr', 'bl', 'bc', 'br'].map(p => (
+                        <button
+                          key={p}
+                          onClick={() => setPositionSubtitle(p === positionSubtitle ? '' : p)}
+                          className={`w-8 h-8 rounded border text-xs transition-all cursor-pointer ${
+                            positionSubtitle === p
+                              ? 'bg-[var(--text)] text-[var(--bg)] border-[var(--text)]'
+                              : 'bg-[var(--bg-card)] text-[var(--text-3)] border-[var(--border)] hover:border-[var(--text-3)]'
+                          }`}
+                          title={p}
+                        >●</button>
+                      ))}
+                    </div>
                   </div>
                 </div>
 

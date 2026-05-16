@@ -1292,8 +1292,9 @@ class CoverRequest(BaseModel):
     color_fill: Optional[str] = None      # 字色 hex 例如 '#FFD700'
     color_stroke: Optional[str] = None    # 描边色 hex
     color_sub_fill: Optional[str] = None  # 副标题字色 hex
-    position: Optional[str] = None        # 9 宫格: 'tl'/'tc'/'tr'/'cl'/'cc'/'cr'/'bl'/'bc'/'br'
-    font_scale: float = 1.0               # 字号倍数 0.5-2.5
+    position: Optional[str] = None            # 主标题 9 宫格: 'tl'/'tc'/'tr'/'cl'/'cc'/'cr'/'bl'/'bc'/'br'
+    position_subtitle: Optional[str] = None   # 副标题 9 宫格, 空走主标题下方默认 (仅 youtube 模板支持独立位置)
+    font_scale: float = 1.0                   # 字号倍数 0.5-2.5
 
 
 # 可选字体清单 (跟一键启动.bat 下载的对应) — 给前端 GET /cover-fonts 用
@@ -1447,6 +1448,7 @@ def _render_template_pillow(img, template: str, title: str, subtitle: str,
                              color_stroke: Optional[str] = None,
                              color_sub_fill: Optional[str] = None,
                              position: Optional[str] = None,
+                             position_subtitle: Optional[str] = None,
                              font_scale: float = 1.0):
     """用 Pillow 在图上叠模板. user_* 字体, color_* 颜色, position 9 宫格, font_scale 字号倍数."""
     from PIL import ImageDraw
@@ -1510,9 +1512,17 @@ def _render_template_pillow(img, template: str, title: str, subtitle: str,
             cur_y += lh + line_gap
 
         if subtitle:
-            stw, _ = _text_size(draw, subtitle, sub_font)
-            sx = (W - stw) // 2
-            sy = block_y + total_h + int(title_size * 0.2)
+            stw, sth = _text_size(draw, subtitle, sub_font)
+            # 副标题位置: 用户指定走 9 宫格, 否则默认主标题下方居中
+            if position_subtitle:
+                ps = position_subtitle
+                sx_map = {'l': pad, 'c': (W - stw) // 2, 'r': W - stw - pad}
+                sy_map = {'t': int(H * 0.08), 'c': (H - sth) // 2, 'b': H - sth - pad}
+                sx = sx_map.get(ps[1] if len(ps) > 1 else 'c', sx_map['c'])
+                sy = sy_map.get(ps[0] if len(ps) > 0 else 'b', sy_map['b'])
+            else:
+                sx = (W - stw) // 2
+                sy = block_y + total_h + int(title_size * 0.2)
             _draw_text_with_stroke(
                 img, (sx, sy), subtitle, sub_font,
                 fill=user_sub_fill or (0, 0, 0),         # 默认黑
@@ -1737,6 +1747,7 @@ def generate_cover(req: CoverRequest):
                                                color_stroke=req.color_stroke,
                                                color_sub_fill=req.color_sub_fill,
                                                position=req.position,
+                                               position_subtitle=req.position_subtitle,
                                                font_scale=req.font_scale)
                 out_jpg = os.path.join(work_dir, f"cover_{ratio.replace(':', 'x')}.jpg")
                 img.save(out_jpg, 'JPEG', quality=92, optimize=True)
