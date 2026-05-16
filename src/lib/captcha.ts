@@ -20,6 +20,13 @@ function getSceneId(): string {
   return (import.meta as any).env?.VITE_ALIYUN_CAPTCHA_SCENE_ID || ''
 }
 
+// prefix (身份标) 在阿里云控制台"概览页面"的"实例基本信息"里, 不是场景列表的 SceneId.
+// SDK 用它拼 API 子域名 lkrpagye.captcha-open-aliyuncs.com — 没有 prefix SDK 连 URL 都拼不出, 静默 Network Error.
+// 老 env 通常已经配过, 没配就用 SceneId 兜底 (账号下单场景时常一样).
+function getPrefix(): string {
+  return (import.meta as any).env?.VITE_ALIYUN_CAPTCHA_PREFIX || getSceneId()
+}
+
 export function captchaEnabled(): boolean {
   return !!getSceneId()
 }
@@ -91,13 +98,15 @@ function init(): Promise<void> {
     console.log('[captcha] loadSDK 完成, initAliyunCaptcha 存在?', typeof (window as any).initAliyunCaptcha)
     ensureDOM()
     const sceneId = getSceneId()
-    console.log('[captcha] 准备 init, sceneId =', sceneId)
+    const prefix = getPrefix()
+    console.log('[captcha] 准备 init, sceneId =', sceneId, 'prefix =', prefix)
     await new Promise<void>((resolve, reject) => {
       // 10s 超时, 防 SDK 静默挂死
       const timer = setTimeout(() => reject(new Error('SDK init 超时 10s — getInstance 没回调')), 10000)
       try {
         ;(window as any).initAliyunCaptcha({
           SceneId: sceneId,
+          prefix: prefix,
           mode: 'popup',
           element: '#' + CONTAINER_ID,
           button: '#' + BUTTON_ID,
