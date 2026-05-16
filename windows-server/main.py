@@ -2686,6 +2686,11 @@ def create_payment_order(req: CreatePayRequest, request: Request):
     elif req.product_type == 'credit_pack':
         if req.plan_id not in billing.CREDIT_PACKS:
             raise HTTPException(400, f"未知积分包: {req.plan_id}")
+        # 积分包准入: 必须 Pro 及以上会员 (免费用户先开通会员才能加买积分包)
+        user_sub = billing.get_user_subscription(user_id)
+        user_tier = user_sub.get('tier') or 'free'
+        if user_tier == 'free':
+            raise HTTPException(403, "积分包仅限 Pro / Max / 旗舰 会员购买, 请先开通会员")
         item = billing.CREDIT_PACKS[req.plan_id]
         item_name = f"{item['name']} ({item['credits']} 积分)"
         amount_yuan = item['price_yuan']

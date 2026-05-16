@@ -630,28 +630,44 @@ function CreditsTab({ credits, plans, sub, onBuyPack }: {
         </div>
       </div>
 
-      {/* 积分包 4 档 */}
-      <div>
-        <div className="text-base font-semibold mb-1">购买积分包</div>
-        <div className="text-xs text-[var(--text-3)] mb-4">买完积分永不过期, 可叠加月送积分使用</div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {plans && Object.entries(plans.credit_packs).map(([code, pack]) => {
-            const baseRate = pack.credits / pack.price_yuan
-            const bonus = Math.max(0, Math.round((baseRate / 10 - 1) * 100))
-            const isBest = code === 'pack_499'
-            return (
-              <div key={code} className={`relative p-4 rounded-xl border-2 flex flex-col gap-2 ${isBest ? 'border-amber-400 bg-[var(--bg-card)]' : 'border-[var(--border)] bg-[var(--bg-card)]'}`}>
-                {isBest && <div className="absolute -top-2 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-full bg-amber-400 text-black text-[9px] font-medium">最划算</div>}
-                <div className="text-xs text-[var(--text-3)]">{pack.name}</div>
-                <div className="text-2xl font-semibold">¥{pack.price_yuan}</div>
-                <div className="text-sm text-[var(--text-2)]">{pack.credits.toLocaleString()} 积分</div>
-                {bonus > 0 && <div className="text-[10px] text-amber-500 font-medium">送 {bonus}%</div>}
-                <button onClick={() => onBuyPack(code)} className="mt-1 py-2 rounded-lg text-xs bg-[var(--text)] text-[var(--bg)] hover:opacity-80 cursor-pointer">购买</button>
-              </div>
-            )
-          })}
-        </div>
-      </div>
+      {/* 积分包 4 档 — 必须 Pro 及以上会员才能买 */}
+      {(() => {
+        const isFreeUser = (sub?.tier || 'free') === 'free'
+        return (
+          <div>
+            <div className="flex items-baseline justify-between mb-1">
+              <div className="text-base font-semibold">购买积分包</div>
+              {isFreeUser && (
+                <div className="text-xs text-amber-500">⚠️ 需先开通 Pro 及以上会员</div>
+              )}
+            </div>
+            <div className="text-xs text-[var(--text-3)] mb-4">
+              {isFreeUser ? '免费用户只能用每月赠送积分; 加买积分包需先开会员' : '买完积分永不过期, 可叠加月送积分使用'}
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {plans && Object.entries(plans.credit_packs).map(([code, pack]) => {
+                const baseRate = pack.credits / pack.price_yuan
+                const bonus = Math.max(0, Math.round((baseRate / 10 - 1) * 100))
+                const isBest = code === 'pack_499'
+                return (
+                  <div key={code} className={`relative p-4 rounded-xl border-2 flex flex-col gap-2 ${isBest && !isFreeUser ? 'border-amber-400 bg-[var(--bg-card)]' : 'border-[var(--border)] bg-[var(--bg-card)]'} ${isFreeUser ? 'opacity-50' : ''}`}>
+                    {isBest && !isFreeUser && <div className="absolute -top-2 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-full bg-amber-400 text-black text-[9px] font-medium">最划算</div>}
+                    <div className="text-xs text-[var(--text-3)]">{pack.name}</div>
+                    <div className="text-2xl font-semibold">¥{pack.price_yuan}</div>
+                    <div className="text-sm text-[var(--text-2)]">{pack.credits.toLocaleString()} 积分</div>
+                    {bonus > 0 && <div className="text-[10px] text-amber-500 font-medium">送 {bonus}%</div>}
+                    <button onClick={() => !isFreeUser && onBuyPack(code)} disabled={isFreeUser}
+                      className={`mt-1 py-2 rounded-lg text-xs ${isFreeUser ? 'bg-[var(--bg-hover)] text-[var(--text-3)] cursor-not-allowed' : 'bg-[var(--text)] text-[var(--bg)] hover:opacity-80 cursor-pointer'}`}
+                      title={isFreeUser ? '免费用户不能买积分包, 先开通 Pro' : ''}>
+                      {isFreeUser ? '需先开会员' : '购买'}
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })()}
 
       {/* 积分扣减规则 */}
       <div className="p-5 rounded-2xl border border-[var(--border)] bg-[var(--bg-card)]">
