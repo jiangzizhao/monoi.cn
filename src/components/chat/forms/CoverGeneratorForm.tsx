@@ -44,7 +44,8 @@ export function CoverGeneratorForm({ defaultVideoOssKey, defaultVideoUrl, onClos
   const [colorSubFill, setColorSubFill] = useState<string>('#000000')
   const [position, setPosition] = useState<string>('')              // 主标题 9 宫格, 空走模板默认
   const [positionSubtitle, setPositionSubtitle] = useState<string>('')  // 副标题 9 宫格, 空走主标题下方默认
-  const [fontScale, setFontScale] = useState<number>(1.0)
+  const [fontScale, setFontScale] = useState<number>(1.0)              // 主标题字号倍数
+  const [fontScaleSubtitle, setFontScaleSubtitle] = useState<number>(1.0)  // 副标题字号倍数
 
   // 自传图作为源 (代替视频截帧, 但仍走相同叠字流程)
   const [uploadedCover, setUploadedCover] = useState<{ name: string; url: string; oss_key: string } | null>(null)
@@ -129,6 +130,7 @@ export function CoverGeneratorForm({ defaultVideoOssKey, defaultVideoUrl, onClos
         position: position || null,
         position_subtitle: positionSubtitle || null,
         font_scale: fontScale,
+        font_scale_subtitle: fontScaleSubtitle,
       }
       if (uploadedCover) {
         body.source_image_oss_key = uploadedCover.oss_key
@@ -325,7 +327,7 @@ export function CoverGeneratorForm({ defaultVideoOssKey, defaultVideoUrl, onClos
                 <div className="flex items-center justify-between">
                   <div className="text-xs text-[var(--text-2)]">自定义参数</div>
                   <button
-                    onClick={() => { setColorFill('#000000'); setColorStroke('#FFFFFF'); setColorSubFill('#000000'); setPosition(''); setFontScale(1.0) }}
+                    onClick={() => { setColorFill('#000000'); setColorStroke('#FFFFFF'); setColorSubFill('#000000'); setPosition(''); setPositionSubtitle(''); setFontScale(1.0); setFontScaleSubtitle(1.0) }}
                     className="text-[10px] text-[var(--text-3)] hover:text-[var(--text)] cursor-pointer"
                   >全部恢复默认</button>
                 </div>
@@ -408,19 +410,26 @@ export function CoverGeneratorForm({ defaultVideoOssKey, defaultVideoUrl, onClos
                   </div>
                 </div>
 
-                {/* 字号倍数滑块 */}
+                {/* 字号倍数滑块 — 主标题 + 副标题分别调 */}
                 <div className="flex items-center gap-3">
-                  <span className="text-[10px] text-[var(--text-3)] w-12">字号</span>
+                  <span className="text-[10px] text-[var(--text-3)] w-16">主标字号</span>
                   <input
-                    type="range"
-                    min={0.5}
-                    max={2.0}
-                    step={0.1}
+                    type="range" min={0.5} max={2.0} step={0.1}
                     value={fontScale}
                     onChange={(e) => setFontScale(Number(e.target.value))}
                     className="flex-1 accent-current cursor-pointer"
                   />
                   <span className="text-[11px] text-[var(--text-3)] font-mono w-10 text-right">{fontScale.toFixed(1)}x</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-[10px] text-[var(--text-3)] w-16">副标字号</span>
+                  <input
+                    type="range" min={0.5} max={2.0} step={0.1}
+                    value={fontScaleSubtitle}
+                    onChange={(e) => setFontScaleSubtitle(Number(e.target.value))}
+                    className="flex-1 accent-current cursor-pointer"
+                  />
+                  <span className="text-[11px] text-[var(--text-3)] font-mono w-10 text-right">{fontScaleSubtitle.toFixed(1)}x</span>
                 </div>
               </div>
 

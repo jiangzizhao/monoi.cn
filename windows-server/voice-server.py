@@ -1294,7 +1294,8 @@ class CoverRequest(BaseModel):
     color_sub_fill: Optional[str] = None  # 副标题字色 hex
     position: Optional[str] = None            # 主标题 9 宫格: 'tl'/'tc'/'tr'/'cl'/'cc'/'cr'/'bl'/'bc'/'br'
     position_subtitle: Optional[str] = None   # 副标题 9 宫格, 空走主标题下方默认 (仅 youtube 模板支持独立位置)
-    font_scale: float = 1.0                   # 字号倍数 0.5-2.5
+    font_scale: float = 1.0                   # 主标题字号倍数 0.5-2.5
+    font_scale_subtitle: float = 1.0          # 副标题字号倍数 (默认 1.0 跟主标题一样)
 
 
 # 可选字体清单 (跟一键启动.bat 下载的对应) — 给前端 GET /cover-fonts 用
@@ -1449,15 +1450,17 @@ def _render_template_pillow(img, template: str, title: str, subtitle: str,
                              color_sub_fill: Optional[str] = None,
                              position: Optional[str] = None,
                              position_subtitle: Optional[str] = None,
-                             font_scale: float = 1.0):
-    """用 Pillow 在图上叠模板. user_* 字体, color_* 颜色, position 9 宫格, font_scale 字号倍数."""
+                             font_scale: float = 1.0,
+                             font_scale_subtitle: float = 1.0):
+    """用 Pillow 在图上叠模板. user_* 字体, color_* 颜色, position 9 宫格, font_scale* 主/副标字号倍数."""
     from PIL import ImageDraw
     W, H = img.size
     base = min(W, H)
     fs = max(0.5, min(2.5, font_scale or 1.0))
+    fs_sub = max(0.5, min(2.5, font_scale_subtitle or 1.0))
     # 爆款封面: 字号要大. 主标默认 18% (从 13% 提到 18%), 副标 7.5%
     title_size = int(base * 0.18 * fs)
-    sub_size = int(base * 0.075 * fs)
+    sub_size = int(base * 0.075 * fs_sub)
     # 用户自定义颜色覆盖模板默认 (None 走模板默认)
     user_fill = _hex_to_rgb(color_fill) if color_fill else None
     user_stroke = _hex_to_rgb(color_stroke) if color_stroke else None
@@ -1748,6 +1751,7 @@ def generate_cover(req: CoverRequest):
                                                color_sub_fill=req.color_sub_fill,
                                                position=req.position,
                                                position_subtitle=req.position_subtitle,
+                                               font_scale_subtitle=req.font_scale_subtitle,
                                                font_scale=req.font_scale)
                 out_jpg = os.path.join(work_dir, f"cover_{ratio.replace(':', 'x')}.jpg")
                 img.save(out_jpg, 'JPEG', quality=92, optimize=True)
