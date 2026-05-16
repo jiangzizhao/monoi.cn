@@ -123,13 +123,17 @@ function DashboardTab() {
 
   const max7d = Math.max(...data.revenue.daily_7d.map(d => d.amount), 1)
 
+  const REF_LEVEL_LABEL: Record<string, string> = { normal: '普通', advanced: '高级', partner: '合伙人' }
   return (
     <>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatCard label="累计用户" value={data.users.total} sub={`今日 +${data.users.new_today}`}/>
-        <StatCard label="付费用户" value={data.users.paying} sub={`转化率 ${data.users.paying_conversion}%`}/>
-        <StatCard label="累计营收" value={`¥${data.revenue.total.toFixed(0)}`} sub={`本月 ¥${data.revenue.month.toFixed(0)}`}/>
-        <StatCard label="今日营收" value={`¥${data.revenue.today.toFixed(0)}`} sub={`本周 ¥${data.revenue.week.toFixed(0)}`}/>
+      {/* 用户 (3) + 营收 (3) 6 卡片 */}
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+        <StatCard label="累计注册用户" value={data.users.total} sub={`今日新增 +${data.users.new_today}`}/>
+        <StatCard label="付费用户" value={data.users.paying} sub={`转化率 ${data.users.paying_conversion}% · 占注册`}/>
+        <StatCard label="今日营收" value={`¥${data.revenue.today.toFixed(0)}`} sub="今日 00:00 起"/>
+        <StatCard label="本月营收" value={`¥${data.revenue.month.toFixed(0)}`} sub={`${new Date().getMonth() + 1} 月 1 日起`}/>
+        <StatCard label="本周营收" value={`¥${data.revenue.week.toFixed(0)}`} sub="近 7 天滚动"/>
+        <StatCard label="累计营收" value={`¥${data.revenue.total.toFixed(0)}`} sub="历史全部 paid"/>
       </div>
 
       {/* 7 日营收趋势 */}
@@ -146,34 +150,72 @@ function DashboardTab() {
         </div>
       </div>
 
-      {/* 套餐分布 + 推广员分布 */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div className="p-5 rounded-2xl border border-[var(--border)] bg-[var(--bg-card)]">
-          <div className="text-sm font-medium mb-3">套餐分布 (付费)</div>
-          {data.tier_distribution.length === 0 ? (
-            <div className="text-xs text-[var(--text-3)]">还没有付费用户</div>
-          ) : (
-            <div className="space-y-1.5">
-              {data.tier_distribution.map(t => (
-                <div key={t.tier} className="flex justify-between text-xs">
-                  <span className="text-[var(--text-2)]">{TIER_LABEL[t.tier] || t.tier}</span>
-                  <span className="font-medium">{t.count} 人</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-        <div className="p-5 rounded-2xl border border-[var(--border)] bg-[var(--bg-card)]">
-          <div className="text-sm font-medium mb-3">推广员分布</div>
-          <div className="space-y-1.5">
-            {data.referrer_distribution.map(r => (
-              <div key={r.level} className="flex justify-between text-xs">
-                <span className="text-[var(--text-2)]">{r.level === 'normal' ? '普通' : r.level === 'certified' ? '认证推广员' : '核心合伙人'}</span>
-                <span className="font-medium">{r.count} 人</span>
-              </div>
-            ))}
-          </div>
-        </div>
+      {/* 套餐分布: 详细表 (人数 + 占付费 % + 占注册 %) */}
+      <div className="p-5 rounded-2xl border border-[var(--border)] bg-[var(--bg-card)]">
+        <div className="text-sm font-medium mb-3">套餐分布 (付费用户)</div>
+        {data.users.paying === 0 ? (
+          <div className="text-xs text-[var(--text-3)]">还没有付费用户</div>
+        ) : (
+          <table className="w-full text-xs">
+            <thead className="text-[var(--text-3)]">
+              <tr>
+                <th className="text-left pb-2">套餐</th>
+                <th className="text-right pb-2">人数</th>
+                <th className="text-right pb-2">占付费</th>
+                <th className="text-right pb-2">占注册</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[var(--border-subtle)]">
+              {['pro_monthly', 'max_monthly', 'flagship_yearly'].map(tier => {
+                const t = data.tiers[tier]
+                if (!t) return null
+                return (
+                  <tr key={tier}>
+                    <td className="py-2 text-[var(--text-2)]">{TIER_LABEL[tier]}</td>
+                    <td className="py-2 text-right font-medium">{t.count}</td>
+                    <td className="py-2 text-right text-[var(--text-3)]">{t.pct_of_paying}%</td>
+                    <td className="py-2 text-right text-[var(--text-3)]">{t.pct_of_total}%</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* 推广员细分: 3 等级 (人数 / 今日新拉 / 累计拉 / 应得分成 / 累计提现) */}
+      <div className="p-5 rounded-2xl border border-[var(--border)] bg-[var(--bg-card)]">
+        <div className="text-sm font-medium mb-3">推广员分布</div>
+        <table className="w-full text-xs">
+          <thead className="text-[var(--text-3)]">
+            <tr>
+              <th className="text-left pb-2">等级</th>
+              <th className="text-right pb-2">人数</th>
+              <th className="text-right pb-2">今日新拉</th>
+              <th className="text-right pb-2">累计拉</th>
+              <th className="text-right pb-2">应得现金</th>
+              <th className="text-right pb-2">应得积分</th>
+              <th className="text-right pb-2">累计提现</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-[var(--border-subtle)]">
+            {['normal', 'advanced', 'partner'].map(level => {
+              const r = data.referrer_levels[level]
+              if (!r) return null
+              return (
+                <tr key={level}>
+                  <td className="py-2 text-[var(--text-2)]">{REF_LEVEL_LABEL[level]}</td>
+                  <td className="py-2 text-right font-medium">{r.count}</td>
+                  <td className="py-2 text-right text-green-500">+{r.new_today}</td>
+                  <td className="py-2 text-right">{r.total_brought}</td>
+                  <td className="py-2 text-right text-amber-500">¥{r.pending_cash.toFixed(2)}</td>
+                  <td className="py-2 text-right text-amber-500">{r.pending_credits}</td>
+                  <td className="py-2 text-right text-[var(--text-3)]">¥{r.total_withdrawn.toFixed(2)}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
       </div>
 
       {/* 待处理提现 */}

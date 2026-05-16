@@ -395,39 +395,55 @@ def process_withdrawal(wid: int, req: ProcessWithdrawRequest, request: Request):
 @router.get("/stats")
 def stats(request: Request):
     require_admin(request)
+    import datetime
     conn = get_db()
     now = time.time()
-    day_ago = now - 86400
+    today = datetime.date.today()
+    start_of_today = datetime.datetime.combine(today, datetime.time.min).timestamp()
+    start_of_month = datetime.datetime.combine(today.replace(day=1), datetime.time.min).timestamp()
     week_ago = now - 7 * 86400
-    month_ago = now - 30 * 86400
 
+    # ============ 用户 ============
     total_users = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
-    new_today = conn.execute("SELECT COUNT(*) FROM users WHERE created_at >= datetime('now', '-1 day')").fetchone()[0]
+    new_today = conn.execute(
+        "SELECT COUNT(*) FROM users WHERE created_at >= datetime(?, 'unixepoch')",
+        (start_of_today,)
+    ).fetchone()[0]
     new_week = conn.execute("SELECT COUNT(*) FROM users WHERE created_at >= datetime('now', '-7 day')").fetchone()[0]
 
-    paying_users = conn.execute("""
-        SELECT COUNT(DISTINCT user_id) FROM user_subscription
+    # 付费用户细分 (Pro/Max/旗舰), 当前订阅未过期
+    tier_dist_rows = conn.execute("""
+        SELECT tier, COUNT(*) as cnt FROM user_subscription
         WHERE tier IN ('pro_monthly', 'max_monthly', 'flagship_yearly')
           AND current_period_end >= ?
-    """, (now,)).fetchone()[0]
-
-    revenue_total = conn.execute("SELECT COALESCE(SUM(amount_yuan), 0) FROM billing_orders WHERE status = 'paid'").fetchone()[0]
-    revenue_today = conn.execute("SELECT COALESCE(SUM(amount_yuan), 0) FROM billing_orders WHERE status = 'paid' AND paid_at >= ?", (day_ago,)).fetchone()[0]
-    revenue_week = conn.execute("SELECT COALESCE(SUM(amount_yuan), 0) FROM billing_orders WHERE status = 'paid' AND paid_at >= ?", (week_ago,)).fetchone()[0]
-    revenue_month = conn.execute("SELECT COALESCE(SUM(amount_yuan), 0) FROM billing_orders WHERE status = 'paid' AND paid_at >= ?", (month_ago,)).fetchone()[0]
-
-    tier_dist = conn.execute("""
-        SELECT tier, COUNT(*) as cnt FROM user_subscription
-        WHERE current_period_end >= ? GROUP BY tier
+        GROUP BY tier
     """, (now,)).fetchall()
-    referrer_dist = conn.execute("""
-        SELECT level, COUNT(*) as cnt FROM referrer_status GROUP BY level
-    """).fetchall()
+    tier_counts = {r['tier']: r['cnt'] for r in tier_dist_rows}
+    paying_users = sum(tier_counts.values())
 
-    pending_withdrawals = conn.execute("SELECT COUNT(*) FROM withdrawal_request WHERE status = 'pending'").fetchone()[0]
-    pending_withdraw_amount = conn.execute("SELECT COALESCE(SUM(amount_yuan), 0) FROM withdrawal_request WHERE status = 'pending'").fetchone()[0]
+    # 套餐分布: 每个 tier 数量 + 占付费 % + 占注册 %
+    tier_stats = {}
+    for tier_key in ('pro_monthly', 'max_monthly', 'flagship_yearly'):
+        cnt = tier_counts.get(tier_key, 0)
+        tier_stats[tier_key] = {
+            'count': cnt,
+            'pct_of_paying': round(cnt / paying_users * 100, 1) if paying_users else 0,
+            'pct_of_total': round(cnt / total_users * 100, 1) if total_users else 0,
+        }
 
-    # 最近 7 天每日营收 (折线图用)
+    # ============ 营收 ============
+    revenue_total = conn.execute("SELECT COALESCE(SUM(amount_yuan), 0) FROM billing_orders WHERE status = 'paid'").fetchone()[0]
+    revenue_today = conn.execute(
+        "SELECT COALESCE(SUM(amount_yuan), 0) FROM billing_orders WHERE status = 'paid' AND paid_at >= ?",
+        (start_of_today,)
+    ).fetchone()[0]
+    revenue_week = conn.execute("SELECT COALESCE(SUM(amount_yuan), 0) FROM billing_orders WHERE status = 'paid' AND paid_at >= ?", (week_ago,)).fetchone()[0]
+    revenue_month = conn.execute(
+        "SELECT COALESCE(SUM(amount_yuan), 0) FROM billing_orders WHERE status = 'paid' AND paid_at >= ?",
+        (start_of_month,)
+    ).fetchone()[0]
+
+    # 最近 7 天每日营收
     daily_revenue = []
     for i in range(7):
         start = now - (i + 1) * 86400
@@ -439,6 +455,50 @@ def stats(request: Request):
         daily_revenue.append({'days_ago': i, 'amount': r})
     daily_revenue.reverse()
 
+    # ============ 推广员细分 (3 等级) ============
+    referrer_levels = {}
+    for level in ('normal', 'advanced', 'partner'):
+        cnt = conn.execute("SELECT COUNT(*) FROM referrer_status WHERE level = ?", (level,)).fetchone()[0]
+        total_brought = conn.execute(
+            "SELECT COALESCE(SUM(total_paying_users), 0) FROM referrer_status WHERE level = ?",
+            (level,)
+        ).fetchone()[0]
+        # 今日新拉 = commission_log 里 first_order 今天的, 按推广员 level join
+        new_today_brought = conn.execute("""
+            SELECT COUNT(DISTINCT cl.order_id) FROM commission_log cl
+            JOIN referrer_status rs ON rs.user_id = cl.beneficiary_user_id
+            WHERE cl.commission_type = 'first_order'
+              AND cl.created_at >= ?
+              AND rs.level = ?
+        """, (start_of_today, level)).fetchone()[0]
+        # 未结算应得分成 (现金 + 积分)
+        pending_cash = conn.execute("""
+            SELECT COALESCE(SUM(cl.cash_yuan), 0) FROM commission_log cl
+            JOIN referrer_status rs ON rs.user_id = cl.beneficiary_user_id
+            WHERE cl.status = 'pending' AND rs.level = ?
+        """, (level,)).fetchone()[0]
+        pending_credits = conn.execute("""
+            SELECT COALESCE(SUM(cl.credits), 0) FROM commission_log cl
+            JOIN referrer_status rs ON rs.user_id = cl.beneficiary_user_id
+            WHERE cl.status = 'pending' AND rs.level = ?
+        """, (level,)).fetchone()[0]
+        withdrawn = conn.execute("""
+            SELECT COALESCE(SUM(rb.cash_withdrawn_total), 0) FROM referrer_balance rb
+            JOIN referrer_status rs ON rs.user_id = rb.user_id
+            WHERE rs.level = ?
+        """, (level,)).fetchone()[0]
+        referrer_levels[level] = {
+            'count': cnt,
+            'total_brought': int(total_brought or 0),
+            'new_today': new_today_brought,
+            'pending_cash': round(pending_cash, 2),
+            'pending_credits': int(pending_credits or 0),
+            'total_withdrawn': round(withdrawn, 2),
+        }
+
+    pending_withdrawals = conn.execute("SELECT COUNT(*) FROM withdrawal_request WHERE status = 'pending'").fetchone()[0]
+    pending_withdraw_amount = conn.execute("SELECT COALESCE(SUM(amount_yuan), 0) FROM withdrawal_request WHERE status = 'pending'").fetchone()[0]
+
     conn.close()
 
     return {
@@ -449,15 +509,15 @@ def stats(request: Request):
             'paying': paying_users,
             'paying_conversion': round(paying_users / total_users * 100, 1) if total_users else 0,
         },
+        'tiers': tier_stats,
         'revenue': {
             'total': round(revenue_total, 2),
             'today': round(revenue_today, 2),
             'week': round(revenue_week, 2),
-            'month': round(revenue_month, 2),
+            'month': round(revenue_month, 2),         # 本月 1 日 0 点起
             'daily_7d': daily_revenue,
         },
-        'tier_distribution': [{'tier': r['tier'], 'count': r['cnt']} for r in tier_dist],
-        'referrer_distribution': [{'level': r['level'], 'count': r['cnt']} for r in referrer_dist],
+        'referrer_levels': referrer_levels,
         'pending_withdrawals': pending_withdrawals,
         'pending_withdraw_amount': round(pending_withdraw_amount, 2),
     }

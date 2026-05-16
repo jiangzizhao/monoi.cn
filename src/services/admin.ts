@@ -121,12 +121,17 @@ export interface AdminStats {
     total: number; new_today: number; new_week: number
     paying: number; paying_conversion: number
   }
+  // 套餐分布 — 每个 tier 数量 + 占付费 % + 占注册 %
+  tiers: Record<string, { count: number; pct_of_paying: number; pct_of_total: number }>
   revenue: {
     total: number; today: number; week: number; month: number
     daily_7d: { days_ago: number; amount: number }[]
   }
-  tier_distribution: { tier: string; count: number }[]
-  referrer_distribution: { level: string; count: number }[]
+  // 推广员细分 — normal / advanced / partner
+  referrer_levels: Record<string, {
+    count: number; total_brought: number; new_today: number
+    pending_cash: number; pending_credits: number; total_withdrawn: number
+  }>
   pending_withdrawals: number
   pending_withdraw_amount: number
 }
