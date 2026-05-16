@@ -27,6 +27,9 @@ _REQUIRED = (
     'WX_APP_ID', 'WX_MCH_ID', 'WX_API_V3_KEY',
     'WX_CERT_SERIAL_NO', 'WX_PRIVATE_KEY_PATH',
 )
+# 新版商户后台 "公钥模式" 必填 (老商户号 SDK 自动 fetch 平台证书, 新商户号必须显式传):
+# - WX_WECHATPAY_PUBLIC_KEY_PATH:  微信支付平台公钥文件 (商户后台下载的 pub_key.pem)
+# - WX_WECHATPAY_PUBLIC_KEY_ID:    平台公钥 ID (商户后台 → 微信支付平台公钥 → 显示的 PUB_KEY_ID_xxx)
 _DEFAULT_NOTIFY_URL = 'https://monoi.cn/api/pay/wx/notify'
 _MOCK_PAID_AFTER = 15.0  # 秒
 
@@ -53,7 +56,7 @@ def _get_client():
     with open(pkey_path, 'r', encoding='utf-8') as f:
         private_key = f.read()
 
-    _client = WeChatPay(
+    init_kwargs = dict(
         wechatpay_type=WeChatPayType.NATIVE,
         mchid=os.getenv('WX_MCH_ID'),
         private_key=private_key,
@@ -62,6 +65,20 @@ def _get_client():
         appid=os.getenv('WX_APP_ID'),
         notify_url=os.getenv('WX_NOTIFY_URL', _DEFAULT_NOTIFY_URL),
     )
+
+    # 新版"公钥模式" — 商户后台 → API 安全 → 微信支付平台公钥, 显式传
+    # (老商户号 SDK 内部自动 fetch 平台证书 + APIv3 key 解密; 新版必须自己传)
+    pub_key_path = os.getenv('WX_WECHATPAY_PUBLIC_KEY_PATH')
+    pub_key_id = os.getenv('WX_WECHATPAY_PUBLIC_KEY_ID')
+    if pub_key_path and pub_key_id:
+        with open(pub_key_path, 'r', encoding='utf-8') as f:
+            init_kwargs['public_key'] = f.read()
+        init_kwargs['public_key_id'] = pub_key_id
+        print(f"[wxpay] 公钥模式: public_key_id={pub_key_id[:20]}...", flush=True)
+    else:
+        print(f"[wxpay] 证书模式 (无 WX_WECHATPAY_PUBLIC_KEY_*, 用 APIv3 key 自动 fetch 平台证书)", flush=True)
+
+    _client = WeChatPay(**init_kwargs)
     return _client
 
 
