@@ -57,10 +57,13 @@ curl -O https://raw.githubusercontent.com/jiangzizhao/monoi.cn/main/windows-serv
 
 ```
 VITE_ALIYUN_CAPTCHA_SCENE_ID=场景ID         (跟后端 ALIYUN_CAPTCHA_SCENE_ID 同一个)
-VITE_ALIYUN_CAPTCHA_PREFIX=prefix值
 ```
 
-**注意: `VITE_*` 是公开变量 (会被打包进前端 JS, 任何人都能看到)**, SceneId 和 prefix 设计上就是公开的, 不是密钥. 真正的密钥 `ALIYUN_CAPTCHA_ACCESS_KEY_SECRET` 只在 Windows 后端 .env, 不要塞 Vercel.
+SceneId 取值方法: 阿里云控制台 → 验证码 2.0 → **场景列表** → 你创建的场景行 → 操作列 **"接入引导"** → 阿里云给你看的代码模板里 `SceneId: '真值'` 引号里那串. 通常是 4-12 位混合字符 (不一定跟"场景名称"一样).
+
+**注意: `VITE_*` 是公开变量 (会被打包进前端 JS, 任何人都能看到)**, SceneId 设计上就是公开的, 不是密钥. 真正的密钥 `ALIYUN_CAPTCHA_ACCESS_KEY_SECRET` 只在 Windows 后端 .env, 不要塞 Vercel.
+
+> ℹ Captcha 2.0 SDK 配置里**没有 `prefix` 字段** (只有老版 NoCaptcha 才有). 不要配 `VITE_ALIYUN_CAPTCHA_PREFIX`, 配了也没用 SDK 会忽略.
 
 填完触发一次重新部署 (Vercel 会自动). 部署完登录页/注册页点 "发送验证码" 应该弹滑块.
 
