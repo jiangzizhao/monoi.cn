@@ -10,7 +10,6 @@
 
 const SDK_URL = 'https://o.alicdn.com/captcha-frontend/aliyunCaptcha/AliyunCaptcha.js'
 const CONTAINER_ID = 'aliyun-captcha-container'
-const BUTTON_ID = 'aliyun-captcha-trigger'
 
 let _sdkLoading: Promise<void> | null = null
 let _initPromise: Promise<void> | null = null
@@ -49,17 +48,20 @@ function ensureDOM(): void {
   if (!document.getElementById(CONTAINER_ID)) {
     const div = document.createElement('div')
     div.id = CONTAINER_ID
+    // embed 模式 SDK 会把滑块直接渲染进这个元素 — 不能完全藏起来, 给 fixed 居中
+    div.style.cssText = 'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:9999;'
     document.body.appendChild(div)
   }
-  if (!document.getElementById(BUTTON_ID)) {
-    const btn = document.createElement('button')
-    btn.id = BUTTON_ID
-    btn.type = 'button'
-    btn.setAttribute('aria-hidden', 'true')
-    // 不能加 pointer-events:none, SDK 用事件代理可能要靠它
-    btn.style.cssText = 'position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;opacity:0;'
-    document.body.appendChild(btn)
-  }
+}
+
+// 捕获 SDK 自己抛的 unhandled rejection (Network Error 等), 帮 debug
+if (typeof window !== 'undefined') {
+  window.addEventListener('unhandledrejection', (e) => {
+    const msg = String(e.reason?.message || e.reason || '')
+    if (msg.includes('etwork') || msg.includes('aptcha')) {
+      console.error('[captcha] SDK 内部 unhandled rejection:', e.reason)
+    }
+  })
 }
 
 export interface VerifyOutcome<T> {
@@ -107,9 +109,8 @@ function init(): Promise<void> {
         ;(window as any).initAliyunCaptcha({
           SceneId: sceneId,
           prefix: prefix,
-          mode: 'popup',
+          mode: 'embed',
           element: '#' + CONTAINER_ID,
-          button: '#' + BUTTON_ID,
           captchaVerifyCallback: async (captchaVerifyParam: string) => {
             console.log('[captcha] captchaVerifyCallback 被调, param 长度=', captchaVerifyParam?.length)
             if (!_pendingOnVerified) {
@@ -181,9 +182,8 @@ export async function runCaptcha<T>(
       console.log('[captcha] 调 instance.show()')
       _instance.show()
     } else {
-      console.log('[captcha] instance 没拿到 or .show 不存在, fallback btn.click()')
-      const btn = document.getElementById(BUTTON_ID) as HTMLButtonElement | null
-      btn?.click()
+      console.log('[captcha] instance 没拿到 / .show 不存在')
+      finishPending({ ok: false, error: 'captcha SDK 未就绪' })
     }
   })
 }
