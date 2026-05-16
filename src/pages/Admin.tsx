@@ -26,6 +26,14 @@ const TIER_LABEL: Record<string, string> = {
   free: '免费', pro_monthly: 'Pro', max_monthly: 'Max', flagship_yearly: '旗舰',
 }
 
+// 商品名映射 (订单管理 / 流水显示用): plans + credit_packs 全集, 没匹配上 fallback raw code
+const PRODUCT_LABEL: Record<string, string> = {
+  free: '免费版', pro_monthly: 'Pro 月卡', max_monthly: 'Max 月卡', flagship_yearly: '旗舰年卡',
+  pack_99: '体验包 (100 积分)', pack_49: '小包 (600 积分)',
+  pack_199: '中包 (3000 积分)', pack_499: '大包 (8000 积分)',
+}
+const productName = (code?: string) => code ? (PRODUCT_LABEL[code] || code) : '-'
+
 const fmtTime = (ts?: number | string) => {
   if (!ts) return '-'
   const n = typeof ts === 'string' ? new Date(ts).getTime() / 1000 : ts
@@ -381,7 +389,7 @@ function UserDetailModal({ user, onClose, onReload }: {
               <div className="bg-[var(--bg-input)] p-2 rounded">
                 {detail.orders.slice(0, 5).map((o: any) => (
                   <div key={o.id} className="flex justify-between py-0.5 font-mono text-[10px]">
-                    <span>{o.product_code} ¥{o.amount_yuan} {o.status}</span>
+                    <span>{productName(o.product_code)} ¥{o.amount_yuan} {o.status}</span>
                     <span className="text-[var(--text-3)]">{fmtTime(o.created_at)}</span>
                   </div>
                 ))}
@@ -497,7 +505,7 @@ function OrdersTab() {
                 <tr key={o.id} className="hover:bg-[var(--bg-hover)]">
                   <td className="px-4 py-2 font-mono text-[10px]">{o.id.slice(0, 20)}...</td>
                   <td className="px-4 py-2">{o.username || `#${o.user_id}`}</td>
-                  <td className="px-4 py-2">{o.product_code}</td>
+                  <td className="px-4 py-2">{productName(o.product_code)}</td>
                   <td className="px-4 py-2 text-right text-green-500 font-medium">¥{o.amount_yuan.toFixed(2)}</td>
                   <td className="px-4 py-2 text-[10px] text-[var(--text-3)]">{o.payment_method?.startsWith('admin_grant') ? '管理员开' : o.payment_method}</td>
                   <td className="px-4 py-2 text-[10px] text-[var(--text-3)]">{fmtTime(o.paid_at || o.created_at)}</td>
