@@ -10,6 +10,7 @@
 
 const SDK_URL = 'https://o.alicdn.com/captcha-frontend/aliyunCaptcha/AliyunCaptcha.js'
 const CONTAINER_ID = 'aliyun-captcha-container'
+const BUTTON_ID = 'aliyun-captcha-trigger'
 
 let _sdkLoading: Promise<void> | null = null
 let _initPromise: Promise<void> | null = null
@@ -48,9 +49,16 @@ function ensureDOM(): void {
   if (!document.getElementById(CONTAINER_ID)) {
     const div = document.createElement('div')
     div.id = CONTAINER_ID
-    // embed 模式 SDK 会把滑块直接渲染进这个元素 — 不能完全藏起来, 给 fixed 居中
-    div.style.cssText = 'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:9999;'
+    // popup 模式只是给 SDK 一个挂载点, 真正的滑块弹窗 SDK 自己 portal 到 body, 不依赖这个 div 可见
     document.body.appendChild(div)
+  }
+  if (!document.getElementById(BUTTON_ID)) {
+    const btn = document.createElement('button')
+    btn.id = BUTTON_ID
+    btn.type = 'button'
+    btn.setAttribute('aria-hidden', 'true')
+    btn.style.cssText = 'position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;opacity:0;'
+    document.body.appendChild(btn)
   }
 }
 
@@ -109,8 +117,9 @@ function init(): Promise<void> {
         ;(window as any).initAliyunCaptcha({
           SceneId: sceneId,
           prefix: prefix,
-          mode: 'embed',
+          mode: 'popup',
           element: '#' + CONTAINER_ID,
+          button: '#' + BUTTON_ID,
           captchaVerifyCallback: async (captchaVerifyParam: string) => {
             console.log('[captcha] captchaVerifyCallback 被调, param 长度=', captchaVerifyParam?.length)
             if (!_pendingOnVerified) {
@@ -178,12 +187,15 @@ export async function runCaptcha<T>(
       finishPending({ ok: false, error: '验证超时, 请重试' })
     }, 60000)
 
-    if (_instance && typeof _instance.show === 'function') {
-      console.log('[captcha] 调 instance.show()')
-      _instance.show()
+    // popup 模式必须靠 button click 触发 (instance.show 在无痕场景下不会跑 silent verify),
+    // 程序点 hidden button → SDK 弹滑块 / 静默判定 → captchaVerifyCallback 回调.
+    const btn = document.getElementById(BUTTON_ID) as HTMLButtonElement | null
+    if (btn) {
+      console.log('[captcha] 触发 hidden button click')
+      btn.click()
     } else {
-      console.log('[captcha] instance 没拿到 / .show 不存在')
-      finishPending({ ok: false, error: 'captcha SDK 未就绪' })
+      console.log('[captcha] BUTTON 不在')
+      finishPending({ ok: false, error: 'captcha button 未找到' })
     }
   })
 }
