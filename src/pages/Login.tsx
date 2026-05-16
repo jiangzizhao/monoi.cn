@@ -16,7 +16,15 @@ export default function Login() {
   const [info, setInfo] = useState('')
   const [loading, setLoading] = useState(false)
   const [sendingCode, setSendingCode] = useState(false)
+  const [sendingElapsed, setSendingElapsed] = useState(0)   // sending 状态下的秒数, UI 显示用
   const [cooldown, setCooldown] = useState(0)
+
+  // sendingCode 期间每秒 +1, 让用户看到"发送中 Xs", 不至于以为按钮卡死
+  useEffect(() => {
+    if (!sendingCode) { setSendingElapsed(0); return }
+    const id = setInterval(() => setSendingElapsed(s => s + 1), 1000)
+    return () => clearInterval(id)
+  }, [sendingCode])
 
   useEffect(() => {
     if (cooldown <= 0) return
@@ -118,7 +126,7 @@ export default function Login() {
                   <button type="button" onClick={handleSendCode}
                     disabled={sendingCode || cooldown > 0 || !validatePhone(phone)}
                     className="px-3 rounded-xl text-xs text-[var(--text)] border border-[var(--border)] hover:bg-[var(--bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap transition-colors">
-                    {sendingCode ? '发送中' : cooldown > 0 ? `${cooldown}s 后重发` : '发送验证码'}
+                    {sendingCode ? `发送中 ${sendingElapsed}s` : cooldown > 0 ? `${cooldown}s 后重发` : '发送验证码'}
                   </button>
                 </div>
               </div>
