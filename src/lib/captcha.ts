@@ -71,6 +71,17 @@ export interface RunResult<T> {
 let _pendingResolve: ((r: RunResult<any>) => void) | null = null
 let _pendingOnVerified: ((p: string) => Promise<VerifyOutcome<any>>) | null = null
 let _captured: VerifyOutcome<any> | null = null
+let _pendingTimer: ReturnType<typeof setTimeout> | null = null
+
+// 统一收尾: 清 timer + 重置 state + resolve 外面的 promise (避免按钮永远"发送中")
+function finishPending<T>(result: RunResult<T>) {
+  if (_pendingTimer) { clearTimeout(_pendingTimer); _pendingTimer = null }
+  const r = _pendingResolve
+  _pendingResolve = null
+  _pendingOnVerified = null
+  _captured = null
+  if (r) r(result)
+}
 
 function init(): Promise<void> {
   if (_initPromise) return _initPromise
@@ -100,12 +111,12 @@ function init(): Promise<void> {
           },
           onBizResultCallback: (bizResult: boolean) => {
             console.log('[captcha] onBizResultCallback bizResult=', bizResult)
-            if (!_pendingResolve) return
-            const c = _captured || { captchaPassed: true, bizOk: bizResult }
-            _pendingResolve({ ok: c.bizOk, data: c.data, error: c.error })
-            _pendingResolve = null
-            _pendingOnVerified = null
-            _captured = null
+            finishPending(bizResult ? { ok: true } : { ok: false, error: '滑块未通过, 请重试' })
+          },
+          // 用户关闭/取消弹窗时 SDK 触发 (要不没这回调 _pendingResolve 永远卡, 按钮"发送中"卡死)
+          cancelCallback: () => {
+            console.log('[captcha] cancelCallback — 用户关闭弹窗')
+            finishPending({ ok: false, error: '已取消验证' })
           },
           getInstance: (instance: any) => {
             console.log('[captcha] getInstance 回调, instance =', instance)
@@ -148,9 +159,15 @@ export async function runCaptcha<T>(
   }
   console.log('[captcha] init 通过, 触发 instance.show 或 button click')
   return new Promise<RunResult<T>>((resolve) => {
-    _pendingResolve = resolve
+    _pendingResolve = resolve as any
     _pendingOnVerified = onVerified as any
     _captured = null
+    // 60s 总超时, 防 SDK 不回调时按钮永远"发送中"
+    _pendingTimer = setTimeout(() => {
+      console.warn('[captcha] 60s 超时, 强制收尾')
+      finishPending({ ok: false, error: '验证超时, 请重试' })
+    }, 60000)
+
     if (_instance && typeof _instance.show === 'function') {
       console.log('[captcha] 调 instance.show()')
       _instance.show()
