@@ -38,6 +38,11 @@ def is_configured() -> bool:
     return all(os.getenv(k) for k in _REQUIRED)
 
 
+def missing_env_vars() -> list:
+    """列出当前没设的必填 env (诊断用), 启动 log 里会打印, 帮快速定位."""
+    return [k for k in _REQUIRED if not os.getenv(k)]
+
+
 def _get_client():
     global _client
     if _client is not None:

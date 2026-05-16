@@ -317,7 +317,14 @@ try:
     _ALIPAY_REAL = _alipay.is_configured()
 except Exception as _e:
     _ALIPAY_REAL = False
-print(f"[wxpay] mode = {'REAL (微信商户)' if _WXPAY_REAL else 'MOCK (15s 后自动支付)'}", flush=True)
+if _WXPAY_REAL:
+    print("[wxpay] mode = REAL (微信商户)", flush=True)
+else:
+    try:
+        _missing = _wxpay.missing_env_vars()
+        print(f"[wxpay] mode = MOCK (15s 后自动支付) — 缺 env: {_missing}", flush=True)
+    except Exception:
+        print("[wxpay] mode = MOCK (15s 后自动支付)", flush=True)
 print(f"[alipay] mode = {'REAL' if _ALIPAY_REAL else 'OFF (商户审核中)'}", flush=True)
 
 
