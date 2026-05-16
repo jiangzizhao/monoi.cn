@@ -253,6 +253,17 @@ def init_billing_tables():
         )
     """)
     c.execute("CREATE INDEX IF NOT EXISTS idx_billing_orders_user ON billing_orders(user_id, created_at DESC)")
+    # V2 支付集成: 加 4 个列 (ALTER 失败说明列已存在, 跳过)
+    for col_def in [
+        "ALTER TABLE billing_orders ADD COLUMN payment_channel TEXT",      # wechat / alipay / manual
+        "ALTER TABLE billing_orders ADD COLUMN wx_prepay_id TEXT",
+        "ALTER TABLE billing_orders ADD COLUMN wx_code_url TEXT",
+        "ALTER TABLE billing_orders ADD COLUMN wx_transaction_id TEXT",
+        "ALTER TABLE billing_orders ADD COLUMN expires_at REAL",           # 订单过期时间 (默认 5 分钟)
+    ]:
+        try: c.execute(col_def)
+        except sqlite3.OperationalError: pass
+    c.execute("CREATE INDEX IF NOT EXISTS idx_billing_orders_wx_txn ON billing_orders(wx_transaction_id)")
 
     # 5. 推广绑定 (用户首次注册时记, 终身不变)
     c.execute("""

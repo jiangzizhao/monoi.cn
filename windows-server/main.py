@@ -305,6 +305,21 @@ app.include_router(billing.referral_router)
 import admin
 app.include_router(admin.router)
 
+# 支付集成 (微信 v1, 支付宝 stub)
+try:
+    import wxpay as _wxpay
+    _WXPAY_REAL = _wxpay.is_configured()
+except Exception as _e:
+    _WXPAY_REAL = False
+    print(f"[wxpay] 模块加载失败, 走 mock: {_e}", flush=True)
+try:
+    import alipay as _alipay
+    _ALIPAY_REAL = _alipay.is_configured()
+except Exception as _e:
+    _ALIPAY_REAL = False
+print(f"[wxpay] mode = {'REAL (微信商户)' if _WXPAY_REAL else 'MOCK (15s 后自动支付)'}", flush=True)
+print(f"[alipay] mode = {'REAL' if _ALIPAY_REAL else 'OFF (商户审核中)'}", flush=True)
+
 
 class RegisterRequest(BaseModel):
     username: str
@@ -2633,6 +2648,189 @@ def query_digital_human(code: str):
             "msg": inner.get("msg") or "任务失败",
         }
     return {"success": False, "status": "unknown", "raw": data}
+
+
+# ============== 支付集成 (V2: 微信扫码 + 支付宝 stub) ==============
+
+
+PAYMENT_ORDER_TTL = 5 * 60   # 订单 5 分钟超时, 跟微信 Native 默认一致
+
+
+class CreatePayRequest(BaseModel):
+    plan_id: str                          # PLANS key: pro_monthly / max_monthly / flagship_yearly
+    channel: str = 'wechat'               # 'wechat' / 'alipay'
+
+
+@app.post("/api/pay/create")
+def create_payment_order(req: CreatePayRequest, request: Request):
+    """创建待支付订单 + 调对应通道下单 → 返二维码 URL 给前端渲染."""
+    user_id = _user_id_from_request(request)
+    if req.plan_id not in billing.PLANS:
+        raise HTTPException(400, f"未知套餐: {req.plan_id}")
+    plan = billing.PLANS[req.plan_id]
+    amount_yuan = plan['price_yuan']
+    amount_cents = int(round(amount_yuan * 100))
+    if amount_cents <= 0:
+        raise HTTPException(400, "免费套餐不需要支付")
+
+    now = _time.time()
+    out_trade_no = f"ord_{int(now*1000)}_{uuid.uuid4().hex[:8]}"
+    expires_at = now + PAYMENT_ORDER_TTL
+    referrer_id = billing.get_referrer_id(user_id)
+
+    if req.channel == 'wechat':
+        try:
+            wx_res = _wxpay.create_native_order(
+                out_trade_no=out_trade_no,
+                amount_cents=amount_cents,
+                description=f"monoi {plan['name']}",
+            )
+        except Exception as e:
+            raise HTTPException(500, f"微信下单失败: {e}")
+        code_url = wx_res['code_url']
+        prepay_id = wx_res.get('prepay_id')
+    elif req.channel == 'alipay':
+        if not _ALIPAY_REAL:
+            raise HTTPException(501, "支付宝商户审核中, 暂未开通")
+        try:
+            ap_res = _alipay.create_pc_order(out_trade_no, amount_cents, f"monoi {plan['name']}")
+        except Exception as e:
+            raise HTTPException(500, f"支付宝下单失败: {e}")
+        code_url = ap_res.get('qr_code') or ap_res.get('pay_url')
+        prepay_id = None
+    else:
+        raise HTTPException(400, f"不支持的支付通道: {req.channel}")
+
+    # 写订单到 billing_orders
+    conn = billing.get_db()
+    conn.execute("""
+        INSERT INTO billing_orders (id, user_id, order_type, product_code, amount_yuan,
+                                     status, payment_method, payment_channel,
+                                     wx_prepay_id, wx_code_url, referrer_id,
+                                     created_at, expires_at)
+        VALUES (?, ?, 'subscription', ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)
+    """, (out_trade_no, user_id, req.plan_id, amount_yuan, req.channel, req.channel,
+          prepay_id, code_url, referrer_id, now, expires_at))
+    conn.commit()
+    conn.close()
+
+    return {
+        'success': True,
+        'order_id': out_trade_no,
+        'code_url': code_url,
+        'amount_yuan': amount_yuan,
+        'plan_name': plan['name'],
+        'expires_at': expires_at,
+        'channel': req.channel,
+    }
+
+
+@app.get("/api/pay/query/{order_id}")
+def query_payment_order(order_id: str, request: Request):
+    """前端轮询订单状态. 主动调微信 API 查 (兜 notify 失败 / 慢)."""
+    user_id = _user_id_from_request(request)
+    conn = billing.get_db()
+    row = conn.execute(
+        "SELECT * FROM billing_orders WHERE id = ? AND user_id = ?",
+        (order_id, user_id),
+    ).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(404, "订单不存在或不属于你")
+    row_d = dict(row)
+    # 已 paid 直接返
+    if row_d['status'] == 'paid':
+        conn.close()
+        return {'status': 'paid', 'paid_at': row_d.get('paid_at'),
+                'transaction_id': row_d.get('wx_transaction_id')}
+    # 已超时
+    if row_d.get('expires_at') and _time.time() > row_d['expires_at']:
+        # 标记过期
+        if row_d['status'] == 'pending':
+            conn.execute("UPDATE billing_orders SET status = 'expired' WHERE id = ?", (order_id,))
+            conn.commit()
+        conn.close()
+        return {'status': 'expired'}
+    conn.close()
+
+    # 主动查微信 (主要兜 notify 没收到的情况)
+    if row_d['payment_channel'] == 'wechat':
+        try:
+            q = _wxpay.query_order(order_id)
+        except Exception as e:
+            print(f"[pay] query wxpay {order_id} 失败: {e}", flush=True)
+            return {'status': 'pending'}
+        if q['status'] == 'paid':
+            # 微信侧已支付, 我们 notify 没收到 — 主动 mark paid + 开通
+            _mark_order_paid_and_activate(order_id, q.get('transaction_id'))
+            return {'status': 'paid', 'transaction_id': q.get('transaction_id'),
+                    'paid_at': q.get('paid_at')}
+        return {'status': q['status']}
+    elif row_d['payment_channel'] == 'alipay' and _ALIPAY_REAL:
+        try:
+            q = _alipay.query_order(order_id)
+        except Exception as e:
+            print(f"[pay] query alipay {order_id} 失败: {e}", flush=True)
+            return {'status': 'pending'}
+        if q['status'] == 'paid':
+            _mark_order_paid_and_activate(order_id, q.get('trade_no'))
+            return {'status': 'paid'}
+        return {'status': q['status']}
+    return {'status': row_d['status']}
+
+
+def _mark_order_paid_and_activate(order_id: str, transaction_id: Optional[str]):
+    """订单标记 paid + 开通对应订阅. 幂等 (重复调跳过)."""
+    now = _time.time()
+    conn = billing.get_db()
+    row = conn.execute(
+        "SELECT user_id, product_code, status, referrer_id FROM billing_orders WHERE id = ?",
+        (order_id,)
+    ).fetchone()
+    if not row:
+        conn.close()
+        return
+    if row['status'] == 'paid':
+        conn.close()
+        return  # 幂等
+    conn.execute(
+        "UPDATE billing_orders SET status = 'paid', paid_at = ?, wx_transaction_id = ? WHERE id = ?",
+        (now, transaction_id, order_id),
+    )
+    conn.commit()
+    conn.close()
+    print(f"[pay] 订单 {order_id} 标记 paid, 触发 activate_subscription(user={row['user_id']}, tier={row['product_code']})", flush=True)
+    try:
+        billing.activate_subscription(
+            row['user_id'], row['product_code'],
+            payment_method='wechat',
+            referrer_id=row['referrer_id'],
+            order_id=order_id,
+        )
+    except Exception as e:
+        print(f"[pay] activate_subscription 失败 order={order_id}: {e}", flush=True)
+
+
+@app.post("/api/pay/wx/notify")
+async def wxpay_notify(request: Request):
+    """微信支付成功回调. 验签 → 标记 paid → 开通订阅. 返 {code: SUCCESS} 给微信."""
+    body = await request.body()
+    headers = dict(request.headers)
+    try:
+        parsed = _wxpay.verify_notify(headers, body)
+    except Exception as e:
+        print(f"[pay] wx notify 验签异常: {e}", flush=True)
+        return {'code': 'FAIL', 'message': '验签失败'}
+    if not parsed:
+        print("[pay] wx notify 不是 TRANSACTION.SUCCESS 或验签失败", flush=True)
+        return {'code': 'FAIL', 'message': '验签失败或非成功事件'}
+    out_trade_no = parsed.get('out_trade_no')
+    txn_id = parsed.get('transaction_id')
+    if not out_trade_no:
+        return {'code': 'FAIL', 'message': '缺 out_trade_no'}
+    _mark_order_paid_and_activate(out_trade_no, txn_id)
+    # 微信约定返 {code: SUCCESS} 表示已收, 否则会重试
+    return {'code': 'SUCCESS', 'message': 'OK'}
 
 
 @app.get("/api/digital-human/video/{name}")
