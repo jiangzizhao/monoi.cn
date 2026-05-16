@@ -14,7 +14,6 @@ const BUTTON_ID = 'aliyun-captcha-trigger'
 
 let _sdkLoading: Promise<void> | null = null
 let _initPromise: Promise<void> | null = null
-let _instance: any = null
 
 function getSceneId(): string {
   return (import.meta as any).env?.VITE_ALIYUN_CAPTCHA_SCENE_ID || ''
@@ -139,7 +138,6 @@ function init(): Promise<void> {
           },
           getInstance: (instance: any) => {
             console.log('[captcha] getInstance 回调, instance =', instance)
-            _instance = instance
             clearTimeout(timer)
             resolve()
           },
