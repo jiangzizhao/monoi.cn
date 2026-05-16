@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { X, Loader2, CheckCircle2, XCircle, RefreshCw } from 'lucide-react'
 import { QRCodeCanvas } from 'qrcode.react'
-import { createOrder, queryOrder, type CreateOrderResp } from '../services/pay'
+import { createOrder, queryOrder, type CreateOrderResp, type ProductType } from '../services/pay'
 
 // 品牌 SVG (Simple Icons), 用 currentColor 跟着外层 className text-color 走
 function WeChatIcon({ size = 24 }: { size?: number }) {
@@ -25,16 +25,17 @@ type Channel = 'wechat' | 'alipay'
 
 interface Props {
   open: boolean
-  planId: string                  // 'pro_monthly' / 'max_monthly' / 'flagship_yearly'
-  planName: string                // 显示名 'Pro 月卡'
+  planId: string                  // subscription: pro_monthly...; credit_pack: pack_99...
+  planName: string                // 显示名 'Pro 月卡' / '体验包'
   amountYuan: number              // 显示金额
-  periodLabel: string             // '/月' 或 '/年'
-  highlights: string[]            // 该套餐权益列表 (4-5 条)
+  periodLabel: string             // '/月' / '/年' / '' (积分包没周期)
+  highlights: string[]            // 商品权益/数量列表
+  productType?: ProductType       // 默认 subscription
   onClose: () => void
-  onPaid?: () => void             // 支付成功后通知外面刷新会员状态
+  onPaid?: () => void             // 支付成功后通知外面刷新
 }
 
-export function PaymentDialog({ open, planId, planName, amountYuan, periodLabel, highlights, onClose, onPaid }: Props) {
+export function PaymentDialog({ open, planId, planName, amountYuan, periodLabel, highlights, productType = 'subscription', onClose, onPaid }: Props) {
   const [step, setStep] = useState<Step>('select')
   const [channel, setChannel] = useState<Channel>('wechat')
   const [agreed, setAgreed] = useState(false)
@@ -75,7 +76,7 @@ export function PaymentDialog({ open, planId, planName, amountYuan, periodLabel,
     setCreating(true)
     setError('')
     try {
-      const o = await createOrder(planId, channel)
+      const o = await createOrder(planId, channel, productType)
       setOrder(o)
       setStep('qr')
       // 启动倒计时 + 轮询

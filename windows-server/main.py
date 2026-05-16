@@ -2657,33 +2657,50 @@ PAYMENT_ORDER_TTL = 5 * 60   # 订单 5 分钟超时, 跟微信 Native 默认一
 
 
 class CreatePayRequest(BaseModel):
-    plan_id: str                          # PLANS key: pro_monthly / max_monthly / flagship_yearly
+    plan_id: str                          # subscription: pro_monthly/max_monthly/flagship_yearly; credit_pack: pack_99/pack_49/pack_199/pack_499
     channel: str = 'wechat'               # 'wechat' / 'alipay'
+    product_type: str = 'subscription'    # 'subscription' / 'credit_pack'
 
 
 @app.post("/api/pay/create")
 def create_payment_order(req: CreatePayRequest, request: Request):
-    """创建待支付订单 + 调对应通道下单 → 返二维码 URL 给前端渲染."""
+    """创建待支付订单 + 调对应通道下单 → 返二维码 URL 给前端渲染.
+    支持 subscription (套餐) 和 credit_pack (积分包) 两种 product_type."""
     user_id = _user_id_from_request(request)
-    if req.plan_id not in billing.PLANS:
-        raise HTTPException(400, f"未知套餐: {req.plan_id}")
-    plan = billing.PLANS[req.plan_id]
-    amount_yuan = plan['price_yuan']
+
+    # 根据 product_type 路由到不同 catalog
+    if req.product_type == 'subscription':
+        if req.plan_id not in billing.PLANS:
+            raise HTTPException(400, f"未知套餐: {req.plan_id}")
+        item = billing.PLANS[req.plan_id]
+        item_name = item['name']
+        amount_yuan = item['price_yuan']
+        credits_added = 0
+    elif req.product_type == 'credit_pack':
+        if req.plan_id not in billing.CREDIT_PACKS:
+            raise HTTPException(400, f"未知积分包: {req.plan_id}")
+        item = billing.CREDIT_PACKS[req.plan_id]
+        item_name = f"{item['name']} ({item['credits']} 积分)"
+        amount_yuan = item['price_yuan']
+        credits_added = item['credits']
+    else:
+        raise HTTPException(400, f"不支持的 product_type: {req.product_type}")
     amount_cents = int(round(amount_yuan * 100))
     if amount_cents <= 0:
-        raise HTTPException(400, "免费套餐不需要支付")
+        raise HTTPException(400, "免费商品不需要支付")
 
     now = _time.time()
     out_trade_no = f"ord_{int(now*1000)}_{uuid.uuid4().hex[:8]}"
     expires_at = now + PAYMENT_ORDER_TTL
     referrer_id = billing.get_referrer_id(user_id)
 
+    description = f"monoi {item_name}"
     if req.channel == 'wechat':
         try:
             wx_res = _wxpay.create_native_order(
                 out_trade_no=out_trade_no,
                 amount_cents=amount_cents,
-                description=f"monoi {plan['name']}",
+                description=description,
             )
         except Exception as e:
             raise HTTPException(500, f"微信下单失败: {e}")
@@ -2693,7 +2710,7 @@ def create_payment_order(req: CreatePayRequest, request: Request):
         if not _ALIPAY_REAL:
             raise HTTPException(501, "支付宝商户审核中, 暂未开通")
         try:
-            ap_res = _alipay.create_pc_order(out_trade_no, amount_cents, f"monoi {plan['name']}")
+            ap_res = _alipay.create_pc_order(out_trade_no, amount_cents, description)
         except Exception as e:
             raise HTTPException(500, f"支付宝下单失败: {e}")
         code_url = ap_res.get('qr_code') or ap_res.get('pay_url')
@@ -2701,16 +2718,16 @@ def create_payment_order(req: CreatePayRequest, request: Request):
     else:
         raise HTTPException(400, f"不支持的支付通道: {req.channel}")
 
-    # 写订单到 billing_orders
+    # 写订单到 billing_orders (order_type 区分 subscription / credit_pack)
     conn = billing.get_db()
     conn.execute("""
         INSERT INTO billing_orders (id, user_id, order_type, product_code, amount_yuan,
-                                     status, payment_method, payment_channel,
+                                     credits_added, status, payment_method, payment_channel,
                                      wx_prepay_id, wx_code_url, referrer_id,
                                      created_at, expires_at)
-        VALUES (?, ?, 'subscription', ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)
-    """, (out_trade_no, user_id, req.plan_id, amount_yuan, req.channel, req.channel,
-          prepay_id, code_url, referrer_id, now, expires_at))
+        VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)
+    """, (out_trade_no, user_id, req.product_type, req.plan_id, amount_yuan, credits_added,
+          req.channel, req.channel, prepay_id, code_url, referrer_id, now, expires_at))
     conn.commit()
     conn.close()
 
@@ -2719,7 +2736,7 @@ def create_payment_order(req: CreatePayRequest, request: Request):
         'order_id': out_trade_no,
         'code_url': code_url,
         'amount_yuan': amount_yuan,
-        'plan_name': plan['name'],
+        'plan_name': item_name,
         'expires_at': expires_at,
         'channel': req.channel,
     }
@@ -2780,11 +2797,11 @@ def query_payment_order(order_id: str, request: Request):
 
 
 def _mark_order_paid_and_activate(order_id: str, transaction_id: Optional[str]):
-    """订单标记 paid + 开通对应订阅. 幂等 (重复调跳过)."""
+    """订单标记 paid + 开通订阅 / 充值积分. 幂等 (重复调跳过)."""
     now = _time.time()
     conn = billing.get_db()
     row = conn.execute(
-        "SELECT user_id, product_code, status, referrer_id FROM billing_orders WHERE id = ?",
+        "SELECT user_id, order_type, product_code, credits_added, status, referrer_id FROM billing_orders WHERE id = ?",
         (order_id,)
     ).fetchone()
     if not row:
@@ -2799,16 +2816,33 @@ def _mark_order_paid_and_activate(order_id: str, transaction_id: Optional[str]):
     )
     conn.commit()
     conn.close()
-    print(f"[pay] 订单 {order_id} 标记 paid, 触发 activate_subscription(user={row['user_id']}, tier={row['product_code']})", flush=True)
+
+    order_type = row['order_type']
+    user_id = row['user_id']
+    product_code = row['product_code']
+    print(f"[pay] 订单 {order_id} 标记 paid, type={order_type} user={user_id} product={product_code}", flush=True)
+
     try:
-        billing.activate_subscription(
-            row['user_id'], row['product_code'],
-            payment_method='wechat',
-            referrer_id=row['referrer_id'],
-            order_id=order_id,
-        )
+        if order_type == 'subscription':
+            billing.activate_subscription(
+                user_id, product_code,
+                payment_method='wechat',
+                referrer_id=row['referrer_id'],
+                order_id=order_id,
+            )
+        elif order_type == 'credit_pack':
+            credits = row['credits_added'] or billing.CREDIT_PACKS.get(product_code, {}).get('credits', 0)
+            billing.add_credits(user_id, credits, 'purchase', ref_id=order_id, feature=product_code)
+            # 触发推广佣金 (跟 buy_credits 老 endpoint 行为一致)
+            if row['referrer_id']:
+                pack = billing.CREDIT_PACKS.get(product_code)
+                if pack:
+                    billing.write_first_order_commission(order_id, row['referrer_id'], user_id,
+                                                          pack['price_yuan'], product_code)
+        else:
+            print(f"[pay] 未知 order_type={order_type}, 跳过激活", flush=True)
     except Exception as e:
-        print(f"[pay] activate_subscription 失败 order={order_id}: {e}", flush=True)
+        print(f"[pay] 激活失败 order={order_id} type={order_type}: {e}", flush=True)
 
 
 @app.post("/api/pay/wx/notify")

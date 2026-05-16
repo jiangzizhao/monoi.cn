@@ -30,11 +30,17 @@ export interface QueryOrderResp {
   paid_at?: number
 }
 
-export async function createOrder(planId: string, channel: 'wechat' | 'alipay' = 'wechat'): Promise<CreateOrderResp> {
+export type ProductType = 'subscription' | 'credit_pack'
+
+export async function createOrder(
+  planId: string,
+  channel: 'wechat' | 'alipay' = 'wechat',
+  productType: ProductType = 'subscription',
+): Promise<CreateOrderResp> {
   const res = await fetch(directBase + '/api/pay/create', {
     method: 'POST',
     headers: authHeaders(),
-    body: JSON.stringify({ plan_id: planId, channel }),
+    body: JSON.stringify({ plan_id: planId, channel, product_type: productType }),
   })
   const data = await res.json()
   if (!res.ok) throw new Error(data.detail || data.error || `创建订单失败 (${res.status})`)

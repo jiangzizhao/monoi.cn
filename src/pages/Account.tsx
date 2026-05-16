@@ -230,11 +230,12 @@ export default function Account() {
         </div>
       )}
 
-      {/* 升级/购买弹窗 — 套餐用 PaymentDialog 走真支付, 积分包 V1 暂走客服 */}
+      {/* 升级/购买弹窗 — 套餐 + 积分包都走 PaymentDialog (区分 productType) */}
       {upgradeDialog && plans && plans.plans[upgradeDialog] && (
         <PaymentDialog
           open={true}
           planId={upgradeDialog}
+          productType="subscription"
           planName={plans.plans[upgradeDialog].name}
           amountYuan={plans.plans[upgradeDialog].price_yuan}
           periodLabel={plans.plans[upgradeDialog].period_days === 365 ? '/年' : '/月'}
@@ -243,23 +244,22 @@ export default function Account() {
           onPaid={() => reloadAll()}
         />
       )}
-      {upgradeDialog && (!plans || !plans.plans[upgradeDialog]) && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={() => setUpgradeDialog(null)}>
-          <div onClick={e => e.stopPropagation()} className="relative bg-[var(--bg-card)] border border-[var(--border)] rounded-2xl shadow-ios-lg w-full max-w-md p-6 flex flex-col gap-4">
-            <button onClick={() => setUpgradeDialog(null)} className="absolute top-4 right-4 p-1 rounded text-[var(--text-3)] hover:bg-[var(--bg-hover)] cursor-pointer"><X size={14}/></button>
-            <div className="text-base font-semibold">积分包购买</div>
-            <div className="text-sm text-[var(--text-2)] leading-relaxed">
-              <p>积分包支付通道在接入中, 当前暂时手工:</p>
-              <ol className="mt-3 ml-5 list-decimal space-y-1.5 text-xs">
-                <li>添加客服微信 <span className="font-mono bg-[var(--bg-input)] px-1.5 py-0.5 rounded">monoi-service</span></li>
-                <li>截图你想买的积分包给客服</li>
-                <li>客服报价后扫码付款</li>
-                <li>客服 24 小时内在后台为你开通</li>
-              </ol>
-            </div>
-            <button onClick={() => setUpgradeDialog(null)} className="self-end px-4 py-2 rounded-lg bg-[var(--text)] text-[var(--bg)] text-sm hover:opacity-80 cursor-pointer">知道了</button>
-          </div>
-        </div>
+      {upgradeDialog && plans && plans.credit_packs[upgradeDialog] && (
+        <PaymentDialog
+          open={true}
+          planId={upgradeDialog}
+          productType="credit_pack"
+          planName={plans.credit_packs[upgradeDialog].name}
+          amountYuan={plans.credit_packs[upgradeDialog].price_yuan}
+          periodLabel=""
+          highlights={[
+            `${plans.credit_packs[upgradeDialog].credits.toLocaleString()} 积分`,
+            '永不过期 · 跟月送积分叠加',
+            '所有功能通用',
+          ]}
+          onClose={() => setUpgradeDialog(null)}
+          onPaid={() => reloadAll()}
+        />
       )}
     </div>
   )
