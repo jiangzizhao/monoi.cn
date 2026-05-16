@@ -75,36 +75,54 @@ let _captured: VerifyOutcome<any> | null = null
 function init(): Promise<void> {
   if (_initPromise) return _initPromise
   _initPromise = (async () => {
+    console.log('[captcha] loadSDK 开始')
     await loadSDK()
+    console.log('[captcha] loadSDK 完成, initAliyunCaptcha 存在?', typeof (window as any).initAliyunCaptcha)
     ensureDOM()
-    await new Promise<void>((resolve) => {
-      ;(window as any).initAliyunCaptcha({
-        SceneId: getSceneId(),
-        mode: 'popup',
-        element: '#' + CONTAINER_ID,
-        button: '#' + BUTTON_ID,
-        captchaVerifyCallback: async (captchaVerifyParam: string) => {
-          if (!_pendingOnVerified) {
-            return { captchaResult: true, bizResult: false }
-          }
-          _captured = await _pendingOnVerified(captchaVerifyParam)
-          return { captchaResult: _captured.captchaPassed, bizResult: _captured.bizOk }
-        },
-        onBizResultCallback: (bizResult: boolean) => {
-          if (!_pendingResolve) return
-          const c = _captured || { captchaPassed: true, bizOk: bizResult }
-          _pendingResolve({ ok: c.bizOk, data: c.data, error: c.error })
-          _pendingResolve = null
-          _pendingOnVerified = null
-          _captured = null
-        },
-        getInstance: (instance: any) => {
-          _instance = instance
-          resolve()    // 拿到 instance 才算 init 完成
-        },
-        language: 'cn',
-      })
+    const sceneId = getSceneId()
+    console.log('[captcha] 准备 init, sceneId =', sceneId)
+    await new Promise<void>((resolve, reject) => {
+      // 10s 超时, 防 SDK 静默挂死
+      const timer = setTimeout(() => reject(new Error('SDK init 超时 10s — getInstance 没回调')), 10000)
+      try {
+        ;(window as any).initAliyunCaptcha({
+          SceneId: sceneId,
+          mode: 'popup',
+          element: '#' + CONTAINER_ID,
+          button: '#' + BUTTON_ID,
+          captchaVerifyCallback: async (captchaVerifyParam: string) => {
+            console.log('[captcha] captchaVerifyCallback 被调, param 长度=', captchaVerifyParam?.length)
+            if (!_pendingOnVerified) {
+              return { captchaResult: true, bizResult: false }
+            }
+            _captured = await _pendingOnVerified(captchaVerifyParam)
+            return { captchaResult: _captured.captchaPassed, bizResult: _captured.bizOk }
+          },
+          onBizResultCallback: (bizResult: boolean) => {
+            console.log('[captcha] onBizResultCallback bizResult=', bizResult)
+            if (!_pendingResolve) return
+            const c = _captured || { captchaPassed: true, bizOk: bizResult }
+            _pendingResolve({ ok: c.bizOk, data: c.data, error: c.error })
+            _pendingResolve = null
+            _pendingOnVerified = null
+            _captured = null
+          },
+          getInstance: (instance: any) => {
+            console.log('[captcha] getInstance 回调, instance =', instance)
+            _instance = instance
+            clearTimeout(timer)
+            resolve()
+          },
+          language: 'cn',
+        })
+        console.log('[captcha] initAliyunCaptcha 同步调用完成, 等 getInstance')
+      } catch (e) {
+        console.error('[captcha] initAliyunCaptcha 抛错:', e)
+        clearTimeout(timer)
+        reject(e)
+      }
     })
+    console.log('[captcha] init 完整完成')
   })()
   return _initPromise
 }
@@ -116,24 +134,28 @@ function init(): Promise<void> {
 export async function runCaptcha<T>(
   onVerified: (captchaVerifyParam: string) => Promise<VerifyOutcome<T>>,
 ): Promise<RunResult<T>> {
+  console.log('[captcha] runCaptcha 被调')
   if (!getSceneId()) {
+    console.log('[captcha] SceneId 没配, 跳过 captcha')
     const r = await onVerified('')
     return { ok: r.bizOk, data: r.data, error: r.error }
   }
   try {
     await init()
   } catch (e: any) {
+    console.error('[captcha] init 失败:', e)
     return { ok: false, error: e?.message || 'SDK 初始化失败' }
   }
+  console.log('[captcha] init 通过, 触发 instance.show 或 button click')
   return new Promise<RunResult<T>>((resolve) => {
     _pendingResolve = resolve
     _pendingOnVerified = onVerified as any
     _captured = null
-    // 直接调 instance.show() 触发, 不依赖 button click (浏览器可能挡程序触发的弹窗)
     if (_instance && typeof _instance.show === 'function') {
+      console.log('[captcha] 调 instance.show()')
       _instance.show()
     } else {
-      // fallback: 触发隐藏 button click
+      console.log('[captcha] instance 没拿到 or .show 不存在, fallback btn.click()')
       const btn = document.getElementById(BUTTON_ID) as HTMLButtonElement | null
       btn?.click()
     }
