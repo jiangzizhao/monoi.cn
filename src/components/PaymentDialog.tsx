@@ -3,6 +3,23 @@ import { X, Loader2, CheckCircle2, XCircle, RefreshCw } from 'lucide-react'
 import { QRCodeCanvas } from 'qrcode.react'
 import { createOrder, queryOrder, type CreateOrderResp } from '../services/pay'
 
+// 品牌 SVG (Simple Icons), 用 currentColor 跟着外层 className text-color 走
+function WeChatIcon({ size = 24 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M8.691 2.188C3.891 2.188 0 5.476 0 9.53c0 2.212 1.17 4.203 3.002 5.55a.59.59 0 0 1 .213.665l-.39 1.48c-.019.07-.048.141-.048.213 0 .163.13.295.29.295a.326.326 0 0 0 .167-.054l1.903-1.114a.864.864 0 0 1 .717-.098 10.16 10.16 0 0 0 2.837.403c.276 0 .543-.027.811-.05-.857-2.578.157-4.972 1.932-6.446 1.703-1.415 3.882-1.98 5.853-1.838-.576-3.583-4.196-6.348-8.596-6.348zM5.785 5.991c.642 0 1.162.529 1.162 1.18a1.17 1.17 0 0 1-1.162 1.178A1.17 1.17 0 0 1 4.623 7.17c0-.651.52-1.18 1.162-1.18zm5.813 0c.642 0 1.162.529 1.162 1.18a1.17 1.17 0 0 1-1.162 1.178 1.17 1.17 0 0 1-1.162-1.178c0-.651.52-1.18 1.162-1.18zm5.34 2.867c-1.797-.052-3.746.512-5.28 1.786-1.72 1.428-2.687 3.72-1.78 6.22.942 2.453 3.666 4.229 6.884 4.229.826 0 1.622-.12 2.361-.336a.722.722 0 0 1 .598.082l1.584.926a.272.272 0 0 0 .14.047c.134 0 .24-.111.24-.247 0-.06-.023-.12-.038-.177l-.327-1.233a.582.582 0 0 1-.023-.156.49.49 0 0 1 .201-.398C23.024 18.48 24 16.82 24 14.98c0-3.21-2.931-5.837-6.656-6.088V8.89c-.135-.01-.27-.027-.407-.032zm-2.53 3.21c.532 0 .96.448.96.992v.002c0 .544-.428.988-.96.988a.997.997 0 0 1-.96-.988.997.997 0 0 1 .96-.994zm4.844 0c.532 0 .96.448.96.992v.002c0 .544-.428.988-.96.988a.997.997 0 0 1-.96-.988.997.997 0 0 1 .96-.994z"/>
+    </svg>
+  )
+}
+
+function AlipayIcon({ size = 24 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M22.84 17.012s-3.97-1.227-6.005-1.872c1.225-2.127 2.193-4.69 2.83-7.487h-5.788V5.572h7.083V4.477h-7.083V.992h-2.889c-.508 0-.508.502-.508.502v2.983H3.314v1.095h7.166v1.98H4.557v1.097h11.61c-.51 1.84-1.196 3.535-2.014 5.064-4.564-1.51-9.434-2.682-12.493-1.965C-.405 12.247-.96 13.788.55 15.59c1.412 1.69 4.62 2.722 6.93 2.722 3.864 0 6.83-1.508 9.119-3.916 3.435 1.66 10.464 4.598 10.464 4.598V4.834C27.063 1.794 23.794 0 19.78 0H4.22C1.93 0 0 1.927 0 4.221v15.558C0 22.073 1.93 24 4.22 24h15.56C23.792 24 24 22.073 24 19.78v-4.85c-.336.124-.7.234-1.16.082z"/>
+    </svg>
+  )
+}
+
 type Step = 'select' | 'qr' | 'success' | 'failure'
 type Channel = 'wechat' | 'alipay'
 
@@ -126,14 +143,14 @@ export function PaymentDialog({ open, planId, planName, amountYuan, periodLabel,
               <div className="text-xs text-[var(--text-3)] mb-2">选择支付方式</div>
               <div className="grid grid-cols-2 gap-2">
                 <button onClick={() => setChannel('wechat')}
-                  className={`flex flex-col items-center justify-center gap-1 py-3 rounded-xl border-2 cursor-pointer transition-all ${channel === 'wechat' ? 'border-[#07C160] bg-[#07C160]/10' : 'border-[var(--border)] hover:border-[var(--text-3)]'}`}>
-                  <span className="text-base">🟢</span>
+                  className={`flex flex-col items-center justify-center gap-1.5 py-3.5 rounded-xl border-2 cursor-pointer transition-all ${channel === 'wechat' ? 'border-[#07C160] bg-[#07C160]/10' : 'border-[var(--border)] hover:border-[var(--text-3)]'}`}>
+                  <span className="text-[#07C160]"><WeChatIcon size={26}/></span>
                   <span className="text-xs font-medium">微信支付</span>
                 </button>
                 <button disabled
-                  className="flex flex-col items-center justify-center gap-1 py-3 rounded-xl border-2 border-[var(--border)] opacity-50 cursor-not-allowed"
+                  className="flex flex-col items-center justify-center gap-1.5 py-3.5 rounded-xl border-2 border-[var(--border)] opacity-50 cursor-not-allowed"
                   title="支付宝商户审核中">
-                  <span className="text-base">🔵</span>
+                  <span className="text-[#1677FF]"><AlipayIcon size={26}/></span>
                   <span className="text-xs font-medium">支付宝</span>
                   <span className="text-[10px] text-[var(--text-3)]">审核中</span>
                 </button>
@@ -168,7 +185,7 @@ export function PaymentDialog({ open, planId, planName, amountYuan, periodLabel,
                 )}
               </div>
               <div className="text-sm text-[var(--text)] flex items-center gap-1.5">
-                <span className="text-[#07C160]">●</span>
+                <span className="text-[#07C160]"><WeChatIcon size={16}/></span>
                 微信扫码支付
               </div>
               <div className="text-xs text-[var(--text-3)]">
