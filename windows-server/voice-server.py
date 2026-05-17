@@ -1209,6 +1209,75 @@ async def remove_vocals(file: UploadFile = File(...)):
         except: pass
 
 
+# ============== 音频裁剪 (ffmpeg, 给去人声后的 BGM 用) ==============
+
+
+class TrimAudioRequest(BaseModel):
+    oss_key: str            # 源音频 OSS key (一般是 outputs/vocrm_xxx.mp3)
+    start_seconds: float
+    end_seconds: float
+
+
+@app.post("/trim-audio")
+def trim_audio(req: TrimAudioRequest):
+    """裁剪音频时长. start_seconds → end_seconds 之间保留, 其他丢. 返新 OSS key + URL."""
+    import shutil
+    import subprocess
+    import tempfile
+    from oss_helper import oss_download, oss_upload, oss_sign_get
+
+    if req.end_seconds <= req.start_seconds:
+        raise HTTPException(400, '结束时间必须晚于起始时间')
+    duration = req.end_seconds - req.start_seconds
+    if duration < 0.5:
+        raise HTTPException(400, '裁剪后时长太短 (<0.5s)')
+
+    job_id = f"trim_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}"
+    work_dir = os.path.join(tempfile.gettempdir(), job_id)
+    os.makedirs(work_dir, exist_ok=True)
+
+    try:
+        input_path = os.path.join(work_dir, 'input.mp3')
+        try:
+            oss_download(req.oss_key, input_path)
+        except Exception as e:
+            raise HTTPException(410, f'源音频已过期或不存在: {e}')
+
+        output_path = os.path.join(work_dir, 'trimmed.mp3')
+        # -ss 起始, -t 持续时长 (比 -to 安全, 避免边界舍入误差)
+        # -c copy 直接复制流不重编码, 速度快画质无损 (但 mp3 边界对齐可能微小偏差, 一般够用)
+        # 如果需要精确边界用 -c:a libmp3lame 重编码
+        proc = subprocess.run(
+            ['ffmpeg', '-y',
+             '-ss', f'{req.start_seconds:.3f}',
+             '-i', input_path,
+             '-t', f'{duration:.3f}',
+             '-c:a', 'libmp3lame', '-b:a', '192k',
+             output_path],
+            capture_output=True, timeout=120,
+        )
+        if proc.returncode != 0:
+            err = proc.stderr.decode('utf-8', errors='ignore')[-400:]
+            raise HTTPException(500, f'ffmpeg 裁剪失败: {err}')
+
+        new_oss_key = f"outputs/{job_id}.mp3"
+        try:
+            oss_upload(new_oss_key, output_path, content_type='audio/mpeg')
+        except Exception as e:
+            raise HTTPException(500, f'OSS 上传失败: {e}')
+
+        return {
+            'success': True,
+            'oss_key': new_oss_key,
+            'download_url': oss_sign_get(new_oss_key, expires=24 * 3600),
+            'duration_seconds': duration,
+            'output_size_kb': os.path.getsize(output_path) // 1024,
+        }
+    finally:
+        try: shutil.rmtree(work_dir, ignore_errors=True)
+        except: pass
+
+
 # ============== 一键导出剪映草稿 (按句分段 3 轨道) ==============
 
 

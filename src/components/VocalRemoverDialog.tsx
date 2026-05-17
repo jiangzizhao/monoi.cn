@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { X, Loader2, Upload, CheckCircle2, Download, Music } from 'lucide-react'
-import { removeVocals, type RemoveVocalsResp } from '../services/audio'
+import { X, Loader2, Upload, CheckCircle2, Download, Music, Scissors } from 'lucide-react'
+import { removeVocals, trimAudio, type RemoveVocalsResp } from '../services/audio'
+import { AudioWaveformTrimmer } from './AudioWaveformTrimmer'
 
 interface Props {
   open: boolean
@@ -16,6 +17,11 @@ export function VocalRemoverDialog({ open, onClose, onUseAsBgm }: Props) {
   const [error, setError] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
   const abortRef = useRef<AbortController | null>(null)
+  // 裁剪状态
+  const [trimStart, setTrimStart] = useState(0)
+  const [trimEnd, setTrimEnd] = useState(0)
+  const [trimming, setTrimming] = useState(false)
+  const [trimmedResult, setTrimmedResult] = useState<{ oss_key: string; download_url: string; duration_seconds: number; output_size_kb: number } | null>(null)
 
   // processing 期间秒数 +1, 让用户知道还在跑 (demucs CPU 模式可能 2-5 分钟)
   useEffect(() => {
@@ -29,6 +35,7 @@ export function VocalRemoverDialog({ open, onClose, onUseAsBgm }: Props) {
     if (!open) {
       abortRef.current?.abort()
       setFile(null); setResult(null); setError(''); setProcessing(false)
+      setTrimmedResult(null); setTrimStart(0); setTrimEnd(0)
     }
   }, [open])
 
@@ -59,6 +66,32 @@ export function VocalRemoverDialog({ open, onClose, onUseAsBgm }: Props) {
     abortRef.current?.abort()
     setProcessing(false)
   }
+
+  const handleTrim = async () => {
+    if (!result || trimming) return
+    // 如果没动 trim handles (start=0, end=duration), 不裁剪
+    if (Math.abs(trimStart) < 0.05 && Math.abs(trimEnd - result.duration_seconds) < 0.05) {
+      alert('没有改起止时间, 跳过裁剪 (直接用原文件即可)')
+      return
+    }
+    setTrimming(true); setError('')
+    try {
+      const r = await trimAudio(result.oss_key, trimStart, trimEnd)
+      setTrimmedResult(r)
+    } catch (e: any) {
+      setError(e.message || '裁剪失败')
+    } finally { setTrimming(false) }
+  }
+
+  // 当前展示的"最终结果" — 裁剪过用 trimmedResult, 否则用原始 result
+  const finalResult = trimmedResult ? {
+    download_url: trimmedResult.download_url,
+    oss_key: trimmedResult.oss_key,
+    duration_seconds: trimmedResult.duration_seconds,
+    output_size_kb: trimmedResult.output_size_kb,
+    original_filename: result?.original_filename || 'bgm',
+    gpu_used: result?.gpu_used || false,
+  } : result
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={onClose}>
@@ -120,30 +153,54 @@ export function VocalRemoverDialog({ open, onClose, onUseAsBgm }: Props) {
           </>
         )}
 
-        {/* 结果 */}
+        {/* 去人声完成 — 展示波形 + 裁剪选区 */}
         {result && (
           <div className="flex flex-col gap-3">
             <div className="flex items-center gap-2 text-green-500">
               <CheckCircle2 size={18}/>
               <span className="text-sm font-medium">去人声完成</span>
+              <span className="text-[10px] text-[var(--text-3)] ml-auto">
+                {(finalResult!.output_size_kb / 1024).toFixed(1)} MB · {finalResult!.duration_seconds.toFixed(1)}s · {result.gpu_used ? 'GPU' : 'CPU'}
+              </span>
             </div>
-            <div className="text-xs text-[var(--text-3)] space-y-0.5">
-              <div>时长: {result.duration_seconds.toFixed(1)} 秒</div>
-              <div>大小: {(result.output_size_kb / 1024).toFixed(1)} MB</div>
-              <div>用 {result.gpu_used ? 'GPU' : 'CPU'} 处理</div>
-            </div>
+
+            {/* 波形 + 拖动裁剪 (基于最初的 result.download_url, 编辑 region) */}
+            {!trimmedResult && (
+              <>
+                <AudioWaveformTrimmer
+                  audioUrl={result.download_url}
+                  onChange={(s, e) => { setTrimStart(s); setTrimEnd(e) }}
+                />
+                <button onClick={handleTrim} disabled={trimming}
+                  className="self-start flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border border-[var(--border)] text-[var(--text-2)] hover:text-[var(--text)] hover:bg-[var(--bg-hover)] disabled:opacity-50 cursor-pointer">
+                  {trimming ? <Loader2 size={12} className="animate-spin"/> : <Scissors size={12}/>}
+                  {trimming ? '裁剪中...' : `裁剪到 ${(trimEnd - trimStart).toFixed(1)}s`}
+                </button>
+              </>
+            )}
+
+            {/* 裁剪完显示提示 */}
+            {trimmedResult && (
+              <div className="text-xs text-[var(--text-3)] bg-[var(--bg-hover)] rounded px-3 py-2">
+                已裁剪到 {trimmedResult.duration_seconds.toFixed(1)}s · 下面是最终 BGM
+              </div>
+            )}
+
+            {error && <p className="text-xs text-red-400">{error}</p>}
+
+            {/* 下载 / 用作 BGM (用最终的 finalResult) */}
             <div className="flex flex-col gap-2">
-              <a href={result.download_url} target="_blank" rel="noopener noreferrer" download
+              <a href={finalResult!.download_url} target="_blank" rel="noopener noreferrer" download
                 className="py-2 rounded-xl border border-[var(--border)] hover:bg-[var(--bg-hover)] text-sm flex items-center justify-center gap-2 cursor-pointer">
                 <Download size={14}/> 下载 BGM mp3
               </a>
               {onUseAsBgm && (
-                <button onClick={() => { onUseAsBgm(result.oss_key, result.original_filename.replace(/\.\w+$/, '') + ' (去人声)'); onClose() }}
+                <button onClick={() => { onUseAsBgm(finalResult!.oss_key, result.original_filename.replace(/\.\w+$/, '') + (trimmedResult ? ' (去人声+裁剪)' : ' (去人声)')); onClose() }}
                   className="py-2 rounded-xl bg-[var(--text)] text-[var(--bg)] text-sm hover:opacity-80 cursor-pointer">
                   直接用作合成 BGM
                 </button>
               )}
-              <button onClick={() => { setResult(null); setFile(null) }}
+              <button onClick={() => { setResult(null); setFile(null); setTrimmedResult(null) }}
                 className="text-xs text-[var(--text-3)] hover:text-[var(--text-2)] cursor-pointer">
                 再处理一首
               </button>

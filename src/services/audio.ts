@@ -28,3 +28,25 @@ export async function removeVocals(file: File, signal?: AbortSignal): Promise<Re
   }
   return data
 }
+
+export interface TrimAudioResp {
+  success: boolean
+  oss_key: string
+  download_url: string
+  duration_seconds: number
+  output_size_kb: number
+}
+
+/** 裁剪已有音频. 后端用 ffmpeg, 几秒钟. */
+export async function trimAudio(oss_key: string, start_seconds: number, end_seconds: number): Promise<TrimAudioResp> {
+  const res = await fetch(directBase + '/api/voice/trim-audio', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ oss_key, start_seconds, end_seconds }),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok || !data.success) {
+    throw new Error(data.detail || data.error || `裁剪失败 (${res.status})`)
+  }
+  return data
+}
