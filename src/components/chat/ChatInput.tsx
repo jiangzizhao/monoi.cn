@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
-import { ArrowUp, FileText, Mic, Video } from 'lucide-react'
+import { ArrowUp, FileText, Mic, Video, Music } from 'lucide-react'
+import { VocalRemoverDialog } from '../VocalRemoverDialog'
 import type { LucideIcon } from 'lucide-react'
 import { useChatStore } from '../../store/chatStore'
 import { useChat } from '../../hooks/useChat'
@@ -69,6 +70,7 @@ export function ChatInput({ moduleMenu, onModuleClick, onModuleMenuClose }: Prop
   const [footageForm, setFootageForm] = useState(false)
   const [coverForm, setCoverForm] = useState(false)
   const [publishForm, setPublishForm] = useState(false)
+  const [vocalRemoverOpen, setVocalRemoverOpen] = useState(false)
   const textRef = useRef<HTMLTextAreaElement>(null)
   const { isGenerating, conversations, activeId } = useChatStore()
   const { send, stop } = useChat()
@@ -325,8 +327,19 @@ export function ChatInput({ moduleMenu, onModuleClick, onModuleMenuClose }: Prop
               <Icon size={15} strokeWidth={1.8}/>
             </button>
           ))}
+          {/* 独立工具按钮: 音乐去人声 — 直接弹弹窗, 不开子菜单 */}
+          <button
+            title="去人声提 BGM"
+            onClick={() => setVocalRemoverOpen(true)}
+            className="p-2 rounded-lg transition-all cursor-pointer text-[var(--text-3)] hover:text-[var(--text)] hover:bg-[var(--bg-hover)]"
+          >
+            <Music size={15} strokeWidth={1.8}/>
+          </button>
         </div>
       </div>
+
+      {/* 音乐去人声弹窗 (从工具栏直接打开, 不依赖之前的流程) */}
+      <VocalRemoverDialog open={vocalRemoverOpen} onClose={() => setVocalRemoverOpen(false)}/>
     </div>
     </>
   )
