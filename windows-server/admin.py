@@ -566,7 +566,7 @@ def admin_list_bgm(request: Request):
         FROM bgm_library ORDER BY created_at DESC
     """).fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    return {'bgms': [dict(r) for r in rows]}
 
 
 @router.delete("/bgm-library/{bgm_id}")

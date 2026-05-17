@@ -1263,7 +1263,7 @@ def list_bgm_library():
             'license_note': r['license_note'],
             'preview_url': preview_url,
         })
-    return {'tracks': tracks}
+    return {'bgms': tracks}
 
 
 # ============== 音频裁剪 (ffmpeg, 给去人声后的 BGM 用) ==============
