@@ -1232,19 +1232,35 @@ async def remove_vocals(file: UploadFile = File(...)):
 
 def _find_monoi_db():
     """voice-server.py 在 D:\\monoi-server\\models\\cosyvoice\\ 跑, 相对路径找不到
-    D:\\monoi-server\\monoi.db. 这里按多种可能位置探, 先用 env, 再按 __file__ 向上找."""
+    D:\\monoi-server\\monoi.db. 按多种可能位置探, 并且要确认里面有 bgm_library 表
+    (光检查文件存在不够 — cosyvoice 子目录下可能有个空 db 是之前 sqlite 自动创建的).
+    优先级: env > __file__ 向上推断 > 绝对路径兜底 > cwd."""
+    import sqlite3 as _sq
+    here = os.path.dirname(os.path.abspath(__file__))
     cands = [
         os.environ.get('MONOI_DB_PATH'),
-        'monoi.db',                                                       # cwd
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'monoi.db'),  # cosyvoice → 上两级
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'monoi.db'),
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), 'monoi.db'),
-        r'D:\monoi-server\monoi.db',                                       # Windows 部署绝对路径兜底
+        os.path.join(here, '..', '..', 'monoi.db'),     # cosyvoice → 上两级 (D:\monoi-server\)
+        os.path.join(here, '..', 'monoi.db'),
+        os.path.join(here, 'monoi.db'),
+        r'D:\monoi-server\monoi.db',                    # Windows 部署绝对路径兜底
+        'monoi.db',                                      # cwd 最后兜底
     ]
     for c in cands:
-        if c and os.path.exists(c):
-            return os.path.abspath(c)
-    return 'monoi.db'  # 还是找不到, 让 sqlite 自己报错
+        if not c or not os.path.exists(c):
+            continue
+        # 进一步确认: 里面真有 bgm_library 表 (空 db 不算)
+        try:
+            _conn = _sq.connect(c, timeout=1)
+            has = _conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='bgm_library'"
+            ).fetchone()
+            _conn.close()
+            if has:
+                return os.path.abspath(c)
+        except Exception:
+            continue
+    # 都没匹配到 (理论上 main.py 重启过就一定有), 返第一个候选让 sqlite 报错
+    return os.path.abspath(cands[1] if len(cands) > 1 else 'monoi.db')
 
 
 @app.get("/bgm-library")
