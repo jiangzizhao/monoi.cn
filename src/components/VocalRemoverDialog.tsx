@@ -143,7 +143,7 @@ export function VocalRemoverDialog({ open, onClose, onUseAsBgm }: Props) {
                   AI 分离中... {elapsed}s
                 </div>
                 <div className="text-[10px] text-[var(--text-3)]">
-                  GPU 一般 5-30 秒, CPU 2-5 分钟 (看歌长). 别关弹窗, 关了任务会取消.
+                  AI 分离一般需要几十秒到几分钟 (看歌长). 别关弹窗, 关了任务会取消.
                 </div>
                 <button onClick={handleCancel} className="text-xs text-[var(--text-3)] hover:text-[var(--text-2)] cursor-pointer self-start">
                   取消
@@ -160,7 +160,7 @@ export function VocalRemoverDialog({ open, onClose, onUseAsBgm }: Props) {
               <CheckCircle2 size={18}/>
               <span className="text-sm font-medium">去人声完成</span>
               <span className="text-[10px] text-[var(--text-3)] ml-auto">
-                {(finalResult!.output_size_kb / 1024).toFixed(1)} MB · {finalResult!.duration_seconds.toFixed(1)}s · {result.gpu_used ? 'GPU' : 'CPU'}
+                {(finalResult!.output_size_kb / 1024).toFixed(1)} MB · {finalResult!.duration_seconds.toFixed(1)}s
               </span>
             </div>
 

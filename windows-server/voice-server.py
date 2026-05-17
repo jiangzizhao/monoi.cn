@@ -1153,11 +1153,16 @@ def compose_footage(req: ComposeRequest):
 @app.post("/remove-vocals")
 async def remove_vocals(file: UploadFile = File(...)):
     """上传音乐文件 → demucs 去人声 → 上传 OSS 返签名 mp3 URL.
-    单文件上限 ~50MB (multipart). GPU 5-30s, CPU 2-5min."""
+    单文件上限 ~50MB (multipart)."""
     import shutil
     import tempfile
-    import audio_separation
-    from oss_helper import oss_upload, oss_sign_get
+    import traceback
+    try:
+        import audio_separation
+        from oss_helper import oss_upload, oss_sign_get
+    except Exception as e:
+        print(f"[remove-vocals] import 失败: {e}\n{traceback.format_exc()}", flush=True)
+        raise HTTPException(500, f'import 失败: {e}')
 
     if not audio_separation.is_demucs_installed():
         raise HTTPException(501, 'demucs 未安装, 在 D:\\monoi-server 跑: pip install demucs')
@@ -1185,7 +1190,11 @@ async def remove_vocals(file: UploadFile = File(...)):
         try:
             meta = audio_separation.remove_vocals_to_bgm(input_path, bgm_mp3)
         except RuntimeError as e:
+            print(f"[remove-vocals] demucs 失败: {e}", flush=True)
             raise HTTPException(500, f'去人声失败: {e}')
+        except Exception as e:
+            print(f"[remove-vocals] 未知异常: {e}\n{traceback.format_exc()}", flush=True)
+            raise HTTPException(500, f'去人声异常: {e}')
 
         # 3. 上传 OSS
         oss_key = f"outputs/{job_id}.mp3"
