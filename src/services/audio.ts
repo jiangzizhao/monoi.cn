@@ -50,3 +50,25 @@ export async function trimAudio(oss_key: string, start_seconds: number, end_seco
   }
   return data
 }
+
+// ================= 内置商用 BGM 库 =================
+
+export interface BgmTrack {
+  id: number
+  name: string
+  category: string                     // upbeat / calm / inspirational / cinematic / electronic / chinese / other
+  oss_key: string
+  preview_url: string                  // 签名 URL, 1h 有效, 给前端播放试听
+  duration_seconds: number
+  license_note: string
+}
+
+/** 列出后台精选的商用 BGM (所有登录用户可读, 视频合成 BGM 选区用) */
+export async function listBgmLibrary(): Promise<{ bgms: BgmTrack[] }> {
+  const res = await fetch(directBase + '/api/voice/bgm-library')
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    throw new Error(data.detail || data.error || `BGM 库加载失败 (${res.status})`)
+  }
+  return data
+}

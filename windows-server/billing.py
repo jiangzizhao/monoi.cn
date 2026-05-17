@@ -265,6 +265,21 @@ def init_billing_tables():
         except sqlite3.OperationalError: pass
     c.execute("CREATE INDEX IF NOT EXISTS idx_billing_orders_wx_txn ON billing_orders(wx_transaction_id)")
 
+    # BGM 库 (admin 上传的无版权 BGM, 用户合成视频时选用)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS bgm_library (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,                    -- 显示名 例 "阳光夏日"
+            category TEXT NOT NULL DEFAULT 'other',  -- upbeat/calm/inspirational/cinematic/electronic/chinese/other
+            oss_key TEXT NOT NULL,                 -- 上传到 OSS 的 key
+            duration_seconds REAL DEFAULT 0,
+            license_note TEXT,                     -- 例 "Pixabay Free License, 完全可商用"
+            uploaded_by INTEGER,                   -- admin user_id
+            created_at REAL NOT NULL
+        )
+    """)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_bgm_library_category ON bgm_library(category, created_at DESC)")
+
     # 5. 推广绑定 (用户首次注册时记, 终身不变)
     c.execute("""
         CREATE TABLE IF NOT EXISTS referral_binding (

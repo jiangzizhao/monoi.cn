@@ -1,9 +1,21 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Pause, Play, X, Loader2, Music, Upload, Sparkles } from 'lucide-react'
+import { Pause, Play, X, Loader2, Music, Upload, Sparkles, Library } from 'lucide-react'
 import type { FootageSentenceItem, VideoAsset } from '../../types'
 import { useChatStore, makeAssistantMsg } from '../../store/chatStore'
 import { VocalRemoverDialog } from '../VocalRemoverDialog'
+import { listBgmLibrary, type BgmTrack } from '../../services/audio'
+
+// BGM 库类目中文名映射
+const BGM_CATEGORY_LABEL: Record<string, string> = {
+  upbeat: '欢快活力',
+  calm: '舒缓平静',
+  inspirational: '励志正能量',
+  cinematic: '电影感',
+  electronic: '电子',
+  chinese: '国风',
+  other: '其他',
+}
 
 interface Props {
   videoUrl: string
@@ -48,6 +60,32 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
   const [bgmUploading, setBgmUploading] = useState(false)
   const bgmFileRef = useRef<HTMLInputElement>(null)
   const [vocalRemoverOpen, setVocalRemoverOpen] = useState(false)
+  // 内置 BGM 库
+  const [bgmLibraryOpen, setBgmLibraryOpen] = useState(false)
+  const [bgmLibrary, setBgmLibrary] = useState<BgmTrack[] | null>(null)
+  const [bgmLibraryLoading, setBgmLibraryLoading] = useState(false)
+  const [bgmLibraryError, setBgmLibraryError] = useState('')
+  const [bgmPreviewId, setBgmPreviewId] = useState<number | null>(null)
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null)
+
+  // 打开 BGM 库时拉一次列表 (没拉过)
+  useEffect(() => {
+    if (!bgmLibraryOpen || bgmLibrary !== null) return
+    setBgmLibraryLoading(true); setBgmLibraryError('')
+    listBgmLibrary()
+      .then(r => setBgmLibrary(r.bgms || []))
+      .catch(e => setBgmLibraryError(e.message || '加载失败'))
+      .finally(() => setBgmLibraryLoading(false))
+  }, [bgmLibraryOpen, bgmLibrary])
+
+  // 关弹窗时停掉试听
+  useEffect(() => {
+    if (!bgmLibraryOpen && previewAudioRef.current) {
+      previewAudioRef.current.pause()
+      previewAudioRef.current = null
+      setBgmPreviewId(null)
+    }
+  }, [bgmLibraryOpen])
 
   const directBase = (import.meta as any).env?.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'
   const chatStore = useChatStore()
@@ -523,11 +561,17 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
                   )
                 })()}
                 <button
+                  onClick={() => setBgmLibraryOpen(true)}
+                  className="flex items-center justify-center gap-2 px-4 py-3 rounded-lg border border-[var(--border)] text-xs text-[var(--text)] bg-[var(--bg-hover)] hover:bg-[var(--bg-card)] cursor-pointer transition-all"
+                >
+                  <Library size={14}/> 从内置 BGM 库选 (商用授权)
+                </button>
+                <button
                   onClick={() => bgmFileRef.current?.click()}
                   disabled={bgmUploading}
                   className="flex items-center justify-center gap-2 px-4 py-3 rounded-lg border border-dashed border-[var(--border)] text-xs text-[var(--text-2)] hover:bg-[var(--bg-hover)] hover:border-[var(--text-3)] cursor-pointer disabled:opacity-50 transition-all"
                 >
-                  {bgmUploading ? <><Loader2 size={14} className="animate-spin"/> 上传中...</> : <><Upload size={14}/> 上传 BGM (可选)</>}
+                  {bgmUploading ? <><Loader2 size={14} className="animate-spin"/> 上传中...</> : <><Upload size={14}/> 上传自己的 BGM</>}
                 </button>
                 <button
                   onClick={() => setVocalRemoverOpen(true)}
@@ -559,6 +603,127 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
             setBgm({ oss_key, name, preview_url: '' })
           }}
         />
+
+        {/* 内置 BGM 库 选择弹窗 */}
+        {bgmLibraryOpen && (
+          <div
+            className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+            onClick={() => setBgmLibraryOpen(false)}
+          >
+            <div
+              onClick={e => e.stopPropagation()}
+              className="relative bg-[var(--bg-card)] border border-[var(--border)] rounded-2xl shadow-ios-lg w-full max-w-2xl max-h-[80vh] p-6 flex flex-col gap-3"
+            >
+              <button
+                onClick={() => setBgmLibraryOpen(false)}
+                className="absolute top-4 right-4 p-1 rounded text-[var(--text-3)] hover:bg-[var(--bg-hover)] cursor-pointer"
+              >
+                <X size={14}/>
+              </button>
+
+              <div>
+                <div className="flex items-center gap-2 text-base font-semibold">
+                  <Library size={18}/> 内置 BGM 库
+                </div>
+                <div className="text-xs text-[var(--text-3)] mt-1">
+                  官方精选, 商用授权安全使用 · 点 ▶ 试听, 点 "选用" 加到当前合成
+                </div>
+              </div>
+
+              {bgmLibraryLoading && (
+                <div className="flex items-center justify-center py-12 text-sm text-[var(--text-3)]">
+                  <Loader2 size={16} className="animate-spin mr-2"/> 加载中...
+                </div>
+              )}
+              {bgmLibraryError && (
+                <div className="text-xs text-red-400 bg-red-950/20 border border-red-900/30 rounded-lg px-3 py-2">
+                  {bgmLibraryError}
+                </div>
+              )}
+
+              {bgmLibrary && bgmLibrary.length === 0 && !bgmLibraryLoading && (
+                <div className="text-center py-12 text-sm text-[var(--text-3)]">
+                  BGM 库还没添加曲目, 请联系管理员上传
+                </div>
+              )}
+
+              {bgmLibrary && bgmLibrary.length > 0 && (
+                <div className="flex-1 overflow-y-auto pr-1 -mr-1 flex flex-col gap-4">
+                  {/* 按类目分组 */}
+                  {Object.entries(
+                    bgmLibrary.reduce<Record<string, BgmTrack[]>>((acc, t) => {
+                      const key = t.category || 'other'
+                      ;(acc[key] = acc[key] || []).push(t)
+                      return acc
+                    }, {})
+                  ).map(([cat, tracks]) => (
+                    <div key={cat}>
+                      <div className="text-[11px] text-[var(--text-3)] mb-2 px-1">
+                        {BGM_CATEGORY_LABEL[cat] || cat} · {tracks.length} 首
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        {tracks.map(t => (
+                          <div
+                            key={t.id}
+                            className="flex items-center gap-2 px-3 py-2 rounded-lg border border-[var(--border)] hover:bg-[var(--bg-hover)]"
+                          >
+                            <button
+                              onClick={() => {
+                                // 停掉旧的
+                                if (previewAudioRef.current) {
+                                  previewAudioRef.current.pause()
+                                  previewAudioRef.current = null
+                                }
+                                if (bgmPreviewId === t.id) {
+                                  setBgmPreviewId(null)
+                                  return
+                                }
+                                const a = new Audio(t.preview_url)
+                                a.play().catch(() => {})
+                                a.onended = () => setBgmPreviewId(null)
+                                previewAudioRef.current = a
+                                setBgmPreviewId(t.id)
+                              }}
+                              className="w-7 h-7 flex-shrink-0 rounded-full bg-[var(--bg-hover)] hover:bg-[var(--text)] hover:text-[var(--bg)] flex items-center justify-center cursor-pointer transition-colors"
+                              title={bgmPreviewId === t.id ? '停止' : '试听'}
+                            >
+                              {bgmPreviewId === t.id ? <Pause size={12}/> : <Play size={12}/>}
+                            </button>
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm text-[var(--text)] truncate">{t.name}</div>
+                              {t.license_note && (
+                                <div className="text-[10px] text-[var(--text-3)] truncate">{t.license_note}</div>
+                              )}
+                            </div>
+                            {t.duration_seconds > 0 && (
+                              <span className="text-[10px] text-[var(--text-3)] flex-shrink-0">
+                                {t.duration_seconds.toFixed(0)}s
+                              </span>
+                            )}
+                            <button
+                              onClick={() => {
+                                setBgm({ oss_key: t.oss_key, name: t.name, preview_url: t.preview_url })
+                                if (previewAudioRef.current) {
+                                  previewAudioRef.current.pause()
+                                  previewAudioRef.current = null
+                                }
+                                setBgmPreviewId(null)
+                                setBgmLibraryOpen(false)
+                              }}
+                              className="px-3 py-1 rounded text-xs bg-[var(--text)] text-[var(--bg)] hover:opacity-80 cursor-pointer flex-shrink-0"
+                            >
+                              选用
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* 合成结果区 (合成完显示) */}
         {/* 合成失败时显示错误 (成功直接关弹窗, 不在弹窗里重复展示视频) */}

@@ -1227,6 +1227,45 @@ async def remove_vocals(file: UploadFile = File(...)):
         except: pass
 
 
+# ============== 内置 BGM 库 (admin 上传无版权 BGM, 用户合成视频选用) ==============
+
+
+@app.get("/bgm-library")
+def list_bgm_library():
+    """返全部 admin 上传的 BGM, 按 category 分组, 每首带签名 preview URL."""
+    import sqlite3
+    from oss_helper import oss_sign_get
+
+    conn = sqlite3.connect('monoi.db', timeout=2)
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute("""
+            SELECT id, name, category, oss_key, duration_seconds, license_note
+            FROM bgm_library
+            ORDER BY category, created_at DESC
+        """).fetchall()
+    finally:
+        conn.close()
+
+    tracks = []
+    for r in rows:
+        try:
+            preview_url = oss_sign_get(r['oss_key'], expires=24 * 3600)
+        except Exception as e:
+            print(f"[bgm-library] 签名失败 id={r['id']}: {e}", flush=True)
+            preview_url = ''
+        tracks.append({
+            'id': r['id'],
+            'name': r['name'],
+            'category': r['category'],
+            'oss_key': r['oss_key'],
+            'duration_seconds': r['duration_seconds'],
+            'license_note': r['license_note'],
+            'preview_url': preview_url,
+        })
+    return {'tracks': tracks}
+
+
 # ============== 音频裁剪 (ffmpeg, 给去人声后的 BGM 用) ==============
 
 

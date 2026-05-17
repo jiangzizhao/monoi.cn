@@ -527,3 +527,54 @@ def stats(request: Request):
         'pending_withdrawals': pending_withdrawals,
         'pending_withdraw_amount': round(pending_withdraw_amount, 2),
     }
+
+
+# ============== BGM 库管理 ==============
+
+
+class AddBgmRequest(BaseModel):
+    name: str
+    category: str = 'other'   # upbeat/calm/inspirational/cinematic/electronic/chinese/other
+    oss_key: str              # 必须已经上传到 OSS (走 sign-upload), 这里只入库
+    duration_seconds: float = 0
+    license_note: Optional[str] = None
+
+
+@router.post("/bgm-library")
+def admin_add_bgm(req: AddBgmRequest, request: Request):
+    admin_id = require_admin(request)
+    valid_cats = {'upbeat', 'calm', 'inspirational', 'cinematic', 'electronic', 'chinese', 'other'}
+    if req.category not in valid_cats:
+        raise HTTPException(400, f"category 必须是 {valid_cats}")
+    conn = get_db()
+    cursor = conn.execute("""
+        INSERT INTO bgm_library (name, category, oss_key, duration_seconds, license_note, uploaded_by, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (req.name, req.category, req.oss_key, req.duration_seconds, req.license_note, admin_id, time.time()))
+    new_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return {'success': True, 'id': new_id}
+
+
+@router.get("/bgm-library")
+def admin_list_bgm(request: Request):
+    require_admin(request)
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT id, name, category, oss_key, duration_seconds, license_note, uploaded_by, created_at
+        FROM bgm_library ORDER BY created_at DESC
+    """).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@router.delete("/bgm-library/{bgm_id}")
+def admin_delete_bgm(bgm_id: int, request: Request):
+    require_admin(request)
+    conn = get_db()
+    conn.execute("DELETE FROM bgm_library WHERE id = ?", (bgm_id,))
+    conn.commit()
+    conn.close()
+    # 注意: 不主动删 OSS 文件 (lifecycle 自动清, 或者别的 BGM 用着同一 oss_key)
+    return {'success': True}

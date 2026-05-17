@@ -1,26 +1,41 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, Users, ShoppingBag, DollarSign, BarChart3, Search, X, AlertTriangle,
+  Music, Trash2, Plus, Loader2, Play, Pause,
 } from 'lucide-react'
 import {
   adminListUsers, adminUserDetail, adminGrantSubscription, adminGrantCredits,
   adminSetReferrerLevel, adminSetAdminFlag, adminListOrders, adminListWithdrawals,
   adminProcessWithdrawal, adminStats,
+  adminListBgm, adminAddBgm, adminDeleteBgm,
   type AdminUserRow, type AdminOrderRow, type AdminWithdrawalRow, type AdminStats,
+  type AdminBgmRow,
 } from '../services/admin'
 import { fetchMyProfile } from '../services/billing'
 import { isLoggedIn } from '../lib/auth'
 
 
-type TabKey = 'dashboard' | 'users' | 'orders' | 'withdrawals'
+type TabKey = 'dashboard' | 'users' | 'orders' | 'withdrawals' | 'bgm'
 
 const TABS: { key: TabKey; label: string; Icon: any }[] = [
   { key: 'dashboard', label: '数据看板', Icon: BarChart3 },
   { key: 'users', label: '用户管理', Icon: Users },
   { key: 'orders', label: '订单管理', Icon: ShoppingBag },
   { key: 'withdrawals', label: '提现申请', Icon: DollarSign },
+  { key: 'bgm', label: 'BGM 库', Icon: Music },
 ]
+
+const BGM_CATEGORIES = [
+  { value: 'upbeat', label: '欢快活力' },
+  { value: 'calm', label: '舒缓平静' },
+  { value: 'inspirational', label: '励志正能量' },
+  { value: 'cinematic', label: '电影感' },
+  { value: 'electronic', label: '电子' },
+  { value: 'chinese', label: '国风' },
+  { value: 'other', label: '其他' },
+]
+const BGM_CAT_LABEL = Object.fromEntries(BGM_CATEGORIES.map(c => [c.value, c.label]))
 
 const TIER_LABEL: Record<string, string> = {
   free: '免费', pro_monthly: 'Pro', max_monthly: 'Max', flagship_yearly: '旗舰',
@@ -101,6 +116,7 @@ export default function Admin() {
           {activeTab === 'users' && <UsersTab/>}
           {activeTab === 'orders' && <OrdersTab/>}
           {activeTab === 'withdrawals' && <WithdrawalsTab/>}
+          {activeTab === 'bgm' && <BgmLibraryTab/>}
         </div>
       </div>
     </div>
@@ -652,6 +668,285 @@ function WithdrawalsTab() {
           </table>
         </div>
       </div>
+    </>
+  )
+}
+
+
+// ========== BGM 库管理 ==========
+
+const directBase = (import.meta as any).env?.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'
+
+function BgmLibraryTab() {
+  const [list, setList] = useState<AdminBgmRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState('')
+
+  // 上传表单状态
+  const [showForm, setShowForm] = useState(false)
+  const [file, setFile] = useState<File | null>(null)
+  const [name, setName] = useState('')
+  const [category, setCategory] = useState('upbeat')
+  const [licenseNote, setLicenseNote] = useState('CC0 / 已购买商用授权')
+  const [duration, setDuration] = useState(0)
+  const [uploadProgress, setUploadProgress] = useState(0)
+  const [uploading, setUploading] = useState(false)
+  const [formErr, setFormErr] = useState('')
+
+  const [playingId, setPlayingId] = useState<number | null>(null)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+
+  const reload = () => {
+    setLoading(true); setErr('')
+    adminListBgm().then(r => setList(r.bgms || [])).catch(e => setErr(e.message)).finally(() => setLoading(false))
+  }
+  useEffect(() => { reload() }, [])
+
+  const handleFile = (f: File) => {
+    setFile(f); setFormErr('')
+    if (!name) setName(f.name.replace(/\.\w+$/, ''))
+    // 探测时长
+    const a = new Audio(URL.createObjectURL(f))
+    a.addEventListener('loadedmetadata', () => {
+      setDuration(a.duration || 0)
+      URL.revokeObjectURL(a.src)
+    })
+  }
+
+  const handleSubmit = async () => {
+    if (!file) { setFormErr('请先选音频文件'); return }
+    if (!name.trim()) { setFormErr('请填写曲名'); return }
+    setUploading(true); setFormErr(''); setUploadProgress(0)
+    try {
+      // 1. 拿签名
+      const token = localStorage.getItem('monoi_token') || ''
+      const signRes = await fetch(directBase + '/api/oss/sign-upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ filename: file.name, content_type: file.type || 'audio/mpeg' }),
+      })
+      if (!signRes.ok) throw new Error('OSS 签名失败')
+      const { put_url, oss_key, content_type } = await signRes.json()
+
+      // 2. PUT 到 OSS
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest()
+        xhr.open('PUT', put_url)
+        xhr.setRequestHeader('Content-Type', content_type)
+        xhr.upload.onprogress = e => {
+          if (e.lengthComputable) setUploadProgress(Math.round(e.loaded / e.total * 100))
+        }
+        xhr.onload = () => xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(`OSS PUT ${xhr.status}`))
+        xhr.onerror = () => reject(new Error('OSS PUT 网络错误'))
+        xhr.send(file)
+      })
+
+      // 3. 入库
+      await adminAddBgm({
+        name: name.trim(),
+        category,
+        oss_key,
+        duration_seconds: duration,
+        license_note: licenseNote,
+      })
+
+      // 4. 重置 + reload
+      setFile(null); setName(''); setDuration(0); setUploadProgress(0); setShowForm(false)
+      reload()
+    } catch (e: any) {
+      setFormErr(e.message || '上传失败')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const handleDelete = async (id: number, name: string) => {
+    if (!confirm(`确定删除 "${name}"? 用户已经选过这首的合成不受影响 (OSS 文件仍在), 但新合成不能再选.`)) return
+    try {
+      await adminDeleteBgm(id)
+      reload()
+    } catch (e: any) {
+      alert('删除失败: ' + e.message)
+    }
+  }
+
+  const togglePreview = (row: AdminBgmRow) => {
+    // 后台没存 preview_url, 但有 oss_key — 用户侧 listBgmLibrary 才会签 URL. 这里偷懒: 让管理员去 OSS 控制台看.
+    // 简化方案: 直接调 voice-server 公共 BGM 列表, 找匹配的 preview_url
+    if (audioRef.current) { audioRef.current.pause(); audioRef.current = null }
+    if (playingId === row.id) { setPlayingId(null); return }
+    // 拉一次公共列表找 preview_url
+    fetch(directBase + '/api/voice/bgm-library')
+      .then(r => r.json())
+      .then(d => {
+        const t = (d.bgms || []).find((x: any) => x.id === row.id)
+        if (!t?.preview_url) { alert('无法预览, 检查 OSS 配置'); return }
+        const a = new Audio(t.preview_url)
+        a.onended = () => setPlayingId(null)
+        a.play().catch(() => {})
+        audioRef.current = a
+        setPlayingId(row.id)
+      })
+  }
+
+  // 按类目分组
+  const grouped = list.reduce<Record<string, AdminBgmRow[]>>((acc, t) => {
+    const k = t.category || 'other'
+    ;(acc[k] = acc[k] || []).push(t)
+    return acc
+  }, {})
+
+  return (
+    <>
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <div className="text-base font-semibold">BGM 库管理</div>
+          <div className="text-xs text-[var(--text-3)] mt-0.5">
+            合成视频时, 用户可从这里选商用授权 BGM (无版权风险). 共 {list.length} 首.
+          </div>
+        </div>
+        <button
+          onClick={() => setShowForm(s => !s)}
+          className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[var(--text)] text-[var(--bg)] text-sm cursor-pointer"
+        >
+          <Plus size={14}/> 添加 BGM
+        </button>
+      </div>
+
+      {showForm && (
+        <div className="bg-[var(--bg-card)] rounded-xl p-4 border border-[var(--border)] flex flex-col gap-3">
+          <div className="text-sm font-medium">上传新 BGM</div>
+
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-[var(--text-3)]">音频文件 (mp3 推荐, 最大 50MB)</label>
+            <input
+              type="file" accept="audio/*"
+              onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f) }}
+              className="text-xs text-[var(--text-2)]"
+            />
+            {file && (
+              <div className="text-[11px] text-[var(--text-3)] mt-0.5">
+                {file.name} · {(file.size / 1024 / 1024).toFixed(1)} MB
+                {duration > 0 && ` · ${duration.toFixed(1)}s`}
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-[var(--text-3)]">曲名</label>
+              <input
+                value={name} onChange={e => setName(e.target.value)}
+                placeholder="例: 阳光午后 / Summer Vibes"
+                className="bg-[var(--bg)] border border-[var(--border)] rounded px-2 py-1.5 text-sm"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-[var(--text-3)]">类目</label>
+              <select
+                value={category} onChange={e => setCategory(e.target.value)}
+                className="bg-[var(--bg)] border border-[var(--border)] rounded px-2 py-1.5 text-sm"
+              >
+                {BGM_CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-[var(--text-3)]">授权说明 (展示给用户参考, 留空也行)</label>
+            <input
+              value={licenseNote} onChange={e => setLicenseNote(e.target.value)}
+              placeholder="例: CC0 / 已购买 Artlist 授权 / 站内原创"
+              className="bg-[var(--bg)] border border-[var(--border)] rounded px-2 py-1.5 text-sm"
+            />
+          </div>
+
+          {formErr && <p className="text-xs text-red-400">{formErr}</p>}
+          {uploading && uploadProgress > 0 && (
+            <div className="h-1.5 bg-[var(--bg)] rounded overflow-hidden">
+              <div className="h-full bg-[var(--text)] transition-all" style={{ width: `${uploadProgress}%` }}/>
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            <button
+              onClick={handleSubmit}
+              disabled={uploading || !file}
+              className="px-4 py-2 rounded-lg bg-[var(--text)] text-[var(--bg)] text-sm cursor-pointer disabled:opacity-50"
+            >
+              {uploading ? <span className="flex items-center gap-1.5"><Loader2 size={12} className="animate-spin"/> 上传中 {uploadProgress}%</span> : '提交'}
+            </button>
+            <button
+              onClick={() => { setShowForm(false); setFile(null); setName(''); setFormErr('') }}
+              disabled={uploading}
+              className="px-4 py-2 rounded-lg border border-[var(--border)] text-sm cursor-pointer disabled:opacity-50"
+            >
+              取消
+            </button>
+          </div>
+        </div>
+      )}
+
+      {err && <div className="text-xs text-red-400 bg-red-950/20 border border-red-900/30 rounded-lg px-3 py-2">{err}</div>}
+
+      {loading ? (
+        <div className="flex items-center justify-center py-12 text-sm text-[var(--text-3)]">
+          <Loader2 size={16} className="animate-spin mr-2"/> 加载中...
+        </div>
+      ) : list.length === 0 ? (
+        <div className="bg-[var(--bg-card)] rounded-xl p-8 border border-[var(--border)] text-center text-sm text-[var(--text-3)]">
+          还没添加任何 BGM. 点上方 "添加 BGM" 开始建库.
+        </div>
+      ) : (
+        <div className="flex flex-col gap-4">
+          {Object.entries(grouped).map(([cat, tracks]) => (
+            <div key={cat} className="bg-[var(--bg-card)] rounded-xl border border-[var(--border)] overflow-hidden">
+              <div className="px-4 py-2 border-b border-[var(--border)] text-xs text-[var(--text-2)] font-medium">
+                {BGM_CAT_LABEL[cat] || cat} · {tracks.length} 首
+              </div>
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-[var(--text-3)] border-b border-[var(--border)]">
+                    <th className="px-4 py-2 text-left">试听</th>
+                    <th className="px-4 py-2 text-left">曲名</th>
+                    <th className="px-4 py-2 text-left">时长</th>
+                    <th className="px-4 py-2 text-left">授权说明</th>
+                    <th className="px-4 py-2 text-left">添加时间</th>
+                    <th className="px-4 py-2 text-right">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tracks.map(t => (
+                    <tr key={t.id} className="border-b border-[var(--border)] hover:bg-[var(--bg-hover)]">
+                      <td className="px-4 py-2">
+                        <button
+                          onClick={() => togglePreview(t)}
+                          className="w-6 h-6 rounded-full bg-[var(--bg-hover)] hover:bg-[var(--text)] hover:text-[var(--bg)] flex items-center justify-center cursor-pointer"
+                        >
+                          {playingId === t.id ? <Pause size={10}/> : <Play size={10}/>}
+                        </button>
+                      </td>
+                      <td className="px-4 py-2 text-[var(--text)]">{t.name}</td>
+                      <td className="px-4 py-2 text-[var(--text-3)]">{t.duration_seconds > 0 ? `${t.duration_seconds.toFixed(0)}s` : '-'}</td>
+                      <td className="px-4 py-2 text-[var(--text-3)] truncate max-w-[200px]">{t.license_note || '-'}</td>
+                      <td className="px-4 py-2 text-[var(--text-3)]">{fmtTime(t.created_at)}</td>
+                      <td className="px-4 py-2 text-right">
+                        <button
+                          onClick={() => handleDelete(t.id, t.name)}
+                          className="p-1 rounded text-red-400 hover:bg-red-950/30 cursor-pointer"
+                          title="删除"
+                        >
+                          <Trash2 size={14}/>
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))}
+        </div>
+      )}
     </>
   )
 }

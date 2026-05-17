@@ -139,3 +139,41 @@ export interface AdminStats {
 export async function adminStats(): Promise<AdminStats> {
   return get('/api/admin/stats')
 }
+
+
+// ================= 商用 BGM 库管理 =================
+
+export interface AdminBgmRow {
+  id: number
+  name: string
+  category: string                       // upbeat/calm/inspirational/cinematic/electronic/chinese/other
+  oss_key: string
+  duration_seconds: number
+  license_note: string
+  uploaded_by: number
+  created_at: number
+}
+
+export async function adminListBgm(): Promise<{ bgms: AdminBgmRow[] }> {
+  return get('/api/admin/bgm-library')
+}
+
+export async function adminAddBgm(req: {
+  name: string
+  category: string
+  oss_key: string
+  duration_seconds?: number
+  license_note?: string
+}): Promise<{ success: boolean; id: number }> {
+  return post('/api/admin/bgm-library', req)
+}
+
+export async function adminDeleteBgm(bgm_id: number): Promise<{ success: boolean }> {
+  const res = await fetch(directBase + `/api/admin/bgm-library/${bgm_id}`, {
+    method: 'DELETE',
+    headers: headers(),
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.detail || data.error || `delete failed ${res.status}`)
+  return data
+}
