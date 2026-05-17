@@ -1147,6 +1147,68 @@ def compose_footage(req: ComposeRequest):
         except: pass
 
 
+# ============== 音乐去人声 (Demucs) → 导出 BGM ==============
+
+
+@app.post("/remove-vocals")
+async def remove_vocals(file: UploadFile = File(...)):
+    """上传音乐文件 → demucs 去人声 → 上传 OSS 返签名 mp3 URL.
+    单文件上限 ~50MB (multipart). GPU 5-30s, CPU 2-5min."""
+    import shutil
+    import tempfile
+    import audio_separation
+    from oss_helper import oss_upload, oss_sign_get
+
+    if not audio_separation.is_demucs_installed():
+        raise HTTPException(501, 'demucs 未安装, 在 D:\\monoi-server 跑: pip install demucs')
+
+    # 后缀校验 (demucs 支持的)
+    ext = os.path.splitext(file.filename or '')[1].lower()
+    if ext not in ('.mp3', '.wav', '.m4a', '.flac', '.ogg', '.aac', '.aiff'):
+        raise HTTPException(400, f'不支持的音频格式: {ext}, 请用 mp3/wav/m4a/flac/ogg')
+
+    job_id = f"vocrm_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}"
+    work_dir = os.path.join(tempfile.gettempdir(), job_id)
+    os.makedirs(work_dir, exist_ok=True)
+
+    try:
+        # 1. 保存上传文件
+        input_path = os.path.join(work_dir, f'input{ext}')
+        with open(input_path, 'wb') as f:
+            shutil.copyfileobj(file.file, f)
+        in_size_kb = os.path.getsize(input_path) // 1024
+        if in_size_kb > 50 * 1024:
+            raise HTTPException(400, f'文件太大 ({in_size_kb//1024}MB), 上限 50MB')
+
+        # 2. 跑 demucs → wav → mp3
+        bgm_mp3 = os.path.join(work_dir, 'bgm.mp3')
+        try:
+            meta = audio_separation.remove_vocals_to_bgm(input_path, bgm_mp3)
+        except RuntimeError as e:
+            raise HTTPException(500, f'去人声失败: {e}')
+
+        # 3. 上传 OSS
+        oss_key = f"outputs/{job_id}.mp3"
+        try:
+            oss_upload(oss_key, bgm_mp3, content_type='audio/mpeg')
+        except Exception as e:
+            raise HTTPException(500, f'OSS 上传失败: {e}')
+
+        download_url = oss_sign_get(oss_key, expires=24 * 3600)
+        return {
+            'success': True,
+            'download_url': download_url,
+            'oss_key': oss_key,
+            'duration_seconds': meta['duration_seconds'],
+            'output_size_kb': meta['output_size_kb'],
+            'gpu_used': meta['gpu'],
+            'original_filename': file.filename,
+        }
+    finally:
+        try: shutil.rmtree(work_dir, ignore_errors=True)
+        except: pass
+
+
 # ============== 一键导出剪映草稿 (按句分段 3 轨道) ==============
 
 

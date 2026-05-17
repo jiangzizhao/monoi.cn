@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Pause, Play, X, Loader2, Music, Upload } from 'lucide-react'
+import { Pause, Play, X, Loader2, Music, Upload, Sparkles } from 'lucide-react'
 import type { FootageSentenceItem, VideoAsset } from '../../types'
 import { useChatStore, makeAssistantMsg } from '../../store/chatStore'
+import { VocalRemoverDialog } from '../VocalRemoverDialog'
 
 interface Props {
   videoUrl: string
@@ -46,6 +47,7 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
   const [bgmVolume, setBgmVolume] = useState(0.3)   // 默认 30%, 不盖过口播
   const [bgmUploading, setBgmUploading] = useState(false)
   const bgmFileRef = useRef<HTMLInputElement>(null)
+  const [vocalRemoverOpen, setVocalRemoverOpen] = useState(false)
 
   const directBase = (import.meta as any).env?.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'
   const chatStore = useChatStore()
@@ -488,13 +490,21 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
                 </div>
               </div>
             ) : (
-              <button
-                onClick={() => bgmFileRef.current?.click()}
-                disabled={bgmUploading}
-                className="flex items-center justify-center gap-2 px-4 py-3 rounded-lg border border-dashed border-[var(--border)] text-xs text-[var(--text-2)] hover:bg-[var(--bg-hover)] hover:border-[var(--text-3)] cursor-pointer disabled:opacity-50 transition-all"
-              >
-                {bgmUploading ? <><Loader2 size={14} className="animate-spin"/> 上传中...</> : <><Upload size={14}/> 上传 BGM (可选)</>}
-              </button>
+              <div className="flex flex-col gap-2">
+                <button
+                  onClick={() => bgmFileRef.current?.click()}
+                  disabled={bgmUploading}
+                  className="flex items-center justify-center gap-2 px-4 py-3 rounded-lg border border-dashed border-[var(--border)] text-xs text-[var(--text-2)] hover:bg-[var(--bg-hover)] hover:border-[var(--text-3)] cursor-pointer disabled:opacity-50 transition-all"
+                >
+                  {bgmUploading ? <><Loader2 size={14} className="animate-spin"/> 上传中...</> : <><Upload size={14}/> 上传 BGM (可选)</>}
+                </button>
+                <button
+                  onClick={() => setVocalRemoverOpen(true)}
+                  className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-[11px] text-[var(--text-2)] hover:bg-[var(--bg-hover)] cursor-pointer transition-colors"
+                >
+                  <Sparkles size={12}/> 或者: 上传有人声的歌, AI 自动去人声做 BGM
+                </button>
+              </div>
             )}
             <input
               ref={bgmFileRef}
@@ -509,6 +519,15 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
             />
           </div>
         </div>
+
+        {/* 去人声弹窗 — 完成后直接当 BGM 用 (bypass 第二次 OSS 上传) */}
+        <VocalRemoverDialog
+          open={vocalRemoverOpen}
+          onClose={() => setVocalRemoverOpen(false)}
+          onUseAsBgm={(oss_key, name) => {
+            setBgm({ oss_key, name, preview_url: '' })
+          }}
+        />
 
         {/* 合成结果区 (合成完显示) */}
         {/* 合成失败时显示错误 (成功直接关弹窗, 不在弹窗里重复展示视频) */}
