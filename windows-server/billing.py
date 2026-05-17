@@ -293,6 +293,22 @@ def init_billing_tables():
         )
     """)
 
+    # 封面模板库 (admin 上传 PNG 底图 + 文字字段配置, 用户填字 Pillow 渲染)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS cover_template (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,                    -- 显示名 例 "震惊体红黄底"
+            category TEXT NOT NULL DEFAULT 'other', -- 科普/震惊/故事/教程/极简/职场/学习/理财/other
+            ratio TEXT NOT NULL DEFAULT '3:4',     -- 9:16 / 3:4 / 16:9 / 1:1 (底图比例)
+            bg_oss_key TEXT NOT NULL,              -- 底图 PNG 上传到 OSS
+            text_fields_json TEXT NOT NULL,        -- JSON 数组, 每元素 {label,x,y,w,h,font_file,font_size,color,highlight_color,stroke_*,shadow_*,align,max_chars,placeholder}
+            preview_oss_key TEXT,                  -- (可选) 一张带示例标题的预览图 (admin 上传时 server 渲染好缓存)
+            uploaded_by INTEGER,
+            created_at REAL NOT NULL
+        )
+    """)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_cover_template_category ON cover_template(category, created_at DESC)")
+
     # 5. 推广绑定 (用户首次注册时记, 终身不变)
     c.execute("""
         CREATE TABLE IF NOT EXISTS referral_binding (

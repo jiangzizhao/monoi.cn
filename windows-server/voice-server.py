@@ -1921,6 +1921,66 @@ def get_cover_font_file(filename: str):
     return FileResponse(path, media_type=media, headers={'Cache-Control': 'public, max-age=2592000'})
 
 
+@app.get("/cover-templates")
+def list_cover_templates():
+    """公共端点: 列出所有 admin 上传的封面模板.
+       每个模板带签名的 bg_url (1h 有效) 给前端预览, 还带 text_fields 配置.
+       前端 CoverGeneratorForm 用这个接口."""
+    import sqlite3 as _sq
+    import json as _json
+    from oss_helper import oss_sign_get
+
+    db_path = _find_monoi_db()
+    try:
+        conn = _sq.connect(db_path, timeout=2)
+        conn.row_factory = _sq.Row
+        try:
+            rows = conn.execute("""
+                SELECT id, name, category, ratio, bg_oss_key, text_fields_json, preview_oss_key, created_at
+                FROM cover_template ORDER BY category, created_at DESC
+            """).fetchall()
+        finally:
+            conn.close()
+    except _sq.OperationalError as e:
+        return JSONResponse(status_code=500, content={
+            'error': 'cover_template table not found',
+            'db_path_tried': db_path,
+            'sqlite_error': str(e),
+            'hint': 'main.py 还没 init_billing_tables 建表, 重启 main.py',
+        })
+
+    templates = []
+    for r in rows:
+        # 签 bg URL
+        try:
+            bg_url = oss_sign_get(r['bg_oss_key'], expires=3600)
+        except Exception as e:
+            print(f"[cover-templates] bg 签名失败 id={r['id']}: {e}", flush=True)
+            bg_url = ''
+        # 签 preview URL (可选)
+        preview_url = ''
+        if r['preview_oss_key']:
+            try:
+                preview_url = oss_sign_get(r['preview_oss_key'], expires=3600)
+            except Exception:
+                pass
+        try:
+            text_fields = _json.loads(r['text_fields_json'] or '[]')
+        except Exception:
+            text_fields = []
+        templates.append({
+            'id': r['id'],
+            'name': r['name'],
+            'category': r['category'],
+            'ratio': r['ratio'],
+            'bg_url': bg_url,
+            'preview_url': preview_url,
+            'text_fields': text_fields,
+            'created_at': r['created_at'],
+        })
+    return {'templates': templates}
+
+
 @app.post("/generate-cover")
 def generate_cover(req: CoverRequest):
     """ffmpeg 截帧 + scale → Pillow 渲染模板 → 上传 OSS"""

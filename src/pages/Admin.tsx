@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, Users, ShoppingBag, DollarSign, BarChart3, Search, X, AlertTriangle,
-  Music, Trash2, Plus, Loader2, Play, Pause, Type,
+  Music, Trash2, Plus, Loader2, Play, Pause, Type, Image as ImageIcon, MousePointer2,
 } from 'lucide-react'
 import {
   adminListUsers, adminUserDetail, adminGrantSubscription, adminGrantCredits,
@@ -10,14 +10,15 @@ import {
   adminProcessWithdrawal, adminStats,
   adminListBgm, adminAddBgm, adminDeleteBgm,
   adminListFonts, adminUploadFont, adminDeleteFont,
+  adminListCoverTemplates, adminAddCoverTemplate, adminDeleteCoverTemplate,
   type AdminUserRow, type AdminOrderRow, type AdminWithdrawalRow, type AdminStats,
-  type AdminBgmRow, type AdminFontRow,
+  type AdminBgmRow, type AdminFontRow, type AdminCoverTemplate, type CoverTextField,
 } from '../services/admin'
 import { fetchMyProfile } from '../services/billing'
 import { isLoggedIn } from '../lib/auth'
 
 
-type TabKey = 'dashboard' | 'users' | 'orders' | 'withdrawals' | 'bgm' | 'fonts'
+type TabKey = 'dashboard' | 'users' | 'orders' | 'withdrawals' | 'bgm' | 'fonts' | 'covers'
 
 const TABS: { key: TabKey; label: string; Icon: any }[] = [
   { key: 'dashboard', label: '数据看板', Icon: BarChart3 },
@@ -26,6 +27,26 @@ const TABS: { key: TabKey; label: string; Icon: any }[] = [
   { key: 'withdrawals', label: '提现申请', Icon: DollarSign },
   { key: 'bgm', label: 'BGM 库', Icon: Music },
   { key: 'fonts', label: '字体库', Icon: Type },
+  { key: 'covers', label: '封面模板', Icon: ImageIcon },
+]
+
+const COVER_CATEGORIES = [
+  { value: 'kepu', label: '科普' },
+  { value: 'zhenjing', label: '震惊' },
+  { value: 'gushi', label: '故事' },
+  { value: 'jiaocheng', label: '教程' },
+  { value: 'jianji', label: '极简' },
+  { value: 'zhichang', label: '职场' },
+  { value: 'xuexi', label: '学习' },
+  { value: 'licai', label: '理财' },
+  { value: 'other', label: '其他' },
+]
+const COVER_CAT_LABEL = Object.fromEntries(COVER_CATEGORIES.map(c => [c.value, c.label]))
+const COVER_RATIOS: { value: '9:16' | '3:4' | '16:9' | '1:1'; label: string; w: number; h: number }[] = [
+  { value: '3:4',  label: '3:4 (小红书)',   w: 1080, h: 1440 },
+  { value: '9:16', label: '9:16 (抖音/视频号)', w: 1080, h: 1920 },
+  { value: '16:9', label: '16:9 (B站/YouTube)', w: 1920, h: 1080 },
+  { value: '1:1',  label: '1:1 (方图)',      w: 1080, h: 1080 },
 ]
 
 const BGM_CATEGORIES = [
@@ -120,6 +141,7 @@ export default function Admin() {
           {activeTab === 'withdrawals' && <WithdrawalsTab/>}
           {activeTab === 'bgm' && <BgmLibraryTab/>}
           {activeTab === 'fonts' && <FontLibraryTab/>}
+          {activeTab === 'covers' && <CoverTemplateTab/>}
         </div>
       </div>
     </div>
@@ -1154,5 +1176,514 @@ function FontLibraryTab() {
         </div>
       )}
     </>
+  )
+}
+
+
+// ========== 封面模板管理 ==========
+
+interface FontOption { file: string; label: string; tag?: string; source?: string }
+
+/** 单字段配置 (admin 在拖框编辑器里编辑的对象). 比 server CoverTextField 多个 id, 给 React key 用 */
+interface UiTextField extends CoverTextField { _id: string }
+
+function CoverTemplateTab() {
+  const [list, setList] = useState<AdminCoverTemplate[]>([])
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState('')
+  const [showEditor, setShowEditor] = useState(false)
+
+  const reload = () => {
+    setLoading(true); setErr('')
+    adminListCoverTemplates().then(r => setList(r.templates || [])).catch(e => setErr(e.message)).finally(() => setLoading(false))
+  }
+  useEffect(() => { reload() }, [])
+
+  const handleDelete = async (id: number, name: string) => {
+    if (!confirm(`删除模板 "${name}"? 已生成的封面不受影响, 但新合成不能再选这个模板.`)) return
+    try {
+      await adminDeleteCoverTemplate(id)
+      reload()
+    } catch (e: any) {
+      alert('删除失败: ' + e.message)
+    }
+  }
+
+  // 按类目分组
+  const grouped = list.reduce<Record<string, AdminCoverTemplate[]>>((acc, t) => {
+    const k = t.category || 'other'
+    ;(acc[k] = acc[k] || []).push(t)
+    return acc
+  }, {})
+
+  return (
+    <>
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <div className="text-base font-semibold">封面模板管理</div>
+          <div className="text-xs text-[var(--text-3)] mt-0.5">
+            上传底图 PNG, 拖框定义标题/副标题位置, 选字体/字号/颜色. 用户合成视频时可选模板填字一键出封面.
+            <span className="text-amber-500"> 标题用 大括号 包要高亮的字, 例 "封面{'{邪修}'}", 邪修 会用高亮色.</span>
+          </div>
+        </div>
+        <button
+          onClick={() => setShowEditor(true)}
+          className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[var(--text)] text-[var(--bg)] text-sm cursor-pointer"
+        >
+          <Plus size={14}/> 新建模板
+        </button>
+      </div>
+
+      {err && <div className="text-xs text-red-400 bg-red-950/20 border border-red-900/30 rounded-lg px-3 py-2">{err}</div>}
+
+      {loading ? (
+        <div className="flex items-center justify-center py-12 text-sm text-[var(--text-3)]">
+          <Loader2 size={16} className="animate-spin mr-2"/> 加载中...
+        </div>
+      ) : list.length === 0 ? (
+        <div className="bg-[var(--bg-card)] rounded-xl p-8 border border-[var(--border)] text-center text-sm text-[var(--text-3)]">
+          还没添加模板. 点 "新建模板" 上传第一个.
+        </div>
+      ) : (
+        <div className="flex flex-col gap-4">
+          {Object.entries(grouped).map(([cat, ts]) => (
+            <div key={cat} className="bg-[var(--bg-card)] rounded-xl border border-[var(--border)] overflow-hidden">
+              <div className="px-4 py-2 border-b border-[var(--border)] text-xs text-[var(--text-2)] font-medium">
+                {COVER_CAT_LABEL[cat] || cat} · {ts.length} 个
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 p-3">
+                {ts.map(t => (
+                  <div key={t.id} className="relative group rounded-lg border border-[var(--border)] overflow-hidden">
+                    <div className="aspect-[3/4] bg-[var(--bg)] flex items-center justify-center text-xs text-[var(--text-3)]">
+                      <span>{t.ratio} · {t.text_fields.length} 个字段</span>
+                    </div>
+                    <div className="px-2 py-1.5 bg-[var(--bg-card)] text-xs text-[var(--text)] truncate">{t.name}</div>
+                    <button
+                      onClick={() => handleDelete(t.id, t.name)}
+                      className="absolute top-1 right-1 p-1 rounded bg-red-500/80 text-white opacity-0 group-hover:opacity-100 cursor-pointer"
+                    >
+                      <Trash2 size={12}/>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {showEditor && (
+        <CoverTemplateEditor
+          onClose={() => setShowEditor(false)}
+          onSaved={() => { setShowEditor(false); reload() }}
+        />
+      )}
+    </>
+  )
+}
+
+/** 上传 + 拖框编辑器 — 弹窗形式 */
+function CoverTemplateEditor({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const [name, setName] = useState('')
+  const [category, setCategory] = useState('zhichang')
+  const [ratio, setRatio] = useState<'9:16' | '3:4' | '16:9' | '1:1'>('3:4')
+
+  const [bgFile, setBgFile] = useState<File | null>(null)
+  const [bgOssKey, setBgOssKey] = useState('')
+  const [bgPreviewUrl, setBgPreviewUrl] = useState('')              // 本地 ObjectURL, 用于拖框预览
+  const [bgUploading, setBgUploading] = useState(false)
+  const [bgUploadProgress, setBgUploadProgress] = useState(0)
+  const [bgNaturalSize, setBgNaturalSize] = useState({ w: 0, h: 0 })
+
+  const [fields, setFields] = useState<UiTextField[]>([])
+  const [activeFieldId, setActiveFieldId] = useState<string | null>(null)
+  const [fonts, setFonts] = useState<FontOption[]>([])
+  const [saving, setSaving] = useState(false)
+  const [editorErr, setEditorErr] = useState('')
+
+  // 拖框状态
+  const canvasRef = useRef<HTMLDivElement>(null)
+  const [drawing, setDrawing] = useState<{ startX: number; startY: number; curX: number; curY: number } | null>(null)
+
+  // 拉字体列表 (跟用户端 cover-fonts 一样)
+  useEffect(() => {
+    fetch(directBase + '/api/voice/cover-fonts')
+      .then(r => r.json())
+      .then(d => setFonts(d.fonts || []))
+      .catch(() => setFonts([]))
+  }, [])
+
+  // 处理底图选择 + OSS 直传
+  const handleBgFile = async (f: File) => {
+    setBgFile(f); setEditorErr('')
+    const localUrl = URL.createObjectURL(f)
+    setBgPreviewUrl(localUrl)
+    // 探测原始尺寸
+    const img = new Image()
+    img.onload = () => setBgNaturalSize({ w: img.naturalWidth, h: img.naturalHeight })
+    img.src = localUrl
+
+    // 直传 OSS
+    setBgUploading(true); setBgUploadProgress(0)
+    try {
+      const token = localStorage.getItem('monoi_token') || ''
+      const signRes = await fetch(directBase + '/api/oss/sign-upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ filename: f.name, content_type: f.type || 'image/png' }),
+      })
+      if (!signRes.ok) throw new Error('OSS 签名失败')
+      const { put_url, oss_key, content_type } = await signRes.json()
+
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest()
+        xhr.open('PUT', put_url)
+        xhr.setRequestHeader('Content-Type', content_type)
+        xhr.upload.onprogress = e => {
+          if (e.lengthComputable) setBgUploadProgress(Math.round(e.loaded / e.total * 100))
+        }
+        xhr.onload = () => xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(`OSS PUT ${xhr.status}`))
+        xhr.onerror = () => reject(new Error('OSS PUT 网络错误'))
+        xhr.send(f)
+      })
+      setBgOssKey(oss_key)
+    } catch (e: any) {
+      setEditorErr('底图上传失败: ' + e.message)
+    } finally {
+      setBgUploading(false)
+    }
+  }
+
+  // 在 canvas 上鼠标按下 → 开始画框
+  const handleCanvasMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!canvasRef.current) return
+    if ((e.target as HTMLElement).closest('[data-field-box]')) return  // 点已有 box 不画
+    const rect = canvasRef.current.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+    setDrawing({ startX: x, startY: y, curX: x, curY: y })
+  }
+  const handleCanvasMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!drawing || !canvasRef.current) return
+    const rect = canvasRef.current.getBoundingClientRect()
+    setDrawing({ ...drawing, curX: e.clientX - rect.left, curY: e.clientY - rect.top })
+  }
+  const handleCanvasMouseUp = () => {
+    if (!drawing || !canvasRef.current) return
+    const rect = canvasRef.current.getBoundingClientRect()
+    const minX = Math.min(drawing.startX, drawing.curX)
+    const minY = Math.min(drawing.startY, drawing.curY)
+    const maxX = Math.max(drawing.startX, drawing.curX)
+    const maxY = Math.max(drawing.startY, drawing.curY)
+    setDrawing(null)
+    // 画的框太小 (< 30px) 就当点击, 不加字段
+    if (maxX - minX < 30 || maxY - minY < 30) return
+    // 换算到原图坐标 (canvas 缩放后, 1 px canvas = bgNaturalSize.w/rect.width px 原图)
+    const scaleX = bgNaturalSize.w / rect.width
+    const scaleY = bgNaturalSize.h / rect.height
+    const newField: UiTextField = {
+      _id: `f_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      label: fields.length === 0 ? '主标题' : fields.length === 1 ? '副标题' : `字段${fields.length + 1}`,
+      x: Math.round(minX * scaleX),
+      y: Math.round(minY * scaleY),
+      w: Math.round((maxX - minX) * scaleX),
+      h: Math.round((maxY - minY) * scaleY),
+      font_file: fonts[0]?.file || 'SourceHanSansCN-Heavy.otf',
+      font_size: Math.round((maxY - minY) * scaleY * 0.7),     // 默认字号 ~ 框高的 70%
+      color: '#FFFFFF',
+      highlight_color: '#FFD700',
+      stroke_color: '#000000', stroke_width: 6,
+      shadow_color: null, shadow_offset_x: 0, shadow_offset_y: 0, shadow_blur: 0,
+      align: 'left', max_chars: 0, placeholder: '',
+    }
+    setFields(prev => [...prev, newField])
+    setActiveFieldId(newField._id)
+  }
+
+  const updateField = (id: string, patch: Partial<UiTextField>) => {
+    setFields(prev => prev.map(f => f._id === id ? { ...f, ...patch } : f))
+  }
+  const removeField = (id: string) => {
+    setFields(prev => prev.filter(f => f._id !== id))
+    if (activeFieldId === id) setActiveFieldId(null)
+  }
+
+  const handleSave = async () => {
+    if (!name.trim()) { setEditorErr('请填模板名'); return }
+    if (!bgOssKey) { setEditorErr('请先上传底图'); return }
+    if (fields.length === 0) { setEditorErr('请至少拖框定义 1 个文字字段'); return }
+    setSaving(true); setEditorErr('')
+    try {
+      const cleanFields: CoverTextField[] = fields.map(({ _id, ...f }) => f)
+      await adminAddCoverTemplate({
+        name: name.trim(), category, ratio,
+        bg_oss_key: bgOssKey,
+        text_fields: cleanFields,
+      })
+      onSaved()
+    } catch (e: any) {
+      setEditorErr(e.message || '保存失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const activeField = fields.find(f => f._id === activeFieldId) || null
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={onClose}>
+      <div onClick={e => e.stopPropagation()}
+        className="relative bg-[var(--bg-card)] border border-[var(--border)] rounded-2xl shadow-ios-lg w-full max-w-6xl max-h-[92vh] flex flex-col">
+        <div className="flex items-center justify-between p-4 border-b border-[var(--border)]">
+          <div className="text-base font-semibold">新建封面模板</div>
+          <button onClick={onClose} className="p-1 rounded hover:bg-[var(--bg-hover)] cursor-pointer"><X size={16}/></button>
+        </div>
+
+        <div className="flex-1 overflow-hidden flex flex-col lg:flex-row">
+          {/* 左侧: 基础信息 + 字段表 */}
+          <div className="lg:w-72 flex-shrink-0 border-r border-[var(--border)] p-4 overflow-y-auto flex flex-col gap-3">
+            <div>
+              <label className="text-xs text-[var(--text-3)]">模板名</label>
+              <input value={name} onChange={e => setName(e.target.value)} placeholder="例: 震惊体红黄底"
+                className="w-full bg-[var(--bg)] border border-[var(--border)] rounded px-2 py-1.5 text-sm mt-1"/>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-xs text-[var(--text-3)]">类目</label>
+                <select value={category} onChange={e => setCategory(e.target.value)}
+                  className="w-full bg-[var(--bg)] border border-[var(--border)] rounded px-2 py-1.5 text-sm mt-1">
+                  {COVER_CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-[var(--text-3)]">比例</label>
+                <select value={ratio} onChange={e => setRatio(e.target.value as any)}
+                  className="w-full bg-[var(--bg)] border border-[var(--border)] rounded px-2 py-1.5 text-sm mt-1">
+                  {COVER_RATIOS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                </select>
+              </div>
+            </div>
+
+            <div className="border-t border-[var(--border)] pt-3">
+              <label className="text-xs text-[var(--text-3)]">底图 PNG (建议跟比例匹配, 标题位置留白)</label>
+              <input type="file" accept="image/*"
+                onChange={e => { const f = e.target.files?.[0]; if (f) handleBgFile(f) }}
+                className="text-xs text-[var(--text-2)] mt-1"/>
+              {bgUploading && (
+                <div className="mt-2 h-1 bg-[var(--bg)] rounded overflow-hidden">
+                  <div className="h-full bg-[var(--text)] transition-all" style={{ width: `${bgUploadProgress}%` }}/>
+                </div>
+              )}
+              {bgPreviewUrl && !bgUploading && (
+                <div className="text-[10px] text-[var(--text-3)] mt-1">
+                  {bgNaturalSize.w}×{bgNaturalSize.h} px {bgOssKey ? '· ✓ OSS 已上传' : ''}
+                </div>
+              )}
+            </div>
+
+            <div className="border-t border-[var(--border)] pt-3 flex-1 min-h-0 flex flex-col">
+              <div className="text-xs text-[var(--text-3)] mb-2">
+                文字字段 ({fields.length})
+                <span className="ml-2 text-amber-500">在右侧底图上拖鼠标画框 → 自动加字段</span>
+              </div>
+              <div className="flex flex-col gap-1 overflow-y-auto">
+                {fields.map((f, i) => (
+                  <button key={f._id} onClick={() => setActiveFieldId(f._id)}
+                    className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs cursor-pointer ${
+                      activeFieldId === f._id ? 'bg-[var(--text)] text-[var(--bg)]' : 'text-[var(--text-2)] hover:bg-[var(--bg-hover)]'
+                    }`}>
+                    <span className="font-mono text-[10px] opacity-60">#{i + 1}</span>
+                    <span className="flex-1 text-left truncate">{f.label}</span>
+                    <span className="text-[10px] opacity-60">{f.w}×{f.h}</span>
+                  </button>
+                ))}
+                {fields.length === 0 && (
+                  <div className="text-xs text-[var(--text-3)] py-4 text-center">
+                    暂无字段, 在右侧底图上 <span className="text-amber-500">按住鼠标拖一个矩形</span> 添加
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {editorErr && <div className="text-xs text-red-400">{editorErr}</div>}
+            <button onClick={handleSave} disabled={saving || bgUploading}
+              className="w-full py-2 rounded-lg bg-[var(--text)] text-[var(--bg)] text-sm cursor-pointer disabled:opacity-50">
+              {saving ? <span className="flex items-center justify-center gap-1.5"><Loader2 size={12} className="animate-spin"/> 保存中</span> : '保存模板'}
+            </button>
+          </div>
+
+          {/* 中间: 底图 + 拖框 */}
+          <div className="flex-1 min-w-0 bg-[var(--bg)] overflow-auto p-4 flex items-start justify-center">
+            {!bgPreviewUrl ? (
+              <div className="flex flex-col items-center justify-center text-[var(--text-3)] text-sm py-20">
+                <MousePointer2 size={32} className="mb-3 opacity-50"/>
+                <div>左侧上传底图后, 在这里拖鼠标画文字框</div>
+              </div>
+            ) : (
+              <div ref={canvasRef}
+                onMouseDown={handleCanvasMouseDown}
+                onMouseMove={handleCanvasMouseMove}
+                onMouseUp={handleCanvasMouseUp}
+                onMouseLeave={() => setDrawing(null)}
+                className="relative inline-block max-w-full select-none cursor-crosshair"
+                style={{ maxHeight: '70vh' }}
+              >
+                <img src={bgPreviewUrl} draggable={false} className="block max-w-full pointer-events-none"
+                  style={{ maxHeight: '70vh' }}/>
+
+                {/* 已有的字段框 */}
+                {bgNaturalSize.w > 0 && fields.map((f, i) => {
+                  // canvas 尺寸 = 当前 img 显示尺寸. 取 img 当前实际尺寸
+                  const imgEl = canvasRef.current?.querySelector('img')
+                  const rect = imgEl?.getBoundingClientRect()
+                  if (!rect) return null
+                  const sx = rect.width / bgNaturalSize.w
+                  const sy = rect.height / bgNaturalSize.h
+                  return (
+                    <div key={f._id} data-field-box
+                      onClick={(e) => { e.stopPropagation(); setActiveFieldId(f._id) }}
+                      className={`absolute border-2 cursor-pointer ${
+                        activeFieldId === f._id ? 'border-amber-400 bg-amber-400/10' : 'border-blue-400 bg-blue-400/5'
+                      }`}
+                      style={{ left: f.x * sx, top: f.y * sy, width: f.w * sx, height: f.h * sy }}
+                    >
+                      <div className="absolute -top-5 left-0 text-[10px] bg-[var(--text)] text-[var(--bg)] px-1 rounded whitespace-nowrap">
+                        #{i + 1} {f.label}
+                      </div>
+                    </div>
+                  )
+                })}
+
+                {/* 正在画的临时框 */}
+                {drawing && (
+                  <div className="absolute border-2 border-dashed border-amber-400 bg-amber-400/10 pointer-events-none"
+                    style={{
+                      left: Math.min(drawing.startX, drawing.curX),
+                      top: Math.min(drawing.startY, drawing.curY),
+                      width: Math.abs(drawing.curX - drawing.startX),
+                      height: Math.abs(drawing.curY - drawing.startY),
+                    }}
+                  />
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* 右侧: 字段属性编辑 */}
+          <div className="lg:w-80 flex-shrink-0 border-l border-[var(--border)] p-4 overflow-y-auto">
+            {activeField ? (
+              <FieldEditor
+                field={activeField}
+                fonts={fonts}
+                onChange={patch => updateField(activeField._id, patch)}
+                onRemove={() => removeField(activeField._id)}
+              />
+            ) : (
+              <div className="text-xs text-[var(--text-3)] py-6 text-center">
+                左侧字段表点一个 / 中间画一个新框
+                <br/>这里能编辑选中字段的字体/颜色/描边等
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** 右侧字段属性面板 */
+function FieldEditor({ field, fonts, onChange, onRemove }: {
+  field: UiTextField
+  fonts: FontOption[]
+  onChange: (patch: Partial<UiTextField>) => void
+  onRemove: () => void
+}) {
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <div className="text-sm font-medium">编辑字段</div>
+        <button onClick={onRemove} className="p-1 rounded text-red-400 hover:bg-red-950/30 cursor-pointer">
+          <Trash2 size={14}/>
+        </button>
+      </div>
+
+      <div>
+        <label className="text-xs text-[var(--text-3)]">字段名 (admin/用户都能看到)</label>
+        <input value={field.label} onChange={e => onChange({ label: e.target.value })}
+          className="w-full bg-[var(--bg)] border border-[var(--border)] rounded px-2 py-1.5 text-sm mt-1"/>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 text-xs text-[var(--text-3)]">
+        <div>X: <input type="number" value={field.x} onChange={e => onChange({ x: +e.target.value })} className="w-full bg-[var(--bg)] border border-[var(--border)] rounded px-1 py-0.5 mt-0.5 text-[var(--text)]"/></div>
+        <div>Y: <input type="number" value={field.y} onChange={e => onChange({ y: +e.target.value })} className="w-full bg-[var(--bg)] border border-[var(--border)] rounded px-1 py-0.5 mt-0.5 text-[var(--text)]"/></div>
+        <div>宽: <input type="number" value={field.w} onChange={e => onChange({ w: +e.target.value })} className="w-full bg-[var(--bg)] border border-[var(--border)] rounded px-1 py-0.5 mt-0.5 text-[var(--text)]"/></div>
+        <div>高: <input type="number" value={field.h} onChange={e => onChange({ h: +e.target.value })} className="w-full bg-[var(--bg)] border border-[var(--border)] rounded px-1 py-0.5 mt-0.5 text-[var(--text)]"/></div>
+      </div>
+
+      <div>
+        <label className="text-xs text-[var(--text-3)]">字体</label>
+        <select value={field.font_file} onChange={e => onChange({ font_file: e.target.value })}
+          className="w-full bg-[var(--bg)] border border-[var(--border)] rounded px-2 py-1.5 text-sm mt-1">
+          {fonts.map(f => <option key={f.file} value={f.file}>{f.label} {f.tag ? `(${f.tag})` : ''}</option>)}
+        </select>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="text-xs text-[var(--text-3)]">字号 (px)</label>
+          <input type="number" value={field.font_size} onChange={e => onChange({ font_size: +e.target.value })}
+            className="w-full bg-[var(--bg)] border border-[var(--border)] rounded px-2 py-1.5 text-sm mt-1"/>
+        </div>
+        <div>
+          <label className="text-xs text-[var(--text-3)]">对齐</label>
+          <select value={field.align} onChange={e => onChange({ align: e.target.value as any })}
+            className="w-full bg-[var(--bg)] border border-[var(--border)] rounded px-2 py-1.5 text-sm mt-1">
+            <option value="left">左</option><option value="center">中</option><option value="right">右</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="text-xs text-[var(--text-3)]">主色</label>
+          <input type="color" value={field.color} onChange={e => onChange({ color: e.target.value })}
+            className="w-full h-8 bg-[var(--bg)] border border-[var(--border)] rounded mt-1 cursor-pointer"/>
+        </div>
+        <div>
+          <label className="text-xs text-[var(--text-3)]">高亮色 ({'{}'}内字)</label>
+          <input type="color" value={field.highlight_color || '#FFD700'} onChange={e => onChange({ highlight_color: e.target.value })}
+            className="w-full h-8 bg-[var(--bg)] border border-[var(--border)] rounded mt-1 cursor-pointer"/>
+        </div>
+      </div>
+
+      <div className="border-t border-[var(--border)] pt-3">
+        <div className="text-xs text-[var(--text-3)] mb-2">描边 (在复杂背景上让字更清晰)</div>
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="text-[10px] text-[var(--text-3)]">描边色</label>
+            <input type="color" value={field.stroke_color || '#000000'} onChange={e => onChange({ stroke_color: e.target.value })}
+              className="w-full h-7 bg-[var(--bg)] border border-[var(--border)] rounded mt-0.5 cursor-pointer"/>
+          </div>
+          <div>
+            <label className="text-[10px] text-[var(--text-3)]">描边宽 (0=不描边)</label>
+            <input type="number" value={field.stroke_width} onChange={e => onChange({ stroke_width: +e.target.value })}
+              className="w-full h-7 bg-[var(--bg)] border border-[var(--border)] rounded px-1.5 text-sm mt-0.5"/>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <label className="text-xs text-[var(--text-3)]">用户输入示例 (提示文字)</label>
+        <input value={field.placeholder} onChange={e => onChange({ placeholder: e.target.value })}
+          placeholder={`例: 封面{邪修}`}
+          className="w-full bg-[var(--bg)] border border-[var(--border)] rounded px-2 py-1.5 text-sm mt-1"/>
+      </div>
+
+      <div>
+        <label className="text-xs text-[var(--text-3)]">最大字数 (0=不限)</label>
+        <input type="number" value={field.max_chars} onChange={e => onChange({ max_chars: +e.target.value })}
+          className="w-full bg-[var(--bg)] border border-[var(--border)] rounded px-2 py-1.5 text-sm mt-1"/>
+      </div>
+    </div>
   )
 }

@@ -697,3 +697,120 @@ def admin_delete_font(font_id: int, request: Request):
         except Exception as e:
             return {'success': True, 'warn': f'db 记录已删, 但磁盘文件没删干净: {e}'}
     return {'success': True}
+
+
+# ============== 封面模板库管理 ==============
+# admin 上传 底图 PNG (已传到 OSS) + 文字字段配置 → 入库
+# 用户合成封面时按模板渲染
+
+
+class CoverTextField(BaseModel):
+    """一个文字字段的所有渲染配置. 模板可以有 N 个字段, 用户填 N 个文本框"""
+    label: str                            # 给 admin/用户看的字段名 例 "主标题"
+    x: int                                # 文本框左上角 (像素, 相对底图)
+    y: int
+    w: int                                # 文本框最大宽 (超出自动换行/缩字)
+    h: int                                # 文本框最大高
+    font_file: str = 'SourceHanSansCN-Heavy.otf'  # 字体文件名 (字体库里的)
+    font_size: int = 120                  # 字号 (像素)
+    color: str = '#FFFFFF'                # 主文字色
+    highlight_color: Optional[str] = None # 大括号包的字用这个色 (例 用户填 "封面{邪修}" → 邪修染色)
+    stroke_color: Optional[str] = None    # 描边色 (None 不描边)
+    stroke_width: int = 0
+    shadow_color: Optional[str] = None    # 阴影色 (None 不阴影)
+    shadow_offset_x: int = 0
+    shadow_offset_y: int = 0
+    shadow_blur: int = 0
+    align: str = 'left'                   # left / center / right
+    max_chars: int = 0                    # 0 = 不限. 超过提示用户裁剪
+    placeholder: str = ''                 # 给用户的提示文字 例 "封面{邪修}"
+
+
+class AddCoverTemplateRequest(BaseModel):
+    name: str
+    category: str = 'other'
+    ratio: str = '3:4'                    # 9:16 / 3:4 / 16:9 / 1:1
+    bg_oss_key: str                       # admin 已经把底图 PNG 传到 OSS, 给 key
+    text_fields: list[CoverTextField]     # 至少 1 个
+
+
+@router.post("/cover-templates")
+def admin_add_cover_template(req: AddCoverTemplateRequest, request: Request):
+    admin_id = require_admin(request)
+    if req.ratio not in {'9:16', '3:4', '16:9', '1:1'}:
+        raise HTTPException(400, f'ratio 必须是 9:16/3:4/16:9/1:1')
+    valid_cats = {'kepu', 'zhenjing', 'gushi', 'jiaocheng', 'jianji', 'zhichang', 'xuexi', 'licai', 'other'}
+    if req.category not in valid_cats:
+        raise HTTPException(400, f'category 必须是 {valid_cats}')
+    if not req.text_fields or len(req.text_fields) < 1:
+        raise HTTPException(400, '至少要有 1 个文字字段')
+    if len(req.text_fields) > 10:
+        raise HTTPException(400, '最多 10 个文字字段')
+
+    import json as _json
+    text_fields_json = _json.dumps([f.model_dump() for f in req.text_fields], ensure_ascii=False)
+
+    conn = get_db()
+    cursor = conn.execute("""
+        INSERT INTO cover_template (name, category, ratio, bg_oss_key, text_fields_json, uploaded_by, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (req.name, req.category, req.ratio, req.bg_oss_key, text_fields_json, admin_id, time.time()))
+    new_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return {'success': True, 'id': new_id}
+
+
+@router.get("/cover-templates")
+def admin_list_cover_templates(request: Request):
+    """admin 后台列表: 带 OSS key 不签 URL (admin 端要 OSS 控制台看就自己看)"""
+    require_admin(request)
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT id, name, category, ratio, bg_oss_key, text_fields_json, preview_oss_key, uploaded_by, created_at
+        FROM cover_template ORDER BY created_at DESC
+    """).fetchall()
+    conn.close()
+
+    import json as _json
+    result = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d['text_fields'] = _json.loads(d.pop('text_fields_json') or '[]')
+        except Exception:
+            d['text_fields'] = []
+        result.append(d)
+    return {'templates': result}
+
+
+@router.get("/cover-templates/{template_id}")
+def admin_get_cover_template(template_id: int, request: Request):
+    require_admin(request)
+    conn = get_db()
+    row = conn.execute("""
+        SELECT id, name, category, ratio, bg_oss_key, text_fields_json, preview_oss_key, uploaded_by, created_at
+        FROM cover_template WHERE id = ?
+    """, (template_id,)).fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(404, '模板不存在')
+
+    import json as _json
+    d = dict(row)
+    try:
+        d['text_fields'] = _json.loads(d.pop('text_fields_json') or '[]')
+    except Exception:
+        d['text_fields'] = []
+    return d
+
+
+@router.delete("/cover-templates/{template_id}")
+def admin_delete_cover_template(template_id: int, request: Request):
+    require_admin(request)
+    conn = get_db()
+    conn.execute("DELETE FROM cover_template WHERE id = ?", (template_id,))
+    conn.commit()
+    conn.close()
+    # 注意: 不主动删 OSS 文件 (lifecycle 自动清, 已渲染的封面不受影响)
+    return {'success': True}

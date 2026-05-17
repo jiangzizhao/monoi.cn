@@ -229,3 +229,64 @@ export async function adminDeleteFont(font_id: number): Promise<{ success: boole
   if (!res.ok) throw new Error(data.detail || data.error || `delete failed ${res.status}`)
   return data
 }
+
+
+// ================= 封面模板库管理 =================
+
+export interface CoverTextField {
+  label: string                       // 字段名 例 "主标题"
+  x: number; y: number; w: number; h: number   // 位置/大小 (像素, 相对底图)
+  font_file: string                   // 字体库文件名
+  font_size: number
+  color: string                       // 主色 #RRGGBB
+  highlight_color?: string | null     // 大括号包的字用这个色
+  stroke_color?: string | null
+  stroke_width: number
+  shadow_color?: string | null
+  shadow_offset_x: number
+  shadow_offset_y: number
+  shadow_blur: number
+  align: 'left' | 'center' | 'right'
+  max_chars: number
+  placeholder: string
+}
+
+export interface AdminCoverTemplate {
+  id: number
+  name: string
+  category: string                    // kepu/zhenjing/gushi/jiaocheng/jianji/zhichang/xuexi/licai/other
+  ratio: '9:16' | '3:4' | '16:9' | '1:1'
+  bg_oss_key: string
+  preview_oss_key?: string | null
+  text_fields: CoverTextField[]
+  uploaded_by: number
+  created_at: number
+}
+
+export async function adminListCoverTemplates(): Promise<{ templates: AdminCoverTemplate[] }> {
+  return get('/api/admin/cover-templates')
+}
+
+export async function adminGetCoverTemplate(template_id: number): Promise<AdminCoverTemplate> {
+  return get(`/api/admin/cover-templates/${template_id}`)
+}
+
+export async function adminAddCoverTemplate(req: {
+  name: string
+  category: string
+  ratio: string
+  bg_oss_key: string
+  text_fields: CoverTextField[]
+}): Promise<{ success: boolean; id: number }> {
+  return post('/api/admin/cover-templates', req)
+}
+
+export async function adminDeleteCoverTemplate(template_id: number): Promise<{ success: boolean }> {
+  const res = await fetch(directBase + `/api/admin/cover-templates/${template_id}`, {
+    method: 'DELETE',
+    headers: headers(),
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.detail || data.error || `delete failed ${res.status}`)
+  return data
+}

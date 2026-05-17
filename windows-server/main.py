@@ -2389,6 +2389,19 @@ def bgm_library_proxy():
         raise HTTPException(503, "voice-server (9001) 未启动")
 
 
+@app.get("/api/voice/cover-templates")
+def cover_templates_proxy():
+    """转发到 voice-server: 封面模板库列表 (用户在合成封面时拉)"""
+    import requests as _req
+    try:
+        resp = _req.get(f"{VOICE_SERVER_URL}/cover-templates", timeout=15)
+        if resp.status_code != 200:
+            raise HTTPException(resp.status_code, f"voice-server 错误: {resp.text[:300]}")
+        return resp.json()
+    except _req.exceptions.ConnectionError:
+        raise HTTPException(503, "voice-server (9001) 未启动")
+
+
 @app.get("/api/voice/narration-video/{name}")
 def proxy_narration_video(name: str):
     """剪辑后的视频文件 (直接读 voice-server 输出目录, FileResponse 自动支持 HTTP Range,
