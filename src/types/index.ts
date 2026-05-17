@@ -61,6 +61,9 @@ export interface AudioResult {
   text_preview?: string
   speed?: string
   engine?: string
+  // V2: 去人声 BGM 接入 (TimelinePreview 能从历史选)
+  oss_key?: string                          // 后端原 OSS key, 给 /compose-footage 用作 bgm_oss_key
+  source?: 'voice' | 'vocal_removed_bgm'    // 'vocal_removed_bgm' = 这是去人声生成的 BGM, BGM 选择器扫这种
 }
 
 export interface KeptSegmentLite {

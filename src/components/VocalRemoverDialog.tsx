@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { X, Loader2, Upload, CheckCircle2, Download, Music, Scissors } from 'lucide-react'
 import { removeVocals, trimAudio, type RemoveVocalsResp } from '../services/audio'
 import { AudioWaveformTrimmer } from './AudioWaveformTrimmer'
+import { useChatStore, makeAssistantMsg } from '../store/chatStore'
 
 interface Props {
   open: boolean
@@ -10,6 +11,7 @@ interface Props {
 }
 
 export function VocalRemoverDialog({ open, onClose, onUseAsBgm }: Props) {
+  const chatStore = useChatStore()
   const [file, setFile] = useState<File | null>(null)
   const [processing, setProcessing] = useState(false)
   const [elapsed, setElapsed] = useState(0)
@@ -69,7 +71,6 @@ export function VocalRemoverDialog({ open, onClose, onUseAsBgm }: Props) {
 
   const handleTrim = async () => {
     if (!result || trimming) return
-    // 如果没动 trim handles (start=0, end=duration), 不裁剪
     if (Math.abs(trimStart) < 0.05 && Math.abs(trimEnd - result.duration_seconds) < 0.05) {
       alert('没有改起止时间, 跳过裁剪 (直接用原文件即可)')
       return
@@ -81,6 +82,29 @@ export function VocalRemoverDialog({ open, onClose, onUseAsBgm }: Props) {
     } catch (e: any) {
       setError(e.message || '裁剪失败')
     } finally { setTrimming(false) }
+  }
+
+  // 把当前 finalResult 作为 audio_player block 注入对话流
+  // (合成视频时 TimelinePreview 能从对话历史里扫这种 source='vocal_removed_bgm' 的, 用户能选)
+  const sendToChatAsBgm = () => {
+    if (!finalResult) return
+    const convId = chatStore.activeId
+    if (!convId) { alert('没活跃对话, 先建一个对话'); return }
+    const cleanName = (finalResult.original_filename || 'BGM').replace(/\.\w+$/, '') + (trimmedResult ? ' (去人声+裁剪)' : ' (去人声)')
+    const msg = makeAssistantMsg([
+      { type: 'text', content: `✓ 已生成 BGM: ${cleanName}` },
+      {
+        type: 'audio_player',
+        data: {
+          audio_url: finalResult.download_url,
+          duration_seconds: finalResult.duration_seconds,
+          voice_label: cleanName,
+          oss_key: finalResult.oss_key,
+          source: 'vocal_removed_bgm',
+        },
+      },
+    ])
+    chatStore.addMessage(convId, msg)
   }
 
   // 当前展示的"最终结果" — 裁剪过用 trimmedResult, 否则用原始 result
@@ -188,16 +212,20 @@ export function VocalRemoverDialog({ open, onClose, onUseAsBgm }: Props) {
 
             {error && <p className="text-xs text-red-400">{error}</p>}
 
-            {/* 下载 / 用作 BGM (用最终的 finalResult) */}
+            {/* 下载 / 用作 BGM / 发到对话 (用最终的 finalResult) */}
             <div className="flex flex-col gap-2">
+              <button onClick={() => { sendToChatAsBgm(); onClose() }}
+                className="py-2 rounded-xl bg-[var(--text)] text-[var(--bg)] text-sm hover:opacity-80 cursor-pointer">
+                ✓ 发到对话 (合成视频时能选)
+              </button>
               <a href={finalResult!.download_url} target="_blank" rel="noopener noreferrer" download
                 className="py-2 rounded-xl border border-[var(--border)] hover:bg-[var(--bg-hover)] text-sm flex items-center justify-center gap-2 cursor-pointer">
                 <Download size={14}/> 下载 BGM mp3
               </a>
               {onUseAsBgm && (
                 <button onClick={() => { onUseAsBgm(finalResult!.oss_key, result.original_filename.replace(/\.\w+$/, '') + (trimmedResult ? ' (去人声+裁剪)' : ' (去人声)')); onClose() }}
-                  className="py-2 rounded-xl bg-[var(--text)] text-[var(--bg)] text-sm hover:opacity-80 cursor-pointer">
-                  直接用作合成 BGM
+                  className="py-2 rounded-xl border border-[var(--border)] text-sm hover:bg-[var(--bg-hover)] cursor-pointer">
+                  直接用作当前合成 BGM
                 </button>
               )}
               <button onClick={() => { setResult(null); setFile(null); setTrimmedResult(null) }}

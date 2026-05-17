@@ -103,6 +103,7 @@ function normalizeBlock(block: unknown): MessageBlock | null {
       const data = isRecord(block.data) ? block.data : {}
       const url = asString(data.audio_url)
       if (!url) return null
+      const src = asString(data.source) as any
       return {
         type: 'audio_player',
         data: {
@@ -113,6 +114,8 @@ function normalizeBlock(block: unknown): MessageBlock | null {
           text_preview: asString(data.text_preview) || undefined,
           speed: asString(data.speed) || undefined,
           engine: asString(data.engine) || undefined,
+          oss_key: asString(data.oss_key) || undefined,
+          source: (src === 'voice' || src === 'vocal_removed_bgm') ? src : undefined,
         },
       }
     }

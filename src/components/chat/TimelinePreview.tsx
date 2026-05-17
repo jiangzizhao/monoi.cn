@@ -491,6 +491,37 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
               </div>
             ) : (
               <div className="flex flex-col gap-2">
+                {/* 扫对话历史里去人声生成的 BGM, 让用户能直接选 */}
+                {(() => {
+                  const conv = chatStore.conversations.find(c => c.id === chatStore.activeId)
+                  if (!conv) return null
+                  const bgmHistory: { oss_key: string; name: string; duration?: number }[] = []
+                  for (const msg of conv.messages) {
+                    for (const block of msg.blocks) {
+                      if (block.type === 'audio_player' && (block.data as any).source === 'vocal_removed_bgm' && (block.data as any).oss_key) {
+                        bgmHistory.push({
+                          oss_key: (block.data as any).oss_key,
+                          name: (block.data as any).voice_label || 'BGM',
+                          duration: (block.data as any).duration_seconds,
+                        })
+                      }
+                    }
+                  }
+                  if (bgmHistory.length === 0) return null
+                  return (
+                    <div className="border border-[var(--border)] rounded-lg p-2 flex flex-col gap-1">
+                      <div className="text-[10px] text-[var(--text-3)] px-1">从去人声历史选 ({bgmHistory.length} 首)</div>
+                      {bgmHistory.slice().reverse().map((h, i) => (
+                        <button key={h.oss_key + i}
+                          onClick={() => setBgm({ oss_key: h.oss_key, name: h.name, preview_url: '' })}
+                          className="flex items-center justify-between px-2 py-1.5 rounded text-xs text-[var(--text-2)] hover:bg-[var(--bg-hover)] cursor-pointer">
+                          <span className="truncate flex-1 text-left">🎵 {h.name}</span>
+                          {h.duration && <span className="text-[10px] text-[var(--text-3)] flex-shrink-0 ml-2">{h.duration.toFixed(0)}s</span>}
+                        </button>
+                      ))}
+                    </div>
+                  )
+                })()}
                 <button
                   onClick={() => bgmFileRef.current?.click()}
                   disabled={bgmUploading}
