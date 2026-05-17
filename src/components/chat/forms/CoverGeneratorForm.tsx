@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { X, Loader2, Download as DownloadIcon, Upload, Image as ImageIcon } from 'lucide-react'
+import { X, Loader2, Download as DownloadIcon, Upload, Image as ImageIcon, LayoutTemplate } from 'lucide-react'
 import { useChatStore, makeAssistantMsg } from '../../../store/chatStore'
+import { TemplateCoverPicker } from './TemplateCoverPicker'
 
 interface Props {
   // 从对话最近的合成视频或口播视频拿
@@ -24,7 +25,7 @@ const RATIOS: { id: Ratio; label: string }[] = [
 ]
 
 export function CoverGeneratorForm({ defaultVideoOssKey, defaultVideoUrl, onClose }: Props) {
-  const [mode, setMode] = useState<'generate' | 'upload'>('generate')
+  const [mode, setMode] = useState<'template' | 'generate' | 'upload'>('template')
   const videoRef = useRef<HTMLVideoElement>(null)
   const [videoDuration, setVideoDuration] = useState(0)
   const [frameTime, setFrameTime] = useState(1.0)
@@ -226,10 +227,16 @@ export function CoverGeneratorForm({ defaultVideoOssKey, defaultVideoUrl, onClos
 
         <div className="flex border-b border-[var(--border)]">
           <button
+            onClick={() => setMode('template')}
+            className={`flex-1 py-2.5 text-sm cursor-pointer transition-colors ${mode === 'template' ? 'text-[var(--text)] border-b-2 border-[var(--text)]' : 'text-[var(--text-3)]'}`}
+          >
+            <LayoutTemplate size={14} className="inline mr-1.5"/> 模板库选
+          </button>
+          <button
             onClick={() => setMode('generate')}
             className={`flex-1 py-2.5 text-sm cursor-pointer transition-colors ${mode === 'generate' ? 'text-[var(--text)] border-b-2 border-[var(--text)]' : 'text-[var(--text-3)]'}`}
           >
-            <ImageIcon size={14} className="inline mr-1.5"/> 视频截帧作底
+            <ImageIcon size={14} className="inline mr-1.5"/> 视频截帧
           </button>
           <button
             onClick={() => setMode('upload')}
@@ -240,7 +247,9 @@ export function CoverGeneratorForm({ defaultVideoOssKey, defaultVideoUrl, onClos
         </div>
 
         <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-4">
-          {/* 源选择: 视频截帧 OR 自传图 */}
+          {mode === 'template' && <TemplateCoverPicker/>}
+
+          {/* 源选择: 视频截帧 OR 自传图 (mode = 'template' 时不显示这一整块, 模板自己控制) */}
           {mode === 'generate' && (
             <>
               {defaultVideoUrl && (
@@ -304,7 +313,9 @@ export function CoverGeneratorForm({ defaultVideoOssKey, defaultVideoUrl, onClos
             </div>
           )}
 
-          {/* 共享区 (两个 tab 都用): 标题 + 自定义参数 + 字体 + 比例 */}
+          {/* 共享区 (generate / upload 两个 tab 用, template 不用因为模板自己控制): 标题 + 自定义参数 + 字体 + 比例 */}
+          {mode !== 'template' && (<>
+          {/* spacer: 下面这整块都是 generate/upload 共享区, 用 fragment 包起来 */}
               {/* 标题 */}
               <div className="flex flex-col gap-2">
                 <input
@@ -548,12 +559,13 @@ export function CoverGeneratorForm({ defaultVideoOssKey, defaultVideoUrl, onClos
               </div>
             </div>
           )}
+          </>)}
         </div>
 
         <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-[var(--border)]">
           <button onClick={onClose} className="px-4 py-2 text-sm text-[var(--text-2)] hover:bg-[var(--bg-hover)] rounded-lg transition-colors cursor-pointer">关闭</button>
-          {(() => {
-            // 两个 tab 都用同一个生成按钮: generate tab 需要 defaultVideoOssKey, upload tab 需要 uploadedCover
+          {mode !== 'template' && (() => {
+            // template mode 用 TemplateCoverPicker 自己的按钮, 这里不显示
             const sourceReady = mode === 'generate' ? !!defaultVideoOssKey : !!uploadedCover
             const disabled = generating || !title.trim() || !sourceReady
             return (

@@ -1,0 +1,272 @@
+import { useEffect, useRef, useState } from 'react'
+import { Loader2, Upload, Sparkles, CheckCircle2, Download, ArrowLeft, ImageIcon } from 'lucide-react'
+import {
+  listCoverTemplates, coverRemoveBg, renderCoverFromTemplate,
+  type CoverTemplate,
+} from '../../../services/cover'
+import { useChatStore, makeAssistantMsg } from '../../../store/chatStore'
+
+const CAT_LABEL: Record<string, string> = {
+  kepu: '科普', zhenjing: '震惊', gushi: '故事', jiaocheng: '教程',
+  jianji: '极简', zhichang: '职场', xuexi: '学习', licai: '理财', other: '其他',
+}
+
+export function TemplateCoverPicker() {
+  const chatStore = useChatStore()
+  const [templates, setTemplates] = useState<CoverTemplate[] | null>(null)
+  const [loadErr, setLoadErr] = useState('')
+  const [selected, setSelected] = useState<CoverTemplate | null>(null)
+
+  // 选中模板后: 用户填的每个字段 + 人物图 + 生成结果
+  const [userTexts, setUserTexts] = useState<Record<string, string>>({})
+  const [personFile, setPersonFile] = useState<File | null>(null)
+  const [personLocalUrl, setPersonLocalUrl] = useState('')      // 本地 ObjectURL 临时预览
+  const [personOssKey, setPersonOssKey] = useState('')          // 抠完后的 OSS key
+  const [personPreviewUrl, setPersonPreviewUrl] = useState('')  // 抠完后服务器返的签名 URL
+  const [personProcessing, setPersonProcessing] = useState(false)
+  const [personErr, setPersonErr] = useState('')
+
+  const [generating, setGenerating] = useState(false)
+  const [genErr, setGenErr] = useState('')
+  const [result, setResult] = useState<{ download_url: string; width: number; height: number } | null>(null)
+
+  const personFileRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    listCoverTemplates()
+      .then(r => setTemplates(r.templates || []))
+      .catch(e => setLoadErr(e.message || '加载失败'))
+  }, [])
+
+  // 选模板时, 用 placeholder 初始化每个字段输入
+  useEffect(() => {
+    if (!selected) return
+    const init: Record<string, string> = {}
+    for (const f of selected.text_fields) init[f.label] = f.placeholder || ''
+    setUserTexts(init)
+    setPersonFile(null); setPersonLocalUrl(''); setPersonOssKey(''); setPersonPreviewUrl(''); setPersonErr('')
+    setResult(null); setGenErr('')
+  }, [selected?.id])
+
+  const handlePersonFile = async (f: File) => {
+    if (!selected?.person_slot) return
+    if (f.size > 20 * 1024 * 1024) { setPersonErr('人物图太大 (>20MB)'); return }
+    setPersonFile(f); setPersonLocalUrl(URL.createObjectURL(f)); setPersonErr('')
+    setPersonOssKey(''); setPersonPreviewUrl('')
+    setPersonProcessing(true)
+    try {
+      const r = await coverRemoveBg(f, {
+        stroke_enabled: selected.person_slot.stroke_enabled,
+        stroke_color: selected.person_slot.stroke_color,
+        stroke_width: selected.person_slot.stroke_width,
+      })
+      setPersonOssKey(r.oss_key)
+      setPersonPreviewUrl(r.preview_url)
+    } catch (e: any) {
+      setPersonErr(e.message || '抠图失败')
+    } finally {
+      setPersonProcessing(false)
+    }
+  }
+
+  const handleGenerate = async () => {
+    if (!selected) return
+    setGenerating(true); setGenErr(''); setResult(null)
+    try {
+      const r = await renderCoverFromTemplate({
+        template_id: selected.id,
+        user_texts: userTexts,
+        person_oss_key: personOssKey || undefined,
+      })
+      setResult({ download_url: r.download_url, width: r.width, height: r.height })
+    } catch (e: any) {
+      setGenErr(e.message || '生成失败')
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  const sendToChat = () => {
+    if (!result || !selected) return
+    const convId = chatStore.activeId
+    if (!convId) { alert('没活跃对话, 先建一个对话'); return }
+    const msg = makeAssistantMsg([
+      { type: 'text', content: `✓ 已用模板 "${selected.name}" 生成封面` },
+      { type: 'cover_result', data: { covers: [{ ratio: selected.ratio, url: result.download_url }] } },
+    ])
+    chatStore.addMessage(convId, msg)
+  }
+
+  // ============ 模板列表 ============
+  if (!selected) {
+    if (loadErr) return <div className="text-xs text-red-400 bg-red-950/20 border border-red-900/30 rounded-lg px-3 py-2">{loadErr}</div>
+    if (!templates) return <div className="flex items-center justify-center py-12 text-sm text-[var(--text-3)]"><Loader2 size={16} className="animate-spin mr-2"/> 加载模板...</div>
+    if (templates.length === 0) return <div className="text-center py-12 text-sm text-[var(--text-3)]">还没有可用模板, 联系管理员上传</div>
+
+    // 按类目分组
+    const grouped = templates.reduce<Record<string, CoverTemplate[]>>((acc, t) => {
+      const k = t.category || 'other'
+      ;(acc[k] = acc[k] || []).push(t)
+      return acc
+    }, {})
+
+    return (
+      <div className="flex flex-col gap-4">
+        <div className="text-xs text-[var(--text-3)]">选一个模板 → 填字 → 生成封面. 模板里的字体/颜色/位置都已经调好.</div>
+        {Object.entries(grouped).map(([cat, ts]) => (
+          <div key={cat}>
+            <div className="text-[11px] text-[var(--text-3)] px-1 mb-2">{CAT_LABEL[cat] || cat} · {ts.length} 个</div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              {ts.map(t => (
+                <button
+                  key={t.id}
+                  onClick={() => setSelected(t)}
+                  className="relative group rounded-lg border border-[var(--border)] overflow-hidden hover:border-[var(--text-3)] cursor-pointer transition-colors"
+                >
+                  <div className="aspect-[3/4] bg-[var(--bg)] relative">
+                    {t.bg_url ? (
+                      <img src={t.bg_url} alt={t.name} className="w-full h-full object-cover"/>
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-[var(--text-3)] text-xs">{t.ratio}</div>
+                    )}
+                  </div>
+                  <div className="px-2 py-1.5 bg-[var(--bg-card)] text-xs text-[var(--text)] truncate text-left">{t.name}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  // ============ 选了模板, 填字 + 上传人物 + 生成 ============
+  const personSlot = selected.person_slot
+  const personReady = !personSlot || !!personOssKey   // 没人物坑直接 OK; 有人物坑必须抠完
+  const canGenerate = personReady && !generating && Object.values(userTexts).some(v => v.trim())
+
+  return (
+    <div className="flex flex-col gap-4">
+      <button onClick={() => { setSelected(null); setResult(null) }}
+        className="flex items-center gap-1 text-xs text-[var(--text-3)] hover:text-[var(--text)] cursor-pointer self-start">
+        <ArrowLeft size={12}/> 换个模板
+      </button>
+
+      <div className="flex flex-col sm:flex-row gap-4">
+        {/* 左: 模板预览 + 已抠人物覆盖 */}
+        <div className="sm:w-48 flex-shrink-0">
+          <div className="relative aspect-[3/4] rounded-lg overflow-hidden border border-[var(--border)] bg-[var(--bg)]">
+            {selected.bg_url && <img src={selected.bg_url} alt="" className="absolute inset-0 w-full h-full object-cover"/>}
+            {/* 抠完的人物盖在底图上 (只是参考, 实际渲染服务器算) */}
+            {personPreviewUrl && personSlot && (
+              <img src={personPreviewUrl} alt=""
+                className="absolute object-cover pointer-events-none"
+                style={{
+                  left: `${personSlot.x / 1080 * 100}%`,
+                  top: `${personSlot.y / (selected.ratio === '3:4' ? 1440 : 1920) * 100}%`,
+                  width: `${personSlot.w / 1080 * 100}%`,
+                  height: `${personSlot.h / (selected.ratio === '3:4' ? 1440 : 1920) * 100}%`,
+                }}/>
+            )}
+          </div>
+          <div className="text-xs text-[var(--text-2)] mt-2 text-center">{selected.name}</div>
+          <div className="text-[10px] text-[var(--text-3)] text-center">{selected.ratio}</div>
+        </div>
+
+        {/* 右: 填字 + 人物 */}
+        <div className="flex-1 min-w-0 flex flex-col gap-3">
+          {/* 文字字段 */}
+          {selected.text_fields.map((f, i) => (
+            <div key={i} className="flex flex-col gap-1">
+              <label className="text-xs text-[var(--text-3)] flex items-center gap-2">
+                <span>{f.label}</span>
+                {f.highlight_color && (
+                  <span className="text-[10px] text-amber-500" title={`{} 包的字会用颜色 ${f.highlight_color}`}>
+                    支持 {'{}'} 高亮
+                  </span>
+                )}
+                {f.max_chars > 0 && (
+                  <span className="text-[10px] text-[var(--text-3)]">最多 {f.max_chars} 字</span>
+                )}
+              </label>
+              <input
+                value={userTexts[f.label] || ''}
+                onChange={e => setUserTexts(prev => ({ ...prev, [f.label]: e.target.value }))}
+                placeholder={f.placeholder || `输入${f.label}`}
+                className="bg-[var(--bg-input)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-[var(--text)] placeholder:text-[var(--text-3)] focus:outline-none focus:border-[var(--text-3)]"
+              />
+            </div>
+          ))}
+
+          {/* 人物上传 (有人物坑才显示) */}
+          {personSlot && (
+            <div className="flex flex-col gap-2 border border-[var(--border)] rounded-lg p-3">
+              <div className="text-xs text-[var(--text-2)] flex items-center gap-1.5">
+                <Sparkles size={12} className="text-amber-500"/>
+                人物图 (AI 自动抠背景 {personSlot.stroke_enabled ? `+ ${personSlot.stroke_color} 描边` : ''})
+              </div>
+              {!personFile && (
+                <button onClick={() => personFileRef.current?.click()}
+                  className="flex items-center justify-center gap-2 px-4 py-6 rounded-lg border border-dashed border-[var(--border)] text-xs text-[var(--text-2)] hover:bg-[var(--bg-hover)] cursor-pointer">
+                  <Upload size={14}/> 选张人物照片 (jpg/png, ≤20MB)
+                </button>
+              )}
+              {personFile && (
+                <div className="flex items-center gap-3">
+                  <img src={personPreviewUrl || personLocalUrl}
+                    alt="" className="w-16 h-16 rounded object-cover border border-[var(--border)] bg-[var(--bg)]"/>
+                  <div className="flex-1 min-w-0 text-xs">
+                    {personProcessing ? (
+                      <span className="text-amber-500 flex items-center gap-1.5"><Loader2 size={12} className="animate-spin"/> AI 抠图中 5-15s</span>
+                    ) : personOssKey ? (
+                      <span className="text-green-500 flex items-center gap-1.5"><CheckCircle2 size={12}/> 抠图完成</span>
+                    ) : personErr ? (
+                      <span className="text-red-400">{personErr}</span>
+                    ) : null}
+                    <div className="text-[10px] text-[var(--text-3)] truncate mt-0.5">{personFile.name}</div>
+                  </div>
+                  <button onClick={() => personFileRef.current?.click()}
+                    className="text-[10px] text-[var(--text-3)] hover:text-[var(--text)] cursor-pointer">
+                    换一张
+                  </button>
+                </div>
+              )}
+              <input ref={personFileRef} type="file" accept="image/*" className="hidden"
+                onChange={e => { const f = e.target.files?.[0]; if (f) handlePersonFile(f); if (personFileRef.current) personFileRef.current.value = '' }}/>
+            </div>
+          )}
+
+          {genErr && <div className="text-xs text-red-400 bg-red-950/20 border border-red-900/30 rounded-lg px-3 py-2">{genErr}</div>}
+
+          <button onClick={handleGenerate} disabled={!canGenerate}
+            className={`py-2.5 rounded-lg text-sm transition-colors ${
+              canGenerate ? 'bg-[var(--text)] text-[var(--bg)] hover:opacity-80 cursor-pointer' : 'bg-[var(--bg-hover)] text-[var(--text-3)] cursor-not-allowed'
+            }`}>
+            {generating ? <span className="flex items-center justify-center gap-2"><Loader2 size={14} className="animate-spin"/> 渲染中 (后端 Pillow 合成, ~5s)</span>
+              : !personReady ? '先上传人物图' : '生成封面'}
+          </button>
+        </div>
+      </div>
+
+      {/* 生成结果 */}
+      {result && (
+        <div className="border border-[var(--border)] rounded-lg p-3 flex flex-col gap-3 bg-[var(--bg)]">
+          <div className="flex items-center gap-2 text-green-500 text-sm">
+            <CheckCircle2 size={16}/> 封面生成成功 · {result.width}×{result.height}
+          </div>
+          <img src={result.download_url} alt="封面" className="w-full max-h-[40vh] object-contain rounded bg-black"/>
+          <div className="flex gap-2">
+            <button onClick={sendToChat}
+              className="flex-1 py-2 rounded-lg bg-[var(--text)] text-[var(--bg)] text-sm hover:opacity-80 cursor-pointer flex items-center justify-center gap-1.5">
+              <ImageIcon size={14}/> 发到对话
+            </button>
+            <a href={result.download_url} target="_blank" rel="noopener noreferrer" download
+              className="px-4 py-2 rounded-lg border border-[var(--border)] text-sm hover:bg-[var(--bg-hover)] cursor-pointer flex items-center gap-1.5">
+              <Download size={14}/> 下载
+            </a>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
