@@ -280,6 +280,19 @@ def init_billing_tables():
     """)
     c.execute("CREATE INDEX IF NOT EXISTS idx_bgm_library_category ON bgm_library(category, created_at DESC)")
 
+    # 字体库 (admin 上传的 ttf/otf, 跟内置 _FONT_CATALOG 合并给前端选)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS font_library (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            label TEXT NOT NULL,                   -- 显示名 例 "庞门正道粗书"
+            file TEXT NOT NULL UNIQUE,             -- D:\\monoi-server\\fonts\\ 下的文件名 例 "pmzd.ttf"
+            tag TEXT,                              -- 风格标签 例 "粗黑·标题首选"
+            license_note TEXT,                     -- 例 "免费可商用 — 官方授权"
+            uploaded_by INTEGER,                   -- admin user_id
+            created_at REAL NOT NULL
+        )
+    """)
+
     # 5. 推广绑定 (用户首次注册时记, 终身不变)
     c.execute("""
         CREATE TABLE IF NOT EXISTS referral_binding (

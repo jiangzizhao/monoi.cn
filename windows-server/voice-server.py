@@ -1866,13 +1866,47 @@ def _render_template_pillow(img, template: str, title: str, subtitle: str,
 
 @app.get("/cover-fonts")
 def list_cover_fonts():
-    """列出 server 上可用的字体 (扫 D:\\monoi-server\\fonts\\, 跟 _FONT_CATALOG 对比).
+    """列出 server 上可用的字体. 两个来源合并:
+       1) _FONT_CATALOG 内置硬编码 (一键启动.bat 默认装的)
+       2) font_library 表 — admin 后台手动上传的
     前端用这个接口拉字体下拉选项."""
     available = []
+    seen_files = set()
+    # 1. 内置字体清单 (有文件才算)
     for item in _FONT_CATALOG:
         path = os.path.join(_FONT_DIR_PROJECT, item['file'])
         if os.path.exists(path):
-            available.append(item)
+            available.append({**item, 'source': 'builtin'})
+            seen_files.add(item['file'])
+
+    # 2. admin 上传的字体 (扫 font_library 表)
+    try:
+        import sqlite3 as _sq
+        db_path = _find_monoi_db()
+        conn = _sq.connect(db_path, timeout=2)
+        conn.row_factory = _sq.Row
+        try:
+            rows = conn.execute("""
+                SELECT label, file, tag FROM font_library ORDER BY created_at DESC
+            """).fetchall()
+        finally:
+            conn.close()
+        for r in rows:
+            if r['file'] in seen_files:
+                continue                                   # 跟内置重名跳过
+            path = os.path.join(_FONT_DIR_PROJECT, r['file'])
+            if not os.path.exists(path):
+                continue                                   # 磁盘没文件了 (被手删) 跳过
+            available.append({
+                'file': r['file'],
+                'label': r['label'],
+                'tag': r['tag'] or '',
+                'source': 'admin',
+            })
+            seen_files.add(r['file'])
+    except Exception as e:
+        print(f"[cover-fonts] 拉 font_library 失败 (用内置兜底): {e}", flush=True)
+
     return {'fonts': available}
 
 

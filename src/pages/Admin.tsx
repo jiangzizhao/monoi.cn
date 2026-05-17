@@ -2,21 +2,22 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, Users, ShoppingBag, DollarSign, BarChart3, Search, X, AlertTriangle,
-  Music, Trash2, Plus, Loader2, Play, Pause,
+  Music, Trash2, Plus, Loader2, Play, Pause, Type,
 } from 'lucide-react'
 import {
   adminListUsers, adminUserDetail, adminGrantSubscription, adminGrantCredits,
   adminSetReferrerLevel, adminSetAdminFlag, adminListOrders, adminListWithdrawals,
   adminProcessWithdrawal, adminStats,
   adminListBgm, adminAddBgm, adminDeleteBgm,
+  adminListFonts, adminUploadFont, adminDeleteFont,
   type AdminUserRow, type AdminOrderRow, type AdminWithdrawalRow, type AdminStats,
-  type AdminBgmRow,
+  type AdminBgmRow, type AdminFontRow,
 } from '../services/admin'
 import { fetchMyProfile } from '../services/billing'
 import { isLoggedIn } from '../lib/auth'
 
 
-type TabKey = 'dashboard' | 'users' | 'orders' | 'withdrawals' | 'bgm'
+type TabKey = 'dashboard' | 'users' | 'orders' | 'withdrawals' | 'bgm' | 'fonts'
 
 const TABS: { key: TabKey; label: string; Icon: any }[] = [
   { key: 'dashboard', label: '数据看板', Icon: BarChart3 },
@@ -24,6 +25,7 @@ const TABS: { key: TabKey; label: string; Icon: any }[] = [
   { key: 'orders', label: '订单管理', Icon: ShoppingBag },
   { key: 'withdrawals', label: '提现申请', Icon: DollarSign },
   { key: 'bgm', label: 'BGM 库', Icon: Music },
+  { key: 'fonts', label: '字体库', Icon: Type },
 ]
 
 const BGM_CATEGORIES = [
@@ -117,6 +119,7 @@ export default function Admin() {
           {activeTab === 'orders' && <OrdersTab/>}
           {activeTab === 'withdrawals' && <WithdrawalsTab/>}
           {activeTab === 'bgm' && <BgmLibraryTab/>}
+          {activeTab === 'fonts' && <FontLibraryTab/>}
         </div>
       </div>
     </div>
@@ -945,6 +948,209 @@ function BgmLibraryTab() {
               </table>
             </div>
           ))}
+        </div>
+      )}
+    </>
+  )
+}
+
+
+// ========== 字体库管理 ==========
+
+function FontLibraryTab() {
+  const [list, setList] = useState<AdminFontRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState('')
+
+  // 上传表单
+  const [showForm, setShowForm] = useState(false)
+  const [file, setFile] = useState<File | null>(null)
+  const [label, setLabel] = useState('')
+  const [tag, setTag] = useState('')
+  const [licenseNote, setLicenseNote] = useState('')
+  const [uploading, setUploading] = useState(false)
+  const [formErr, setFormErr] = useState('')
+
+  const reload = () => {
+    setLoading(true); setErr('')
+    adminListFonts().then(r => setList(r.fonts || [])).catch(e => setErr(e.message)).finally(() => setLoading(false))
+  }
+  useEffect(() => { reload() }, [])
+
+  const handleFile = (f: File) => {
+    setFile(f); setFormErr('')
+    if (!label) setLabel(f.name.replace(/\.\w+$/, ''))
+  }
+
+  const handleSubmit = async () => {
+    if (!file) { setFormErr('请先选字体文件'); return }
+    if (!label.trim()) { setFormErr('请填字体名'); return }
+    if (!/\.(ttf|otf|ttc)$/i.test(file.name)) { setFormErr('只支持 .ttf / .otf / .ttc'); return }
+    setUploading(true); setFormErr('')
+    try {
+      await adminUploadFont({
+        file,
+        label: label.trim(),
+        tag: tag.trim(),
+        license_note: licenseNote.trim(),
+      })
+      // 重置 + reload
+      setFile(null); setLabel(''); setTag(''); setLicenseNote(''); setShowForm(false)
+      reload()
+    } catch (e: any) {
+      setFormErr(e.message || '上传失败')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const handleDelete = async (id: number, label: string) => {
+    if (!confirm(`删除字体 "${label}"? 已用该字体的封面渲染不受影响 (磁盘文件也会一起删).`)) return
+    try {
+      await adminDeleteFont(id)
+      reload()
+    } catch (e: any) {
+      alert('删除失败: ' + e.message)
+    }
+  }
+
+  return (
+    <>
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <div className="text-base font-semibold">字体库管理</div>
+          <div className="text-xs text-[var(--text-3)] mt-0.5">
+            合成封面时, 用户可选这些字体. 内置已有 10 个 (思源黑体/优设标题/站酷系列等), 这里加自定义字体.
+            <span className="text-amber-500"> 注意: 只能传免费可商用字体, 法律责任自担.</span>
+          </div>
+        </div>
+        <button
+          onClick={() => setShowForm(s => !s)}
+          className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[var(--text)] text-[var(--bg)] text-sm cursor-pointer"
+        >
+          <Plus size={14}/> 上传字体
+        </button>
+      </div>
+
+      {showForm && (
+        <div className="bg-[var(--bg-card)] rounded-xl p-4 border border-[var(--border)] flex flex-col gap-3">
+          <div className="text-sm font-medium">上传新字体</div>
+
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-[var(--text-3)]">字体文件 (.ttf / .otf / .ttc, 最大 30MB)</label>
+            <input
+              type="file" accept=".ttf,.otf,.ttc"
+              onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f) }}
+              className="text-xs text-[var(--text-2)]"
+            />
+            {file && (
+              <div className="text-[11px] text-[var(--text-3)] mt-0.5">
+                {file.name} · {(file.size / 1024 / 1024).toFixed(2)} MB
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-[var(--text-3)]">字体名 (用户能看到)</label>
+              <input
+                value={label} onChange={e => setLabel(e.target.value)}
+                placeholder="例: 庞门正道粗书"
+                className="bg-[var(--bg)] border border-[var(--border)] rounded px-2 py-1.5 text-sm"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-[var(--text-3)]">风格标签 (可空)</label>
+              <input
+                value={tag} onChange={e => setTag(e.target.value)}
+                placeholder="例: 粗黑·标题首选"
+                className="bg-[var(--bg)] border border-[var(--border)] rounded px-2 py-1.5 text-sm"
+              />
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-[var(--text-3)]">授权说明 (建议填, 保护自己)</label>
+            <input
+              value={licenseNote} onChange={e => setLicenseNote(e.target.value)}
+              placeholder="例: 庞门正道官方公告免费商用 / SIL OFL 协议 / 已购买字魂年费"
+              className="bg-[var(--bg)] border border-[var(--border)] rounded px-2 py-1.5 text-sm"
+            />
+          </div>
+
+          {formErr && <p className="text-xs text-red-400">{formErr}</p>}
+
+          <div className="flex gap-2">
+            <button
+              onClick={handleSubmit}
+              disabled={uploading || !file}
+              className="px-4 py-2 rounded-lg bg-[var(--text)] text-[var(--bg)] text-sm cursor-pointer disabled:opacity-50"
+            >
+              {uploading ? <span className="flex items-center gap-1.5"><Loader2 size={12} className="animate-spin"/> 上传中</span> : '提交'}
+            </button>
+            <button
+              onClick={() => { setShowForm(false); setFile(null); setLabel(''); setFormErr('') }}
+              disabled={uploading}
+              className="px-4 py-2 rounded-lg border border-[var(--border)] text-sm cursor-pointer disabled:opacity-50"
+            >
+              取消
+            </button>
+          </div>
+        </div>
+      )}
+
+      {err && <div className="text-xs text-red-400 bg-red-950/20 border border-red-900/30 rounded-lg px-3 py-2">{err}</div>}
+
+      {loading ? (
+        <div className="flex items-center justify-center py-12 text-sm text-[var(--text-3)]">
+          <Loader2 size={16} className="animate-spin mr-2"/> 加载中...
+        </div>
+      ) : list.length === 0 ? (
+        <div className="bg-[var(--bg-card)] rounded-xl p-8 border border-[var(--border)] text-center text-sm text-[var(--text-3)]">
+          还没上传过字体. 内置的 10 个字体一直可用, 这里加自定义的会跟内置合并到选区.
+        </div>
+      ) : (
+        <div className="bg-[var(--bg-card)] rounded-xl border border-[var(--border)] overflow-hidden">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-[var(--text-3)] border-b border-[var(--border)]">
+                <th className="px-4 py-2 text-left">字体名</th>
+                <th className="px-4 py-2 text-left">风格</th>
+                <th className="px-4 py-2 text-left">文件名</th>
+                <th className="px-4 py-2 text-left">授权说明</th>
+                <th className="px-4 py-2 text-left">状态</th>
+                <th className="px-4 py-2 text-left">添加时间</th>
+                <th className="px-4 py-2 text-right">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {list.map(f => (
+                <tr key={f.id} className="border-b border-[var(--border)] hover:bg-[var(--bg-hover)]">
+                  <td className="px-4 py-2 text-[var(--text)]">{f.label}</td>
+                  <td className="px-4 py-2 text-[var(--text-3)]">{f.tag || '-'}</td>
+                  <td className="px-4 py-2 text-[var(--text-3)] font-mono text-[10px]">{f.file}</td>
+                  <td className="px-4 py-2 text-[var(--text-3)] truncate max-w-[200px]">{f.license_note || '-'}</td>
+                  <td className="px-4 py-2">
+                    {f.file_exists ? (
+                      <span className="text-green-500 text-[10px]">✓ 文件正常</span>
+                    ) : (
+                      <span className="text-red-400 text-[10px]">✗ 磁盘文件不在</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2 text-[var(--text-3)]">{fmtTime(f.created_at)}</td>
+                  <td className="px-4 py-2 text-right">
+                    <button
+                      onClick={() => handleDelete(f.id, f.label)}
+                      className="p-1 rounded text-red-400 hover:bg-red-950/30 cursor-pointer"
+                      title="删除 (会同时删磁盘文件)"
+                    >
+                      <Trash2 size={14}/>
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </>

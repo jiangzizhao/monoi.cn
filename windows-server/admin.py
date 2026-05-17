@@ -16,10 +16,12 @@ V1 功能:
 V2 留: 退款 / 系统配置热改 / 公告栏 / 黑名单关键词
 """
 
+import os
+import re
 import sqlite3
 import time
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Request, Query
+from fastapi import APIRouter, HTTPException, Request, Query, UploadFile, File, Form
 from pydantic import BaseModel
 
 DB_PATH = "monoi.db"
@@ -577,4 +579,121 @@ def admin_delete_bgm(bgm_id: int, request: Request):
     conn.commit()
     conn.close()
     # 注意: 不主动删 OSS 文件 (lifecycle 自动清, 或者别的 BGM 用着同一 oss_key)
+    return {'success': True}
+
+
+# ============== 字体库管理 ==============
+# admin 上传 .ttf/.otf → 写到 D:\monoi-server\fonts\ → 入库
+# voice-server 的 /cover-fonts 同时读 _FONT_CATALOG (内置) + font_library 表 (admin 加的)
+
+# 字体目录: 跟 voice-server.py 的 _FONT_DIR_PROJECT 保持一致
+_FONT_DIR = r'D:\monoi-server\fonts'
+
+
+@router.get("/fonts")
+def admin_list_fonts(request: Request):
+    """列出所有 admin 上传的字体 (内置那 10 个不算, 在 voice-server.py 硬编码)"""
+    require_admin(request)
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT id, label, file, tag, license_note, uploaded_by, created_at
+        FROM font_library ORDER BY created_at DESC
+    """).fetchall()
+    conn.close()
+    # 顺便检查文件是不是真在磁盘上 (没在标记一下, 可能上传后被手删了)
+    result = []
+    for r in rows:
+        d = dict(r)
+        d['file_exists'] = os.path.exists(os.path.join(_FONT_DIR, r['file']))
+        result.append(d)
+    return {'fonts': result}
+
+
+@router.post("/fonts")
+async def admin_upload_font(
+    request: Request,
+    file: UploadFile = File(...),
+    label: str = Form(...),
+    tag: str = Form(''),
+    license_note: str = Form(''),
+):
+    """上传 .ttf/.otf 字体文件到 D:\\monoi-server\\fonts\\ + 入库"""
+    admin_id = require_admin(request)
+
+    if not label.strip():
+        raise HTTPException(400, '字体名 (label) 不能为空')
+
+    # 校验扩展名
+    fname = file.filename or ''
+    ext_match = re.search(r'\.(ttf|otf|ttc)$', fname.lower())
+    if not ext_match:
+        raise HTTPException(400, '只支持 .ttf / .otf / .ttc 字体')
+
+    # 规范文件名: 去掉中文 / 空格 / 特殊符, 防止文件系统 / URL 问题
+    safe_base = re.sub(r'[^A-Za-z0-9_.-]', '_', fname).strip('_')
+    if not safe_base:
+        safe_base = f"font_{int(time.time())}{ext_match.group(0)}"
+
+    # 写到 fonts 目录, 防同名覆盖 (加时间戳)
+    os.makedirs(_FONT_DIR, exist_ok=True)
+    target = os.path.join(_FONT_DIR, safe_base)
+    if os.path.exists(target):
+        # 同名已存在 — 加时间戳后缀
+        stem, ext = os.path.splitext(safe_base)
+        safe_base = f"{stem}_{int(time.time())}{ext}"
+        target = os.path.join(_FONT_DIR, safe_base)
+
+    # 流式写入 (大字体可能 10MB+)
+    content = await file.read()
+    if len(content) > 30 * 1024 * 1024:
+        raise HTTPException(413, '字体文件太大 (>30MB)')
+    with open(target, 'wb') as f:
+        f.write(content)
+
+    # 入库
+    conn = get_db()
+    try:
+        cursor = conn.execute("""
+            INSERT INTO font_library (label, file, tag, license_note, uploaded_by, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (label.strip(), safe_base, tag.strip() or None, license_note.strip() or None, admin_id, time.time()))
+        new_id = cursor.lastrowid
+        conn.commit()
+    except sqlite3.IntegrityError:
+        # 文件名冲突 (UNIQUE 约束): 删文件 + 提示
+        try: os.remove(target)
+        except: pass
+        raise HTTPException(409, '字体已存在 (file 字段重复)')
+    finally:
+        conn.close()
+
+    return {
+        'success': True,
+        'id': new_id,
+        'file': safe_base,
+        'label': label.strip(),
+        'size_kb': round(len(content) / 1024, 1),
+    }
+
+
+@router.delete("/fonts/{font_id}")
+def admin_delete_font(font_id: int, request: Request):
+    """删字体: 从库里去掉, 同时删磁盘文件 (彻底)"""
+    require_admin(request)
+    conn = get_db()
+    row = conn.execute("SELECT file FROM font_library WHERE id = ?", (font_id,)).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(404, '字体不存在')
+    conn.execute("DELETE FROM font_library WHERE id = ?", (font_id,))
+    conn.commit()
+    conn.close()
+
+    # 删磁盘文件
+    fpath = os.path.join(_FONT_DIR, row['file'])
+    if os.path.exists(fpath):
+        try:
+            os.remove(fpath)
+        except Exception as e:
+            return {'success': True, 'warn': f'db 记录已删, 但磁盘文件没删干净: {e}'}
     return {'success': True}

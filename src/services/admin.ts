@@ -177,3 +177,55 @@ export async function adminDeleteBgm(bgm_id: number): Promise<{ success: boolean
   if (!res.ok) throw new Error(data.detail || data.error || `delete failed ${res.status}`)
   return data
 }
+
+
+// ================= 字体库管理 =================
+
+export interface AdminFontRow {
+  id: number
+  label: string
+  file: string                          // D:\monoi-server\fonts\ 下的文件名
+  tag: string
+  license_note: string
+  uploaded_by: number
+  created_at: number
+  file_exists: boolean                  // 后端检查文件是不是真在磁盘上
+}
+
+export async function adminListFonts(): Promise<{ fonts: AdminFontRow[] }> {
+  return get('/api/admin/fonts')
+}
+
+/** 上传字体. 走 multipart form-data, 不能用 post 函数 (它强制 application/json) */
+export async function adminUploadFont(req: {
+  file: File
+  label: string
+  tag?: string
+  license_note?: string
+}): Promise<{ success: boolean; id: number; file: string; size_kb: number }> {
+  const token = getToken()
+  if (!token) throw new Error('未登录')
+  const form = new FormData()
+  form.append('file', req.file)
+  form.append('label', req.label)
+  if (req.tag) form.append('tag', req.tag)
+  if (req.license_note) form.append('license_note', req.license_note)
+  const res = await fetch(directBase + '/api/admin/fonts', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.detail || data.error || `上传失败 ${res.status}`)
+  return data
+}
+
+export async function adminDeleteFont(font_id: number): Promise<{ success: boolean }> {
+  const res = await fetch(directBase + `/api/admin/fonts/${font_id}`, {
+    method: 'DELETE',
+    headers: headers(),
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.detail || data.error || `delete failed ${res.status}`)
+  return data
+}
