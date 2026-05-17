@@ -1196,12 +1196,21 @@ async def remove_vocals(file: UploadFile = File(...)):
             print(f"[remove-vocals] 未知异常: {e}\n{traceback.format_exc()}", flush=True)
             raise HTTPException(500, f'去人声异常: {e}')
 
-        # 3. 上传 OSS
+        # 3. 上传 OSS (加 3 次重试, 防 SSL 握手抖动)
         oss_key = f"outputs/{job_id}.mp3"
-        try:
-            oss_upload(oss_key, bgm_mp3, content_type='audio/mpeg')
-        except Exception as e:
-            raise HTTPException(500, f'OSS 上传失败: {e}')
+        last_err = None
+        for attempt in range(3):
+            try:
+                oss_upload(oss_key, bgm_mp3, content_type='audio/mpeg')
+                last_err = None
+                break
+            except Exception as e:
+                last_err = e
+                if attempt < 2:
+                    print(f"[remove-vocals] OSS 上传失败重试 {attempt+1}/3: {str(e)[:200]}", flush=True)
+                    time.sleep(2)
+        if last_err:
+            raise HTTPException(500, f'OSS 上传失败 (重试 3 次都不行): {str(last_err)[:300]}')
 
         download_url = oss_sign_get(oss_key, expires=24 * 3600)
         return {
