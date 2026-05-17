@@ -61,11 +61,14 @@ function AssetThumb({ asset, selected, onSelect }: { asset: VideoAsset; selected
         </div>
       )}
       {selected && <div className="absolute inset-0 bg-[var(--text)]/20 flex items-center justify-center"><Check size={20} className="text-white drop-shadow"/></div>}
-      <div className="absolute top-1 left-1">
-        <span className="text-[10px] px-1.5 py-0.5 rounded font-medium text-white bg-black/60">
-          {asset.source === 'pexels' ? 'P' : asset.source === 'pixabay' ? 'Px' : '自传'}
-        </span>
-      </div>
+      {/* 角标: 只标"自传" (你自己传过的), Pexels/Pixabay 不标 — 都是免费可商用, 区分没意义 */}
+      {asset.source === 'upload' && (
+        <div className="absolute top-1 left-1">
+          <span className="text-[10px] px-1.5 py-0.5 rounded font-medium text-white bg-black/60">
+            自传
+          </span>
+        </div>
+      )}
       <a href={asset.source_url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
         className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded bg-black/60">
         <ExternalLink size={10} className="text-white"/>
