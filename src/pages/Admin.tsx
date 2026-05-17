@@ -121,7 +121,8 @@ function DashboardTab() {
   if (err) return <div className="text-sm text-red-400">{err}</div>
   if (!data) return <div className="text-sm text-[var(--text-3)]">加载中...</div>
 
-  const max7d = Math.max(...data.revenue.daily_7d.map(d => d.amount), 1)
+  const daily7d = data.revenue?.daily_7d ?? []
+  const max7d = Math.max(...daily7d.map(d => d.amount), 1)
 
   const REF_LEVEL_LABEL: Record<string, string> = { normal: '普通', advanced: '高级', partner: '合伙人' }
   return (
@@ -140,7 +141,7 @@ function DashboardTab() {
       <div className="p-5 rounded-2xl border border-[var(--border)] bg-[var(--bg-card)]">
         <div className="text-sm font-medium mb-3">近 7 日每日营收</div>
         <div className="flex items-end gap-2 h-32">
-          {data.revenue.daily_7d.map((d, i) => (
+          {daily7d.map((d, i) => (
             <div key={i} className="flex-1 flex flex-col items-center gap-1">
               <div className="text-[10px] text-[var(--text-3)]">¥{d.amount.toFixed(0)}</div>
               <div className="w-full bg-[var(--text)] rounded-t" style={{ height: `${(d.amount / max7d) * 100}%`, minHeight: '2px' }}/>
@@ -167,8 +168,7 @@ function DashboardTab() {
             </thead>
             <tbody className="divide-y divide-[var(--border-subtle)]">
               {['pro_monthly', 'max_monthly', 'flagship_yearly'].map(tier => {
-                const t = data.tiers[tier]
-                if (!t) return null
+                const t = data.tiers?.[tier] || { count: 0, pct_of_paying: 0, pct_of_total: 0 }
                 return (
                   <tr key={tier}>
                     <td className="py-2 text-[var(--text-2)]">{TIER_LABEL[tier]}</td>
@@ -200,17 +200,19 @@ function DashboardTab() {
           </thead>
           <tbody className="divide-y divide-[var(--border-subtle)]">
             {['normal', 'advanced', 'partner'].map(level => {
-              const r = data.referrer_levels[level]
-              if (!r) return null
+              const r = data.referrer_levels?.[level] || {
+                count: 0, total_brought: 0, new_today: 0,
+                pending_cash: 0, pending_credits: 0, total_withdrawn: 0,
+              }
               return (
                 <tr key={level}>
                   <td className="py-2 text-[var(--text-2)]">{REF_LEVEL_LABEL[level]}</td>
                   <td className="py-2 text-right font-medium">{r.count}</td>
                   <td className="py-2 text-right text-green-500">+{r.new_today}</td>
                   <td className="py-2 text-right">{r.total_brought}</td>
-                  <td className="py-2 text-right text-amber-500">¥{r.pending_cash.toFixed(2)}</td>
+                  <td className="py-2 text-right text-amber-500">¥{(r.pending_cash || 0).toFixed(2)}</td>
                   <td className="py-2 text-right text-amber-500">{r.pending_credits}</td>
-                  <td className="py-2 text-right text-[var(--text-3)]">¥{r.total_withdrawn.toFixed(2)}</td>
+                  <td className="py-2 text-right text-[var(--text-3)]">¥{(r.total_withdrawn || 0).toFixed(2)}</td>
                 </tr>
               )
             })}
