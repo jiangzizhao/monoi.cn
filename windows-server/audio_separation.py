@@ -36,12 +36,12 @@ def detect_gpu() -> bool:
 
 
 def separate_vocals(input_path: str, output_dir: str, model: str = 'htdemucs') -> Tuple[str, str]:
-    """跑 demucs 分离, 返 (vocals_path, no_vocals_path). 两个都是 wav 格式.
+    """跑 demucs 分离, 返 (vocals_path, no_vocals_path). 用 --mp3 直接写 mp3 (绕过 torchaudio.save).
 
     Args:
         input_path: 输入音频文件绝对路径
         output_dir: 输出目录 (会创建 output_dir/<model>/<input_name>/ 子目录)
-        model: demucs 模型, 默认 htdemucs (最新最准, 也是默认)
+        model: demucs 模型, 默认 htdemucs (最新最准)
 
     Raises:
         RuntimeError: demucs 跑失败
@@ -51,41 +51,32 @@ def separate_vocals(input_path: str, output_dir: str, model: str = 'htdemucs') -
 
     os.makedirs(output_dir, exist_ok=True)
 
-    # 用 sys.executable 而不是 'python' — 保证用跟 voice-server 同一个 Python (venv 那个),
-    # 不然 subprocess 可能跑系统 Python 找不到 venv 里装的 demucs
+    # --mp3: demucs 内部用 ffmpeg 直接写 mp3, 绕开 torchaudio.save (新版 torchaudio 要 torchcodec
+    # Windows 装不上). 顺便省了我们再 wav→mp3 一步.
+    # sys.executable: 保证用跟 voice-server 同一 Python (venv 那个), 不要走系统 python.
     cmd = [
         sys.executable, '-m', 'demucs',
         '-n', model,
-        '--two-stems=vocals',     # 只分 vocals/no_vocals, 比 4-stem 快一倍
+        '--two-stems=vocals',
+        '--mp3', '--mp3-bitrate=192',
         '-o', output_dir,
         input_path,
     ]
     print(f"[demucs] 开始分离: {os.path.basename(input_path)} (GPU={detect_gpu()}, py={sys.executable})", flush=True)
-    proc = subprocess.run(cmd, capture_output=True, timeout=600)   # 10min 上限
+    proc = subprocess.run(cmd, capture_output=True, timeout=600)
     if proc.returncode != 0:
         err = proc.stderr.decode('utf-8', errors='ignore')[-500:]
         raise RuntimeError(f'demucs 失败: {err}')
 
-    # 输出路径: output_dir/<model>/<input_filename_without_ext>/vocals.wav + no_vocals.wav
+    # 输出路径: output_dir/<model>/<input_filename_without_ext>/vocals.mp3 + no_vocals.mp3
     input_name = os.path.splitext(os.path.basename(input_path))[0]
     stem_dir = os.path.join(output_dir, model, input_name)
-    vocals = os.path.join(stem_dir, 'vocals.wav')
-    no_vocals = os.path.join(stem_dir, 'no_vocals.wav')
+    vocals = os.path.join(stem_dir, 'vocals.mp3')
+    no_vocals = os.path.join(stem_dir, 'no_vocals.mp3')
     if not (os.path.exists(vocals) and os.path.exists(no_vocals)):
         raise RuntimeError(f'demucs 跑完但找不到输出文件: {stem_dir}')
     print(f"[demucs] 分离完成: vocals={os.path.getsize(vocals)//1024}KB, bgm={os.path.getsize(no_vocals)//1024}KB", flush=True)
     return vocals, no_vocals
-
-
-def wav_to_mp3(wav_path: str, mp3_path: str, bitrate: str = '192k') -> None:
-    """ffmpeg 转 wav → mp3. 节省 ~80% 空间."""
-    proc = subprocess.run(
-        ['ffmpeg', '-y', '-i', wav_path, '-b:a', bitrate, mp3_path],
-        capture_output=True, timeout=120,
-    )
-    if proc.returncode != 0:
-        err = proc.stderr.decode('utf-8', errors='ignore')[-300:]
-        raise RuntimeError(f'ffmpeg wav→mp3 失败: {err}')
 
 
 def remove_vocals_to_bgm(input_path: str, output_mp3_path: str, work_dir: Optional[str] = None) -> dict:
@@ -102,8 +93,10 @@ def remove_vocals_to_bgm(input_path: str, output_mp3_path: str, work_dir: Option
     if work_dir is None:
         work_dir = os.path.join(os.path.dirname(input_path), '_demucs_work')
 
-    vocals_wav, no_vocals_wav = separate_vocals(input_path, work_dir)
-    wav_to_mp3(no_vocals_wav, output_mp3_path)
+    _, no_vocals_mp3 = separate_vocals(input_path, work_dir)
+    # 直接 copy 到目标位置 (demucs 已经输出 mp3, 不用再 ffmpeg 转码)
+    shutil.copy(no_vocals_mp3, output_mp3_path)
+
     # ffprobe 测一下输出时长
     try:
         probe = subprocess.run(
@@ -114,7 +107,7 @@ def remove_vocals_to_bgm(input_path: str, output_mp3_path: str, work_dir: Option
         duration = float(probe.stdout.strip()) if probe.returncode == 0 else 0
     except Exception:
         duration = 0
-    # 清掉 demucs 中间 wav (大头), 留 mp3
+    # 清掉 demucs 中间产物
     try:
         shutil.rmtree(work_dir, ignore_errors=True)
     except Exception:
