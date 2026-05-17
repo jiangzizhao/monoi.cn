@@ -1192,10 +1192,23 @@ function CoverTemplateTab() {
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
   const [showEditor, setShowEditor] = useState(false)
+  // admin list 端点不签 URL, 复用公共端点 /api/voice/cover-templates 拿带签 bg_url
+  const [bgUrlMap, setBgUrlMap] = useState<Record<number, string>>({})
 
   const reload = () => {
     setLoading(true); setErr('')
     adminListCoverTemplates().then(r => setList(r.templates || [])).catch(e => setErr(e.message)).finally(() => setLoading(false))
+    // 同时拉公共端点拿签名 URL (复用阶段 2 已有的端点, 不动后端)
+    fetch(directBase + '/api/voice/cover-templates')
+      .then(r => r.json())
+      .then(d => {
+        const m: Record<number, string> = {}
+        for (const t of (d.templates || [])) {
+          if (t.bg_url) m[t.id] = t.bg_url
+        }
+        setBgUrlMap(m)
+      })
+      .catch(() => {})
   }
   useEffect(() => { reload() }, [])
 
@@ -1252,20 +1265,49 @@ function CoverTemplateTab() {
                 {COVER_CAT_LABEL[cat] || cat} · {ts.length} 个
               </div>
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 p-3">
-                {ts.map(t => (
-                  <div key={t.id} className="relative group rounded-lg border border-[var(--border)] overflow-hidden">
-                    <div className="aspect-[3/4] bg-[var(--bg)] flex items-center justify-center text-xs text-[var(--text-3)]">
-                      <span>{t.ratio} · {t.text_fields.length} 个字段</span>
+                {ts.map(t => {
+                  const bgUrl = bgUrlMap[t.id]    // 从公共端点拉到的签名 URL
+                  return (
+                    <div key={t.id} className="relative group rounded-lg border border-[var(--border)] overflow-hidden">
+                      <div className="aspect-[3/4] bg-[var(--bg)] flex items-center justify-center text-xs text-[var(--text-3)] relative">
+                        {bgUrl ? (
+                          <img src={bgUrl} alt={t.name} className="w-full h-full object-cover"/>
+                        ) : (
+                          <span>{t.ratio} · {t.text_fields.length} 个字段</span>
+                        )}
+                        {/* 字段框 overlay (薄薄一层, 让 admin 看到布局) */}
+                        {bgUrl && t.text_fields.map((f, i) => (
+                          <div key={i} className="absolute border border-amber-400/70 bg-amber-400/10 pointer-events-none"
+                            style={{
+                              left: `${f.x / 1080 * 100}%`,
+                              top: `${f.y / (t.ratio === '3:4' ? 1440 : 1920) * 100}%`,
+                              width: `${f.w / 1080 * 100}%`,
+                              height: `${f.h / (t.ratio === '3:4' ? 1440 : 1920) * 100}%`,
+                            }}/>
+                        ))}
+                        {bgUrl && t.person_slot && (
+                          <div className="absolute border border-pink-400/70 bg-pink-400/10 pointer-events-none"
+                            style={{
+                              left: `${t.person_slot.x / 1080 * 100}%`,
+                              top: `${t.person_slot.y / (t.ratio === '3:4' ? 1440 : 1920) * 100}%`,
+                              width: `${t.person_slot.w / 1080 * 100}%`,
+                              height: `${t.person_slot.h / (t.ratio === '3:4' ? 1440 : 1920) * 100}%`,
+                            }}/>
+                        )}
+                      </div>
+                      <div className="px-2 py-1.5 bg-[var(--bg-card)] text-xs text-[var(--text)] truncate flex items-center gap-1">
+                        <span className="flex-1 truncate">{t.name}</span>
+                        <span className="text-[10px] text-[var(--text-3)]">{t.ratio}·{t.text_fields.length}字</span>
+                      </div>
+                      <button
+                        onClick={() => handleDelete(t.id, t.name)}
+                        className="absolute top-1 right-1 p-1 rounded bg-red-500/80 text-white opacity-0 group-hover:opacity-100 cursor-pointer"
+                      >
+                        <Trash2 size={12}/>
+                      </button>
                     </div>
-                    <div className="px-2 py-1.5 bg-[var(--bg-card)] text-xs text-[var(--text)] truncate">{t.name}</div>
-                    <button
-                      onClick={() => handleDelete(t.id, t.name)}
-                      className="absolute top-1 right-1 p-1 rounded bg-red-500/80 text-white opacity-0 group-hover:opacity-100 cursor-pointer"
-                    >
-                      <Trash2 size={12}/>
-                    </button>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
           ))}
