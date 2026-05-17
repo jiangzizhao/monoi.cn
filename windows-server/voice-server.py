@@ -1981,6 +1981,164 @@ def list_cover_templates():
     return {'templates': templates}
 
 
+# ============== 模板封面: 人物抠图 + 模板渲染 ==============
+
+
+@app.post("/cover-remove-bg")
+async def cover_remove_bg(
+    file: UploadFile = File(...),
+    stroke_enabled: bool = Form(True),
+    stroke_color: str = Form('#FFFFFF'),
+    stroke_width: int = Form(12),
+):
+    """用户上传人物照片 → rembg 抠图 → (可选) 描边 → 透明 PNG → OSS.
+    返签名 URL + oss_key, 前端预览 + 给 /render-cover-from-template 用."""
+    import uuid as _uuid
+    from oss_helper import oss_upload, oss_sign_get
+
+    if not file.filename:
+        raise HTTPException(400, '没上传文件')
+    raw = await file.read()
+    if len(raw) > 20 * 1024 * 1024:
+        raise HTTPException(413, '人物图太大 (>20MB)')
+    if len(raw) < 100:
+        raise HTTPException(400, '文件太小, 可能空文件')
+
+    # 抠图 + 描边
+    try:
+        from cover_compositor import remove_bg_with_stroke
+        out_png = remove_bg_with_stroke(
+            raw,
+            stroke_enabled=stroke_enabled,
+            stroke_color=stroke_color,
+            stroke_width=stroke_width,
+        )
+    except ImportError as e:
+        raise HTTPException(500, f'rembg 没装: {e}. venv 跑: pip install rembg[cpu]')
+    except Exception as e:
+        raise HTTPException(500, f'抠图失败: {e}')
+
+    # 上传 OSS
+    out_key = f"cover_person/{int(time.time())}_{_uuid.uuid4().hex[:8]}.png"
+    try:
+        oss_upload(out_key, out_png, content_type='image/png')
+        signed = oss_sign_get(out_key, expires=24 * 3600)
+    except Exception as e:
+        raise HTTPException(502, f'OSS 上传失败: {e}')
+
+    return {
+        'success': True,
+        'oss_key': out_key,
+        'preview_url': signed,
+        'size_kb': round(len(out_png) / 1024, 1),
+        'has_stroke': stroke_enabled,
+    }
+
+
+class RenderCoverFromTemplateRequest(BaseModel):
+    template_id: int
+    user_texts: dict                       # {field_label: 用户填的文字} 例 {'主标题': '封面{邪修}', '副标题': '太香啦'}
+    person_oss_key: Optional[str] = None   # /cover-remove-bg 返的, 无人物模板留空
+
+
+@app.post("/render-cover-from-template")
+def render_cover_from_template(req: RenderCoverFromTemplateRequest):
+    """按模板配置渲染封面: 下载底图 + (可选) 下载抠好的人物 → Pillow 合成 → OSS"""
+    import sqlite3 as _sq
+    import json as _json
+    import tempfile
+    import uuid as _uuid
+    from oss_helper import oss_download, oss_upload, oss_sign_get
+
+    # 1. 拉模板配置
+    db_path = _find_monoi_db()
+    conn = _sq.connect(db_path, timeout=2)
+    conn.row_factory = _sq.Row
+    try:
+        row = conn.execute("""
+            SELECT bg_oss_key, text_fields_json, person_slot_json, ratio
+            FROM cover_template WHERE id = ?
+        """, (req.template_id,)).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        raise HTTPException(404, f'模板 {req.template_id} 不存在')
+
+    try:
+        text_fields = _json.loads(row['text_fields_json'] or '[]')
+    except Exception:
+        text_fields = []
+    person_slot = None
+    if row['person_slot_json']:
+        try:
+            person_slot = _json.loads(row['person_slot_json'])
+        except Exception:
+            pass
+
+    # 2. 工作目录, 下载底图
+    job_id = f"render_cover_{int(time.time()*1000)}_{_uuid.uuid4().hex[:6]}"
+    work_dir = os.path.join(tempfile.gettempdir(), job_id)
+    os.makedirs(work_dir, exist_ok=True)
+
+    try:
+        bg_path = os.path.join(work_dir, 'bg.png')
+        try:
+            oss_download(row['bg_oss_key'], bg_path)
+        except Exception as e:
+            raise HTTPException(502, f'底图下载失败: {e}')
+
+        # 3. 下载抠好的人物 (有的话)
+        person_path = None
+        if person_slot and req.person_oss_key:
+            person_path = os.path.join(work_dir, 'person.png')
+            try:
+                oss_download(req.person_oss_key, person_path)
+            except Exception as e:
+                print(f"[render-cover] 人物下载失败, 跳过人物: {e}", flush=True)
+                person_path = None
+
+        # 4. 合成
+        from cover_compositor import render_cover
+        try:
+            out_img = render_cover(
+                bg_path=bg_path,
+                text_fields=text_fields,
+                user_texts=req.user_texts or {},
+                person_slot=person_slot,
+                person_png_path=person_path,
+            )
+        except Exception as e:
+            raise HTTPException(500, f'封面合成失败: {e}')
+
+        # 5. 上传 OSS, 返签名 URL
+        out_path = os.path.join(work_dir, 'cover.png')
+        # 注意: 转 RGB 存 JPG 体积更小, 但有人物坑透明区会变白; 保留 PNG 兼容性更好
+        out_img.convert('RGB').save(out_path, 'JPEG', quality=92)
+        out_key = f"cover_rendered/{int(time.time())}_{_uuid.uuid4().hex[:8]}.jpg"
+        with open(out_path, 'rb') as f:
+            data = f.read()
+        try:
+            oss_upload(out_key, data, content_type='image/jpeg')
+            signed = oss_sign_get(out_key, expires=24 * 3600)
+        except Exception as e:
+            raise HTTPException(502, f'OSS 上传失败: {e}')
+
+        return {
+            'success': True,
+            'oss_key': out_key,
+            'download_url': signed,
+            'size_kb': round(len(data) / 1024, 1),
+            'width': out_img.width, 'height': out_img.height,
+        }
+    finally:
+        # 清工作目录
+        try:
+            import shutil as _sh
+            _sh.rmtree(work_dir, ignore_errors=True)
+        except Exception:
+            pass
+
+
 @app.post("/generate-cover")
 def generate_cover(req: CoverRequest):
     """ffmpeg 截帧 + scale → Pillow 渲染模板 → 上传 OSS"""

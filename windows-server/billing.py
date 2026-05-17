@@ -302,12 +302,19 @@ def init_billing_tables():
             ratio TEXT NOT NULL DEFAULT '3:4',     -- 9:16 / 3:4 / 16:9 / 1:1 (底图比例)
             bg_oss_key TEXT NOT NULL,              -- 底图 PNG 上传到 OSS
             text_fields_json TEXT NOT NULL,        -- JSON 数组, 每元素 {label,x,y,w,h,font_file,font_size,color,highlight_color,stroke_*,shadow_*,align,max_chars,placeholder}
+            person_slot_json TEXT,                 -- (可选) 人物坑配置 {x,y,w,h,stroke_color,stroke_width,fit_mode} — 不要人物的模板填 NULL
             preview_oss_key TEXT,                  -- (可选) 一张带示例标题的预览图 (admin 上传时 server 渲染好缓存)
             uploaded_by INTEGER,
             created_at REAL NOT NULL
         )
     """)
     c.execute("CREATE INDEX IF NOT EXISTS idx_cover_template_category ON cover_template(category, created_at DESC)")
+
+    # 给老表加 person_slot_json (老 db 跑过没这列时, 加一下)
+    try:
+        c.execute("ALTER TABLE cover_template ADD COLUMN person_slot_json TEXT")
+    except Exception:
+        pass    # 已经有了, 跳过
 
     # 5. 推广绑定 (用户首次注册时记, 终身不变)
     c.execute("""

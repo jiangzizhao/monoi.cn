@@ -726,12 +726,26 @@ class CoverTextField(BaseModel):
     placeholder: str = ''                 # 给用户的提示文字 例 "封面{邪修}"
 
 
+class CoverPersonSlot(BaseModel):
+    """模板里给用户人物图预留的坑位. 用户上传一张人物图 → rembg 抠图 → 按 fit_mode
+    塞进这个坑. 可选描边让人物从背景分离更显眼."""
+    x: int
+    y: int
+    w: int
+    h: int
+    stroke_enabled: bool = True
+    stroke_color: str = '#FFFFFF'
+    stroke_width: int = 12                 # 像素, 1080×1440 上 12px 比较合适
+    fit_mode: str = 'cover'                # cover (按比例填满裁多余) / contain (按比例完整显示)
+
+
 class AddCoverTemplateRequest(BaseModel):
     name: str
     category: str = 'other'
     ratio: str = '3:4'                    # 9:16 / 3:4 / 16:9 / 1:1
     bg_oss_key: str                       # admin 已经把底图 PNG 传到 OSS, 给 key
     text_fields: list[CoverTextField]     # 至少 1 个
+    person_slot: Optional[CoverPersonSlot] = None   # 没人物的模板留 None
 
 
 @router.post("/cover-templates")
@@ -749,16 +763,36 @@ def admin_add_cover_template(req: AddCoverTemplateRequest, request: Request):
 
     import json as _json
     text_fields_json = _json.dumps([f.model_dump() for f in req.text_fields], ensure_ascii=False)
+    person_slot_json = _json.dumps(req.person_slot.model_dump(), ensure_ascii=False) if req.person_slot else None
 
     conn = get_db()
     cursor = conn.execute("""
-        INSERT INTO cover_template (name, category, ratio, bg_oss_key, text_fields_json, uploaded_by, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (req.name, req.category, req.ratio, req.bg_oss_key, text_fields_json, admin_id, time.time()))
+        INSERT INTO cover_template (name, category, ratio, bg_oss_key, text_fields_json, person_slot_json, uploaded_by, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (req.name, req.category, req.ratio, req.bg_oss_key, text_fields_json, person_slot_json, admin_id, time.time()))
     new_id = cursor.lastrowid
     conn.commit()
     conn.close()
     return {'success': True, 'id': new_id}
+
+
+def _parse_template_row(r):
+    """sqlite Row → dict, 把 text_fields_json / person_slot_json 解出来"""
+    import json as _json
+    d = dict(r)
+    try:
+        d['text_fields'] = _json.loads(d.pop('text_fields_json') or '[]')
+    except Exception:
+        d['text_fields'] = []
+    raw_person = d.pop('person_slot_json', None)
+    if raw_person:
+        try:
+            d['person_slot'] = _json.loads(raw_person)
+        except Exception:
+            d['person_slot'] = None
+    else:
+        d['person_slot'] = None
+    return d
 
 
 @router.get("/cover-templates")
@@ -767,21 +801,11 @@ def admin_list_cover_templates(request: Request):
     require_admin(request)
     conn = get_db()
     rows = conn.execute("""
-        SELECT id, name, category, ratio, bg_oss_key, text_fields_json, preview_oss_key, uploaded_by, created_at
+        SELECT id, name, category, ratio, bg_oss_key, text_fields_json, person_slot_json, preview_oss_key, uploaded_by, created_at
         FROM cover_template ORDER BY created_at DESC
     """).fetchall()
     conn.close()
-
-    import json as _json
-    result = []
-    for r in rows:
-        d = dict(r)
-        try:
-            d['text_fields'] = _json.loads(d.pop('text_fields_json') or '[]')
-        except Exception:
-            d['text_fields'] = []
-        result.append(d)
-    return {'templates': result}
+    return {'templates': [_parse_template_row(r) for r in rows]}
 
 
 @router.get("/cover-templates/{template_id}")
@@ -789,20 +813,13 @@ def admin_get_cover_template(template_id: int, request: Request):
     require_admin(request)
     conn = get_db()
     row = conn.execute("""
-        SELECT id, name, category, ratio, bg_oss_key, text_fields_json, preview_oss_key, uploaded_by, created_at
+        SELECT id, name, category, ratio, bg_oss_key, text_fields_json, person_slot_json, preview_oss_key, uploaded_by, created_at
         FROM cover_template WHERE id = ?
     """, (template_id,)).fetchone()
     conn.close()
     if not row:
         raise HTTPException(404, '模板不存在')
-
-    import json as _json
-    d = dict(row)
-    try:
-        d['text_fields'] = _json.loads(d.pop('text_fields_json') or '[]')
-    except Exception:
-        d['text_fields'] = []
-    return d
+    return _parse_template_row(row)
 
 
 @router.delete("/cover-templates/{template_id}")

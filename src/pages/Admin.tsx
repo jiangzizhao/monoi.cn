@@ -1297,6 +1297,11 @@ function CoverTemplateEditor({ onClose, onSaved }: { onClose: () => void; onSave
 
   const [fields, setFields] = useState<UiTextField[]>([])
   const [activeFieldId, setActiveFieldId] = useState<string | null>(null)
+  // 人物坑 (最多 1 个), null = 这个模板没人物
+  const [personSlot, setPersonSlot] = useState<CoverPersonSlot | null>(null)
+  // 'text' 拖框 → 加文字字段; 'person' 拖框 → 设/换人物坑; 'person_edit' → 选中人物坑编辑属性
+  const [drawMode, setDrawMode] = useState<'text' | 'person'>('text')
+  const [personSelected, setPersonSelected] = useState(false)   // 右侧编辑面板显示人物坑属性
   const [fonts, setFonts] = useState<FontOption[]>([])
   const [saving, setSaving] = useState(false)
   const [editorErr, setEditorErr] = useState('')
@@ -1376,20 +1381,33 @@ function CoverTemplateEditor({ onClose, onSaved }: { onClose: () => void; onSave
     const maxX = Math.max(drawing.startX, drawing.curX)
     const maxY = Math.max(drawing.startY, drawing.curY)
     setDrawing(null)
-    // 画的框太小 (< 30px) 就当点击, 不加字段
-    if (maxX - minX < 30 || maxY - minY < 30) return
-    // 换算到原图坐标 (canvas 缩放后, 1 px canvas = bgNaturalSize.w/rect.width px 原图)
+    if (maxX - minX < 30 || maxY - minY < 30) return    // 太小当点击, 不加
     const scaleX = bgNaturalSize.w / rect.width
     const scaleY = bgNaturalSize.h / rect.height
+    const x = Math.round(minX * scaleX)
+    const y = Math.round(minY * scaleY)
+    const w = Math.round((maxX - minX) * scaleX)
+    const h = Math.round((maxY - minY) * scaleY)
+
+    if (drawMode === 'person') {
+      // 人物坑只能 1 个, 拖新框替换旧的
+      setPersonSlot({
+        x, y, w, h,
+        stroke_enabled: true, stroke_color: '#FFFFFF', stroke_width: 12,
+        fit_mode: 'cover',
+      })
+      setActiveFieldId(null); setPersonSelected(true)
+      setDrawMode('text')     // 加完人物坑自动切回文字模式
+      return
+    }
+
+    // 默认: 加文字字段
     const newField: UiTextField = {
       _id: `f_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       label: fields.length === 0 ? '主标题' : fields.length === 1 ? '副标题' : `字段${fields.length + 1}`,
-      x: Math.round(minX * scaleX),
-      y: Math.round(minY * scaleY),
-      w: Math.round((maxX - minX) * scaleX),
-      h: Math.round((maxY - minY) * scaleY),
+      x, y, w, h,
       font_file: fonts[0]?.file || 'SourceHanSansCN-Heavy.otf',
-      font_size: Math.round((maxY - minY) * scaleY * 0.7),     // 默认字号 ~ 框高的 70%
+      font_size: Math.round(h * 0.7),
       color: '#FFFFFF',
       highlight_color: '#FFD700',
       stroke_color: '#000000', stroke_width: 6,
@@ -1397,7 +1415,7 @@ function CoverTemplateEditor({ onClose, onSaved }: { onClose: () => void; onSave
       align: 'left', max_chars: 0, placeholder: '',
     }
     setFields(prev => [...prev, newField])
-    setActiveFieldId(newField._id)
+    setActiveFieldId(newField._id); setPersonSelected(false)
   }
 
   const updateField = (id: string, patch: Partial<UiTextField>) => {
@@ -1419,6 +1437,7 @@ function CoverTemplateEditor({ onClose, onSaved }: { onClose: () => void; onSave
         name: name.trim(), category, ratio,
         bg_oss_key: bgOssKey,
         text_fields: cleanFields,
+        person_slot: personSlot,    // 没人物坑就传 null
       })
       onSaved()
     } catch (e: any) {
@@ -1482,13 +1501,42 @@ function CoverTemplateEditor({ onClose, onSaved }: { onClose: () => void; onSave
             </div>
 
             <div className="border-t border-[var(--border)] pt-3 flex-1 min-h-0 flex flex-col">
-              <div className="text-xs text-[var(--text-3)] mb-2">
+              {/* 模式切换: 文字 / 人物 */}
+              <div className="flex gap-1 mb-3 p-0.5 rounded-lg bg-[var(--bg)] border border-[var(--border)]">
+                <button onClick={() => setDrawMode('text')}
+                  className={`flex-1 px-2 py-1 rounded text-xs cursor-pointer ${
+                    drawMode === 'text' ? 'bg-[var(--text)] text-[var(--bg)]' : 'text-[var(--text-3)]'
+                  }`}>
+                  拖框加 文字
+                </button>
+                <button onClick={() => setDrawMode('person')}
+                  className={`flex-1 px-2 py-1 rounded text-xs cursor-pointer ${
+                    drawMode === 'person' ? 'bg-pink-500 text-white' : 'text-[var(--text-3)]'
+                  }`}>
+                  拖框加 人物坑
+                </button>
+              </div>
+
+              {/* 人物坑 (最多 1) */}
+              {personSlot && (
+                <button
+                  onClick={() => { setPersonSelected(true); setActiveFieldId(null) }}
+                  className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs cursor-pointer mb-1 ${
+                    personSelected ? 'bg-pink-500 text-white' : 'text-pink-400 bg-pink-500/10 hover:bg-pink-500/20'
+                  }`}>
+                  <span className="font-mono text-[10px] opacity-60">人物</span>
+                  <span className="flex-1 text-left">人物坑 {personSlot.stroke_enabled ? '· 描边' : ''}</span>
+                  <span className="text-[10px] opacity-60">{personSlot.w}×{personSlot.h}</span>
+                </button>
+              )}
+
+              <div className="text-xs text-[var(--text-3)] mb-2 mt-1">
                 文字字段 ({fields.length})
-                <span className="ml-2 text-amber-500">在右侧底图上拖鼠标画框 → 自动加字段</span>
+                {drawMode === 'person' && <span className="ml-2 text-pink-400">↑ 模式: 拖框设人物坑</span>}
               </div>
               <div className="flex flex-col gap-1 overflow-y-auto">
                 {fields.map((f, i) => (
-                  <button key={f._id} onClick={() => setActiveFieldId(f._id)}
+                  <button key={f._id} onClick={() => { setActiveFieldId(f._id); setPersonSelected(false) }}
                     className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs cursor-pointer ${
                       activeFieldId === f._id ? 'bg-[var(--text)] text-[var(--bg)]' : 'text-[var(--text-2)] hover:bg-[var(--bg-hover)]'
                     }`}>
@@ -1497,7 +1545,7 @@ function CoverTemplateEditor({ onClose, onSaved }: { onClose: () => void; onSave
                     <span className="text-[10px] opacity-60">{f.w}×{f.h}</span>
                   </button>
                 ))}
-                {fields.length === 0 && (
+                {fields.length === 0 && !personSlot && (
                   <div className="text-xs text-[var(--text-3)] py-4 text-center">
                     暂无字段, 在右侧底图上 <span className="text-amber-500">按住鼠标拖一个矩形</span> 添加
                   </div>
@@ -1525,7 +1573,7 @@ function CoverTemplateEditor({ onClose, onSaved }: { onClose: () => void; onSave
                 onMouseMove={handleCanvasMouseMove}
                 onMouseUp={handleCanvasMouseUp}
                 onMouseLeave={() => setDrawing(null)}
-                className="relative inline-block max-w-full select-none cursor-crosshair"
+                className={`relative inline-block max-w-full select-none ${drawMode === 'person' ? 'cursor-crosshair' : 'cursor-crosshair'}`}
                 style={{ maxHeight: '70vh' }}
               >
                 <img src={bgPreviewUrl} draggable={false} className="block max-w-full pointer-events-none"
@@ -1554,9 +1602,33 @@ function CoverTemplateEditor({ onClose, onSaved }: { onClose: () => void; onSave
                   )
                 })}
 
-                {/* 正在画的临时框 */}
+                {/* 人物坑框 (粉色, 跟文字框颜色区分) */}
+                {bgNaturalSize.w > 0 && personSlot && (() => {
+                  const imgEl = canvasRef.current?.querySelector('img')
+                  const rect = imgEl?.getBoundingClientRect()
+                  if (!rect) return null
+                  const sx = rect.width / bgNaturalSize.w
+                  const sy = rect.height / bgNaturalSize.h
+                  return (
+                    <div data-field-box
+                      onClick={(e) => { e.stopPropagation(); setPersonSelected(true); setActiveFieldId(null) }}
+                      className={`absolute border-2 cursor-pointer ${
+                        personSelected ? 'border-pink-500 bg-pink-500/15' : 'border-pink-400 border-dashed bg-pink-400/5'
+                      }`}
+                      style={{ left: personSlot.x * sx, top: personSlot.y * sy, width: personSlot.w * sx, height: personSlot.h * sy }}
+                    >
+                      <div className="absolute -top-5 left-0 text-[10px] bg-pink-500 text-white px-1 rounded whitespace-nowrap">
+                        人物坑
+                      </div>
+                    </div>
+                  )
+                })()}
+
+                {/* 正在画的临时框 (mode 不同颜色不同) */}
                 {drawing && (
-                  <div className="absolute border-2 border-dashed border-amber-400 bg-amber-400/10 pointer-events-none"
+                  <div className={`absolute border-2 border-dashed pointer-events-none ${
+                      drawMode === 'person' ? 'border-pink-400 bg-pink-400/10' : 'border-amber-400 bg-amber-400/10'
+                    }`}
                     style={{
                       left: Math.min(drawing.startX, drawing.curX),
                       top: Math.min(drawing.startY, drawing.curY),
@@ -1571,7 +1643,13 @@ function CoverTemplateEditor({ onClose, onSaved }: { onClose: () => void; onSave
 
           {/* 右侧: 字段属性编辑 */}
           <div className="lg:w-80 flex-shrink-0 border-l border-[var(--border)] p-4 overflow-y-auto">
-            {activeField ? (
+            {personSelected && personSlot ? (
+              <PersonSlotEditor
+                slot={personSlot}
+                onChange={patch => setPersonSlot(prev => prev ? { ...prev, ...patch } : prev)}
+                onRemove={() => { setPersonSlot(null); setPersonSelected(false) }}
+              />
+            ) : activeField ? (
               <FieldEditor
                 field={activeField}
                 fonts={fonts}
@@ -1683,6 +1761,70 @@ function FieldEditor({ field, fonts, onChange, onRemove }: {
         <label className="text-xs text-[var(--text-3)]">最大字数 (0=不限)</label>
         <input type="number" value={field.max_chars} onChange={e => onChange({ max_chars: +e.target.value })}
           className="w-full bg-[var(--bg)] border border-[var(--border)] rounded px-2 py-1.5 text-sm mt-1"/>
+      </div>
+    </div>
+  )
+}
+
+
+/** 人物坑属性编辑面板 — 跟 FieldEditor 类似的右侧栏 */
+function PersonSlotEditor({ slot, onChange, onRemove }: {
+  slot: CoverPersonSlot
+  onChange: (patch: Partial<CoverPersonSlot>) => void
+  onRemove: () => void
+}) {
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <div className="text-sm font-medium text-pink-400">人物坑</div>
+        <button onClick={onRemove} className="p-1 rounded text-red-400 hover:bg-red-950/30 cursor-pointer">
+          <Trash2 size={14}/>
+        </button>
+      </div>
+
+      <div className="text-xs text-[var(--text-3)] bg-[var(--bg-hover)] rounded p-2 leading-relaxed">
+        💡 用户上传一张人物照片, 后端 rembg 自动抠图, 按 fit_mode 塞进这个坑.
+        可选给抠完的人物加描边, 让人物从背景分离更清楚.
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 text-xs text-[var(--text-3)]">
+        <div>X: <input type="number" value={slot.x} onChange={e => onChange({ x: +e.target.value })} className="w-full bg-[var(--bg)] border border-[var(--border)] rounded px-1 py-0.5 mt-0.5 text-[var(--text)]"/></div>
+        <div>Y: <input type="number" value={slot.y} onChange={e => onChange({ y: +e.target.value })} className="w-full bg-[var(--bg)] border border-[var(--border)] rounded px-1 py-0.5 mt-0.5 text-[var(--text)]"/></div>
+        <div>宽: <input type="number" value={slot.w} onChange={e => onChange({ w: +e.target.value })} className="w-full bg-[var(--bg)] border border-[var(--border)] rounded px-1 py-0.5 mt-0.5 text-[var(--text)]"/></div>
+        <div>高: <input type="number" value={slot.h} onChange={e => onChange({ h: +e.target.value })} className="w-full bg-[var(--bg)] border border-[var(--border)] rounded px-1 py-0.5 mt-0.5 text-[var(--text)]"/></div>
+      </div>
+
+      <div>
+        <label className="text-xs text-[var(--text-3)]">填充方式</label>
+        <select value={slot.fit_mode} onChange={e => onChange({ fit_mode: e.target.value as any })}
+          className="w-full bg-[var(--bg)] border border-[var(--border)] rounded px-2 py-1.5 text-sm mt-1">
+          <option value="cover">cover (按比例填满, 多余裁掉)</option>
+          <option value="contain">contain (按比例完整显示, 留白)</option>
+        </select>
+      </div>
+
+      <div className="border-t border-[var(--border)] pt-3">
+        <label className="flex items-center gap-2 text-xs text-[var(--text-2)] cursor-pointer">
+          <input type="checkbox" checked={slot.stroke_enabled}
+            onChange={e => onChange({ stroke_enabled: e.target.checked })}/>
+          给人物加描边 (Canva 风格, 让人物从背景分离)
+        </label>
+        {slot.stroke_enabled && (
+          <div className="grid grid-cols-2 gap-2 mt-2">
+            <div>
+              <label className="text-[10px] text-[var(--text-3)]">描边色</label>
+              <input type="color" value={slot.stroke_color}
+                onChange={e => onChange({ stroke_color: e.target.value })}
+                className="w-full h-7 bg-[var(--bg)] border border-[var(--border)] rounded mt-0.5 cursor-pointer"/>
+            </div>
+            <div>
+              <label className="text-[10px] text-[var(--text-3)]">描边宽 (px)</label>
+              <input type="number" value={slot.stroke_width}
+                onChange={e => onChange({ stroke_width: +e.target.value })}
+                className="w-full h-7 bg-[var(--bg)] border border-[var(--border)] rounded px-1.5 text-sm mt-0.5"/>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

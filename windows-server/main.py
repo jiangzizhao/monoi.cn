@@ -2402,6 +2402,37 @@ def cover_templates_proxy():
         raise HTTPException(503, "voice-server (9001) 未启动")
 
 
+@app.post("/api/voice/cover-remove-bg")
+async def cover_remove_bg_proxy(request: Request):
+    """转发到 voice-server: 人物图 → rembg 抠图 → 描边 → OSS. multipart 透传."""
+    import requests as _req
+    try:
+        body = await request.body()
+        headers = {'Content-Type': request.headers.get('content-type', '')}
+        resp = _req.post(
+            f"{VOICE_SERVER_URL}/cover-remove-bg",
+            data=body, headers=headers, timeout=120,    # rembg CPU 5-30s
+        )
+        if resp.status_code != 200:
+            raise HTTPException(resp.status_code, f"voice-server 错误: {resp.text[:300]}")
+        return resp.json()
+    except _req.exceptions.ConnectionError:
+        raise HTTPException(503, "voice-server (9001) 未启动")
+
+
+@app.post("/api/voice/render-cover-from-template")
+def render_cover_from_template_proxy(req: dict):
+    """转发到 voice-server: 按模板渲染封面"""
+    import requests as _req
+    try:
+        resp = _req.post(f"{VOICE_SERVER_URL}/render-cover-from-template", json=req, timeout=120)
+        if resp.status_code != 200:
+            raise HTTPException(resp.status_code, f"voice-server 错误: {resp.text[:300]}")
+        return resp.json()
+    except _req.exceptions.ConnectionError:
+        raise HTTPException(503, "voice-server (9001) 未启动")
+
+
 @app.get("/api/voice/narration-video/{name}")
 def proxy_narration_video(name: str):
     """剪辑后的视频文件 (直接读 voice-server 输出目录, FileResponse 自动支持 HTTP Range,

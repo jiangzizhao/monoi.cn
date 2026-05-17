@@ -251,6 +251,14 @@ export interface CoverTextField {
   placeholder: string
 }
 
+export interface CoverPersonSlot {
+  x: number; y: number; w: number; h: number
+  stroke_enabled: boolean              // 是否给人物加描边
+  stroke_color: string                 // 描边色 例 #FFFFFF
+  stroke_width: number                 // 描边宽 (像素)
+  fit_mode: 'cover' | 'contain'        // 人物图怎么填满坑
+}
+
 export interface AdminCoverTemplate {
   id: number
   name: string
@@ -259,6 +267,7 @@ export interface AdminCoverTemplate {
   bg_oss_key: string
   preview_oss_key?: string | null
   text_fields: CoverTextField[]
+  person_slot: CoverPersonSlot | null  // 没人物的模板是 null
   uploaded_by: number
   created_at: number
 }
@@ -277,6 +286,7 @@ export async function adminAddCoverTemplate(req: {
   ratio: string
   bg_oss_key: string
   text_fields: CoverTextField[]
+  person_slot?: CoverPersonSlot | null
 }): Promise<{ success: boolean; id: number }> {
   return post('/api/admin/cover-templates', req)
 }
