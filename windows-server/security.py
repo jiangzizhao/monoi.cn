@@ -16,7 +16,8 @@ from fastapi import HTTPException, Request
 
 # 用 main.py 的 get_db() 同一份 monoi.db
 def _get_login_db():
-    conn = sqlite3.connect('monoi.db')
+    # timeout=2 防 DB 锁住整个 endpoint, 我们 schema 写得很轻量, 2 秒内必须能拿到
+    conn = sqlite3.connect('monoi.db', timeout=2)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -48,18 +49,18 @@ def check_login_lock(identity: str) -> Optional[int]:
     """检查该 identity 是不是被锁. 返还剩多少秒解锁, 或 None (没锁)."""
     now = time.time()
     conn = _get_login_db()
-    rows = conn.execute("""
-        SELECT attempted_at, success FROM login_attempts
-        WHERE identity = ? AND attempted_at > ?
-        ORDER BY attempted_at DESC LIMIT ?
-    """, (identity, now - LOGIN_LOCK_WINDOW, LOGIN_LOCK_THRESHOLD)).fetchall()
-    conn.close()
+    try:
+        rows = conn.execute("""
+            SELECT attempted_at, success FROM login_attempts
+            WHERE identity = ? AND attempted_at > ?
+            ORDER BY attempted_at DESC LIMIT ?
+        """, (identity, now - LOGIN_LOCK_WINDOW, LOGIN_LOCK_THRESHOLD)).fetchall()
+    finally:
+        conn.close()
     if len(rows) < LOGIN_LOCK_THRESHOLD:
         return None
-    # 最近 N 次有任何一次成功 = 没锁
     if any(r['success'] for r in rows):
         return None
-    # 最近 N 次全失败 + 最早那次还在锁定窗口内 = 锁
     earliest_fail = rows[-1]['attempted_at']
     unlock_at = earliest_fail + LOGIN_LOCK_DURATION
     if unlock_at > now:
@@ -70,12 +71,14 @@ def check_login_lock(identity: str) -> Optional[int]:
 def record_login_attempt(identity: str, client_ip: str, success: bool):
     """记一次登录尝试. 成功后旧的失败记录自动失效 (因为下次 check 看 success=1)."""
     conn = _get_login_db()
-    conn.execute("""
-        INSERT INTO login_attempts (identity, client_ip, success, attempted_at)
-        VALUES (?, ?, ?, ?)
-    """, (identity, client_ip, 1 if success else 0, time.time()))
-    conn.commit()
-    conn.close()
+    try:
+        conn.execute("""
+            INSERT INTO login_attempts (identity, client_ip, success, attempted_at)
+            VALUES (?, ?, ?, ?)
+        """, (identity, client_ip, 1 if success else 0, time.time()))
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def guard_login(identity: str):

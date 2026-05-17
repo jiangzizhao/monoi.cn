@@ -604,8 +604,13 @@ def login(req: LoginRequest, request: Request):
     # 邮箱大小写不敏感
     email_norm = (req.email or '').strip().lower()
     client_ip = _client_ip_from_request(request)
-    # 失败锁定: 5 次/15min 锁 15min
-    security.guard_login(email_norm)
+    # 失败锁定 (security 模块挂了就跳过, 不影响登录主流程)
+    try:
+        security.guard_login(email_norm)
+    except HTTPException:
+        raise   # 锁定错误正常抛
+    except Exception as e:
+        print(f"[security] guard_login 异常, 跳过锁检查: {e}", flush=True)
     conn = get_db()
     try:
         row = conn.execute(
@@ -613,12 +618,15 @@ def login(req: LoginRequest, request: Request):
             (email_norm,)
         ).fetchone()
         if not row:
-            security.record_login_attempt(email_norm, client_ip, success=False)
+            try: security.record_login_attempt(email_norm, client_ip, success=False)
+            except Exception as e: print(f"[security] record_login_attempt 失败: {e}", flush=True)
             raise HTTPException(404, "该邮箱未注册")
         if not verify_password(req.password, row[2]):
-            security.record_login_attempt(email_norm, client_ip, success=False)
+            try: security.record_login_attempt(email_norm, client_ip, success=False)
+            except Exception as e: print(f"[security] record_login_attempt 失败: {e}", flush=True)
             raise HTTPException(401, "密码错误")
-        security.record_login_attempt(email_norm, client_ip, success=True)
+        try: security.record_login_attempt(email_norm, client_ip, success=True)
+        except Exception as e: print(f"[security] record_login_attempt 失败: {e}", flush=True)
         token = create_token(row[0], row[1])
         return {"success": True, "token": token, "username": row[1]}
     finally:
@@ -636,17 +644,25 @@ def login_sms(req: LoginSmsRequest, request: Request):
     if not _validate_phone(req.phone):
         raise HTTPException(400, "手机号格式不对")
     client_ip = _client_ip_from_request(request)
-    security.guard_login(req.phone)   # 跟邮箱登录同一套失败锁定
+    try:
+        security.guard_login(req.phone)
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[security] guard_login 异常 (sms), 跳过: {e}", flush=True)
     if not _verify_sms_code(req.phone, req.sms_code, 'login'):
-        security.record_login_attempt(req.phone, client_ip, success=False)
+        try: security.record_login_attempt(req.phone, client_ip, success=False)
+        except Exception as e: print(f"[security] record err: {e}", flush=True)
         raise HTTPException(401, "验证码错误或已过期")
     conn = get_db()
     try:
         row = conn.execute("SELECT id, username FROM users WHERE phone = ?", (req.phone,)).fetchone()
         if not row:
-            security.record_login_attempt(req.phone, client_ip, success=False)
+            try: security.record_login_attempt(req.phone, client_ip, success=False)
+            except Exception as e: print(f"[security] record err: {e}", flush=True)
             raise HTTPException(404, "手机号未注册, 请先注册账号")
-        security.record_login_attempt(req.phone, client_ip, success=True)
+        try: security.record_login_attempt(req.phone, client_ip, success=True)
+        except Exception as e: print(f"[security] record err: {e}", flush=True)
         token = create_token(row[0], row[1])
         return {"success": True, "token": token, "username": row[1]}
     finally:
