@@ -2330,6 +2330,52 @@ def compose_footage_proxy(req: dict):
         raise HTTPException(503, "voice-server (9001) 未启动")
 
 
+@app.post("/api/voice/compose-jianying-draft")
+def compose_jianying_draft_proxy(req: dict):
+    """转发到 voice-server: 拼剪映草稿 zip + 上传 OSS 返签名 URL"""
+    import requests as _req
+    try:
+        resp = _req.post(f"{VOICE_SERVER_URL}/compose-jianying-draft", json=req, timeout=900)
+        if resp.status_code != 200:
+            raise HTTPException(resp.status_code, f"voice-server 错误: {resp.text[:300]}")
+        return resp.json()
+    except _req.exceptions.ConnectionError:
+        raise HTTPException(503, "voice-server (9001) 未启动")
+
+
+@app.post("/api/voice/remove-vocals")
+async def remove_vocals_proxy(request: Request):
+    """转发到 voice-server: demucs 去人声. multipart 文件上传, 透传 body + content-type."""
+    import requests as _req
+    body = await request.body()
+    content_type = request.headers.get('content-type', 'application/octet-stream')
+    try:
+        resp = _req.post(
+            f"{VOICE_SERVER_URL}/remove-vocals",
+            data=body,
+            headers={'Content-Type': content_type},
+            timeout=900,    # 15 min, 长歌 CPU 模式可能要
+        )
+        if resp.status_code != 200:
+            raise HTTPException(resp.status_code, f"voice-server 错误: {resp.text[:300]}")
+        return resp.json()
+    except _req.exceptions.ConnectionError:
+        raise HTTPException(503, "voice-server (9001) 未启动")
+
+
+@app.post("/api/voice/trim-audio")
+def trim_audio_proxy(req: dict):
+    """转发到 voice-server: ffmpeg 裁剪音频"""
+    import requests as _req
+    try:
+        resp = _req.post(f"{VOICE_SERVER_URL}/trim-audio", json=req, timeout=180)
+        if resp.status_code != 200:
+            raise HTTPException(resp.status_code, f"voice-server 错误: {resp.text[:300]}")
+        return resp.json()
+    except _req.exceptions.ConnectionError:
+        raise HTTPException(503, "voice-server (9001) 未启动")
+
+
 @app.get("/api/voice/narration-video/{name}")
 def proxy_narration_video(name: str):
     """剪辑后的视频文件 (直接读 voice-server 输出目录, FileResponse 自动支持 HTTP Range,
