@@ -12,7 +12,7 @@ import {
   adminListFonts, adminUploadFont, adminDeleteFont,
   adminListCoverTemplates, adminAddCoverTemplate, adminDeleteCoverTemplate,
   type AdminUserRow, type AdminOrderRow, type AdminWithdrawalRow, type AdminStats,
-  type AdminBgmRow, type AdminFontRow, type AdminCoverTemplate, type CoverTextField,
+  type AdminBgmRow, type AdminFontRow, type AdminCoverTemplate, type CoverTextField, type CoverPersonSlot,
 } from '../services/admin'
 import { fetchMyProfile } from '../services/billing'
 import { isLoggedIn } from '../lib/auth'
@@ -1288,7 +1288,7 @@ function CoverTemplateEditor({ onClose, onSaved }: { onClose: () => void; onSave
   const [category, setCategory] = useState('zhichang')
   const [ratio, setRatio] = useState<'9:16' | '3:4' | '16:9' | '1:1'>('3:4')
 
-  const [bgFile, setBgFile] = useState<File | null>(null)
+  const [, setBgFile] = useState<File | null>(null)    // 保留 setter (handleBgFile 设, 但当前没读), 拿掉 getter 避 TS6133
   const [bgOssKey, setBgOssKey] = useState('')
   const [bgPreviewUrl, setBgPreviewUrl] = useState('')              // 本地 ObjectURL, 用于拖框预览
   const [bgUploading, setBgUploading] = useState(false)
