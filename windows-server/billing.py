@@ -846,6 +846,39 @@ def my_referrer_status(request: Request):
     return get_referrer_status_dict(user_id)
 
 
+@referral_router.post("/upgrade-check")
+def upgrade_check(request: Request):
+    """用户手动触发升级检查 (一般 update_referrer_stats 已经自动跑过, 这里是兜底).
+    返新 status. 没达条件不变, 达了升级."""
+    user_id = get_current_user_id(request)
+    conn = get_db()
+    now = time.time()
+    after = conn.execute("SELECT * FROM referrer_status WHERE user_id = ?", (user_id,)).fetchone()
+    if not after:
+        conn.close()
+        raise HTTPException(404, '推广员状态不存在')
+    new_level = after['level']
+    cert = COMMISSION_RULES['certified']
+    partner = COMMISSION_RULES['partner']
+    if after['level'] == 'normal':
+        if (after['total_paying_users'] >= cert['trigger_paying_users'] or
+            after['total_revenue_brought'] >= cert['trigger_revenue_yuan']):
+            new_level = 'certified'
+    if (after['month_paying_users'] >= partner['trigger_monthly_paying_users'] or
+        after['month_revenue_brought'] >= partner['trigger_monthly_revenue_yuan']):
+        new_level = 'partner'
+    upgraded = (new_level != after['level'])
+    if upgraded:
+        conn.execute(
+            "UPDATE referrer_status SET level = ?, level_upgraded_at = ?, updated_at = ? WHERE user_id = ?",
+            (new_level, now, now, user_id),
+        )
+        conn.commit()
+        print(f"[billing] 手动触发升级: user_id={user_id} {after['level']} → {new_level}", flush=True)
+    conn.close()
+    return {'upgraded': upgraded, 'from': after['level'], 'to': new_level, **get_referrer_status_dict(user_id)}
+
+
 @referral_router.get("/commissions")
 def my_commissions(request: Request, limit: int = 50):
     user_id = get_current_user_id(request)

@@ -175,6 +175,10 @@ export async function fetchMyReferrerStatus(): Promise<ReferrerStatus> {
   return get('/api/referral/status')
 }
 
+export async function checkReferrerUpgrade(): Promise<{ upgraded: boolean; from: string; to: string } & ReferrerStatus> {
+  return post('/api/referral/upgrade-check', {})
+}
+
 export async function fetchMyReferrerBalance(): Promise<ReferrerBalance> {
   return get('/api/referral/balance')
 }

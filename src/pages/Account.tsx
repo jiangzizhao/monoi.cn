@@ -10,6 +10,7 @@ import {
   fetchPlans, fetchMyCredits, fetchMySubscription, fetchMyReferralCode,
   fetchMyReferrerStatus, fetchMyReferrerBalance, fetchCreditLog, fetchMyOrders,
   fetchMyProfile, updateProfile, changePassword, fetchMyReferralRecords, rebindPhone,
+  checkReferrerUpgrade,
   type PlansResponse, type PlanConfig, type CreditBalance, type UserSubscription,
   type ReferralCode, type ReferrerStatus, type ReferrerBalance, type CreditLogEntry,
   type OrderEntry,
@@ -220,7 +221,7 @@ export default function Account() {
           {activeTab === 'membership' && <MembershipTab sub={sub} plans={plans} credits={credits} onUpgrade={t => setUpgradeDialog(t)}/>}
           {activeTab === 'credits' && <CreditsTab credits={credits} plans={plans} sub={sub} onBuyPack={c => setUpgradeDialog(c)}/>}
           {activeTab === 'transactions' && <TransactionsTab creditLog={creditLog} orders={orders} friendlyName={friendlyName}/>}
-          {activeTab === 'referral' && <ReferralTab refCode={refCode} refStatus={refStatus} refBalance={refBalance} onShowQr={() => setQrOpen(true)}/>}
+          {activeTab === 'referral' && <ReferralTab refCode={refCode} refStatus={refStatus} refBalance={refBalance} onShowQr={() => setQrOpen(true)} onReload={reloadAll}/>}
           {activeTab === 'security' && <SecurityTab me={me} onReload={reloadAll}/>}
         </div>
       </div>
@@ -794,18 +795,61 @@ function TransactionsTab({ creditLog, orders, friendlyName }: {
 
 // ========== Tab 5: 我的推广 ==========
 
-function ReferralTab({ refCode, refStatus, refBalance, onShowQr }: {
+function ReferralTab({ refCode, refStatus, refBalance, onShowQr, onReload }: {
   refCode: ReferralCode | null; refStatus: ReferrerStatus | null; refBalance: ReferrerBalance | null
-  onShowQr: () => void
+  onShowQr: () => void; onReload: () => void
 }) {
   const [copied, setCopied] = useState(false)
   const [records, setRecords] = useState<{ referred_users: ReferredUser[]; commissions: CommissionDetail[] } | null>(null)
   const [guideOpen, setGuideOpen] = useState(false)
   const [subTab, setSubTab] = useState<'users' | 'commissions'>('users')
+  const [upgrading, setUpgrading] = useState(false)
 
   useEffect(() => {
     fetchMyReferralRecords(100).then(setRecords).catch(console.warn)
   }, [])
+
+  // 升级阈值 + 当前进度计算 (跟 billing.py 的 COMMISSION_RULES 对齐)
+  const eligibility = (() => {
+    if (!refStatus) return null
+    if (refStatus.level === 'normal') {
+      const usersNeeded = 5, revenueNeeded = 500
+      const usersGot = refStatus.total_paying_users
+      const revenueGot = refStatus.total_revenue_brought || 0
+      const eligible = usersGot >= usersNeeded || revenueGot >= revenueNeeded
+      return { nextLevel: 'certified', nextLevelLabel: '认证推广员', eligible,
+        progressUsers: { got: usersGot, need: usersNeeded },
+        progressRevenue: { got: revenueGot, need: revenueNeeded } }
+    }
+    if (refStatus.level === 'certified') {
+      const usersNeeded = 20, revenueNeeded = 3000
+      const usersGot = refStatus.month_paying_users || 0
+      const revenueGot = refStatus.month_revenue_brought || 0
+      const eligible = usersGot >= usersNeeded || revenueGot >= revenueNeeded
+      return { nextLevel: 'partner', nextLevelLabel: '核心合伙人', eligible,
+        progressUsers: { got: usersGot, need: usersNeeded, label: '月推付费用户' },
+        progressRevenue: { got: revenueGot, need: revenueNeeded, label: '月推流水' } }
+    }
+    return null  // partner 已经顶
+  })()
+
+  const handleUpgrade = async () => {
+    if (upgrading || !eligibility?.eligible) return
+    setUpgrading(true)
+    try {
+      const r = await checkReferrerUpgrade()
+      if (r.upgraded) {
+        alert(`🎉 已升级为${eligibility.nextLevelLabel}!`)
+        onReload()
+      } else {
+        alert('未达升级条件')
+      }
+    } catch (e: any) {
+      alert(e.message || '升级失败')
+    } finally {
+      setUpgrading(false)
+    }
+  }
 
   const copy = () => {
     if (!refCode) return
@@ -863,7 +907,31 @@ function ReferralTab({ refCode, refStatus, refBalance, onShowQr }: {
         </div>
         {refStatus.level === 'normal' && (
           <div className="mt-3 text-[11px] text-[var(--text-3)] leading-relaxed">
-            💡 普通用户推荐拿积分奖励. 累计带来 5 个付费用户或 ¥500 流水后自动升级为认证推广员 (现金 30% 首单 + 10%×3 月续费). 月推 20 人或 ¥3000 流水升核心合伙人.
+            💡 普通用户推荐拿积分奖励. 累计带来 5 个付费用户或 ¥500 流水后升级认证推广员 (现金 30% 首单 + 10%×3 月续费). 月推 20 人或 ¥3000 流水升核心合伙人.
+          </div>
+        )}
+
+        {/* 升级进度 + 升级按钮 (达条件就高亮蹦出来) */}
+        {eligibility && (
+          <div className={`mt-4 p-3.5 rounded-xl ${eligibility.eligible ? 'bg-amber-50 dark:bg-amber-950/20 border border-amber-300 dark:border-amber-900/50' : 'bg-[var(--bg-hover)] border border-[var(--border)]'}`}>
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <div className="text-xs font-medium text-[var(--text-2)]">
+                {eligibility.eligible ? `🎉 已达升级条件 → ${eligibility.nextLevelLabel}` : `距离升级 ${eligibility.nextLevelLabel}`}
+              </div>
+              {eligibility.eligible && (
+                <button onClick={handleUpgrade} disabled={upgrading}
+                  className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-xs font-medium disabled:opacity-50 cursor-pointer transition-colors">
+                  {upgrading ? '升级中...' : `立即升级`}
+                </button>
+              )}
+            </div>
+            <div className="space-y-1.5">
+              <ProgressLine label={(eligibility.progressUsers as any).label || '累计付费用户'}
+                got={eligibility.progressUsers.got} need={eligibility.progressUsers.need} unit="人"/>
+              <ProgressLine label={(eligibility.progressRevenue as any).label || '累计流水'}
+                got={eligibility.progressRevenue.got} need={eligibility.progressRevenue.need} unit="" prefix="¥"/>
+              <div className="text-[10px] text-[var(--text-3)] mt-1">两个条件**任意达成一个**即可升级</div>
+            </div>
           </div>
         )}
       </div>
@@ -1045,6 +1113,24 @@ function Stat({ label, value }: { label: string; value: string }) {
     <div>
       <div className="text-[10px] text-[var(--text-3)]">{label}</div>
       <div className="text-base font-semibold text-[var(--text)]">{value}</div>
+    </div>
+  )
+}
+
+function ProgressLine({ label, got, need, unit, prefix = '' }: { label: string; got: number; need: number; unit: string; prefix?: string }) {
+  const pct = Math.min(100, (got / need) * 100)
+  const done = got >= need
+  return (
+    <div className="flex flex-col gap-0.5">
+      <div className="flex justify-between text-[11px]">
+        <span className="text-[var(--text-2)]">{label}</span>
+        <span className={done ? 'text-amber-500 font-medium' : 'text-[var(--text-3)]'}>
+          {prefix}{typeof got === 'number' && got % 1 !== 0 ? got.toFixed(2) : got} / {prefix}{need}{unit}
+        </span>
+      </div>
+      <div className="h-1.5 rounded-full bg-[var(--bg-hover)] overflow-hidden">
+        <div className={`h-full transition-all ${done ? 'bg-amber-500' : 'bg-[var(--text-3)]'}`} style={{ width: `${pct}%` }}/>
+      </div>
     </div>
   )
 }
