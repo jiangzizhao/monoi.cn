@@ -455,9 +455,9 @@ def stats(request: Request):
         daily_revenue.append({'days_ago': i, 'amount': r})
     daily_revenue.reverse()
 
-    # ============ 推广员细分 (3 等级) ============
+    # ============ 推广员细分 (3 等级: normal / certified / partner) ============
     referrer_levels = {}
-    for level in ('normal', 'advanced', 'partner'):
+    for level in ('normal', 'certified', 'partner'):
         cnt = conn.execute("SELECT COUNT(*) FROM referrer_status WHERE level = ?", (level,)).fetchone()[0]
         total_brought = conn.execute(
             "SELECT COALESCE(SUM(total_paying_users), 0) FROM referrer_status WHERE level = ?",

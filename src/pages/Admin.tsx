@@ -124,7 +124,7 @@ function DashboardTab() {
   const daily7d = data.revenue?.daily_7d ?? []
   const max7d = Math.max(...daily7d.map(d => d.amount), 1)
 
-  const REF_LEVEL_LABEL: Record<string, string> = { normal: '普通', advanced: '高级', partner: '合伙人' }
+  const REF_LEVEL_LABEL: Record<string, string> = { normal: '普通用户', certified: '认证推广员', partner: '核心合伙人' }
   return (
     <>
       {/* 用户 (3) + 营收 (3) 6 卡片 */}
@@ -199,7 +199,7 @@ function DashboardTab() {
             </tr>
           </thead>
           <tbody className="divide-y divide-[var(--border-subtle)]">
-            {['normal', 'advanced', 'partner'].map(level => {
+            {['normal', 'certified', 'partner'].map(level => {
               const r = data.referrer_levels?.[level] || {
                 count: 0, total_brought: 0, new_today: 0,
                 pending_cash: 0, pending_credits: 0, total_withdrawn: 0,
