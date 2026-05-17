@@ -43,14 +43,32 @@ _load_dotenv_simple()
 
 app = FastAPI()
 
+# CORS 严格化: 只允许我们自己的域名 (env 覆盖 ALLOWED_ORIGINS 逗号分隔, 不配走默认列表)
+_DEFAULT_ALLOWED_ORIGINS = [
+    "https://monoi.cn",
+    "https://www.monoi.cn",
+    "https://monoi-cn.vercel.app",
+    "http://localhost:5173",   # vite dev
+    "http://localhost:5175",   # vite preview
+]
+_env_origins = os.getenv('ALLOWED_ORIGINS', '').strip()
+ALLOWED_ORIGINS = [o.strip() for o in _env_origins.split(',') if o.strip()] if _env_origins else _DEFAULT_ALLOWED_ORIGINS
+print(f"[cors] 允许 origins: {ALLOWED_ORIGINS}", flush=True)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Real-IP", "X-Forwarded-For"],
 )
 
-SECRET_KEY = "monoi-secret-key-2025"
+# JWT 签名 key, 必须从 env 读 (硬编码会被 git 暴露). 兼容老的默认值, 但启动会警告
+SECRET_KEY = os.getenv('JWT_SECRET_KEY') or "monoi-secret-key-2025"
+if SECRET_KEY == "monoi-secret-key-2025":
+    print("[security] ⚠️  JWT_SECRET_KEY 未配置, 用默认硬编码 key (生产环境必须配 32+ 位随机字符串)", flush=True)
+else:
+    print(f"[security] JWT_SECRET_KEY 从 env 读取 ({len(SECRET_KEY)} 字符)", flush=True)
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_DAYS = 30
 VOICE_STORAGE_DIR = "voice-assets"
@@ -294,6 +312,10 @@ def init_db():
     os.makedirs(VOICE_STORAGE_DIR, exist_ok=True)
 
 init_db()
+
+# 安全模块 (登录锁定 + 限流 + admin 白名单)
+import security
+security.init_login_attempts_table()
 
 # 商业化模块 (会员/积分/推广)
 import billing
@@ -578,9 +600,12 @@ def register(req: RegisterRequest):
 FREE_PLAN_INIT_CREDITS = 50    # 免费用户注册一次性送的积分
 
 @app.post("/api/login")
-def login(req: LoginRequest):
-    # 邮箱大小写不敏感 (LOWER(email) = ?), 兼容历史里大小写不一致的注册数据
+def login(req: LoginRequest, request: Request):
+    # 邮箱大小写不敏感
     email_norm = (req.email or '').strip().lower()
+    client_ip = _client_ip_from_request(request)
+    # 失败锁定: 5 次/15min 锁 15min
+    security.guard_login(email_norm)
     conn = get_db()
     try:
         row = conn.execute(
@@ -588,9 +613,12 @@ def login(req: LoginRequest):
             (email_norm,)
         ).fetchone()
         if not row:
+            security.record_login_attempt(email_norm, client_ip, success=False)
             raise HTTPException(404, "该邮箱未注册")
         if not verify_password(req.password, row[2]):
+            security.record_login_attempt(email_norm, client_ip, success=False)
             raise HTTPException(401, "密码错误")
+        security.record_login_attempt(email_norm, client_ip, success=True)
         token = create_token(row[0], row[1])
         return {"success": True, "token": token, "username": row[1]}
     finally:
@@ -603,17 +631,22 @@ class LoginSmsRequest(BaseModel):
 
 
 @app.post("/api/login-sms")
-def login_sms(req: LoginSmsRequest):
+def login_sms(req: LoginSmsRequest, request: Request):
     """手机号 + 短信验证码登录 (mock 模式下 sms_code 跟发送时的 dev_code 一致)"""
     if not _validate_phone(req.phone):
         raise HTTPException(400, "手机号格式不对")
+    client_ip = _client_ip_from_request(request)
+    security.guard_login(req.phone)   # 跟邮箱登录同一套失败锁定
     if not _verify_sms_code(req.phone, req.sms_code, 'login'):
+        security.record_login_attempt(req.phone, client_ip, success=False)
         raise HTTPException(401, "验证码错误或已过期")
     conn = get_db()
     try:
         row = conn.execute("SELECT id, username FROM users WHERE phone = ?", (req.phone,)).fetchone()
         if not row:
+            security.record_login_attempt(req.phone, client_ip, success=False)
             raise HTTPException(404, "手机号未注册, 请先注册账号")
+        security.record_login_attempt(req.phone, client_ip, success=True)
         token = create_token(row[0], row[1])
         return {"success": True, "token": token, "username": row[1]}
     finally:
@@ -2673,6 +2706,8 @@ class CreatePayRequest(BaseModel):
 def create_payment_order(req: CreatePayRequest, request: Request):
     """创建待支付订单 + 调对应通道下单 → 返二维码 URL 给前端渲染.
     支持 subscription (套餐) 和 credit_pack (积分包) 两种 product_type."""
+    # 限流: 同 IP 1 分钟最多创 10 个订单, 防恶意刷创订单 (虽然不付款但白消耗微信 API 配额)
+    security.guard_rate_limit(request, 'pay_create', max_calls=10, window_sec=60)
     user_id = _user_id_from_request(request)
 
     # 根据 product_type 路由到不同 catalog

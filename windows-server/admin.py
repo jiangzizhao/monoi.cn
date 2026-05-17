@@ -38,7 +38,13 @@ ALGORITHM = "HS256"
 
 
 def require_admin(request: Request) -> int:
-    """JWT 验证 + admin 检查. 返回 user_id."""
+    """JWT 验证 + admin 检查 + (可选) IP 白名单. 返回 user_id."""
+    # 可选 IP 白名单 (env ADMIN_IP_WHITELIST 配了才启用)
+    try:
+        import security
+        security.guard_admin_ip(request)
+    except ImportError:
+        pass    # security 模块没装, 跳过
     auth = request.headers.get('authorization') or request.headers.get('Authorization') or ''
     if not auth.startswith('Bearer '):
         raise HTTPException(401, '未登录')
