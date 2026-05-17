@@ -21,7 +21,7 @@ import soundfile as sf
 import numpy as np
 import torchaudio.transforms as TAT
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
 
@@ -1230,22 +1230,50 @@ async def remove_vocals(file: UploadFile = File(...)):
 # ============== 内置 BGM 库 (admin 上传无版权 BGM, 用户合成视频选用) ==============
 
 
+def _find_monoi_db():
+    """voice-server.py 在 D:\\monoi-server\\models\\cosyvoice\\ 跑, 相对路径找不到
+    D:\\monoi-server\\monoi.db. 这里按多种可能位置探, 先用 env, 再按 __file__ 向上找."""
+    cands = [
+        os.environ.get('MONOI_DB_PATH'),
+        'monoi.db',                                                       # cwd
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'monoi.db'),  # cosyvoice → 上两级
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'monoi.db'),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), 'monoi.db'),
+        r'D:\monoi-server\monoi.db',                                       # Windows 部署绝对路径兜底
+    ]
+    for c in cands:
+        if c and os.path.exists(c):
+            return os.path.abspath(c)
+    return 'monoi.db'  # 还是找不到, 让 sqlite 自己报错
+
+
 @app.get("/bgm-library")
 def list_bgm_library():
     """返全部 admin 上传的 BGM, 按 category 分组, 每首带签名 preview URL."""
     import sqlite3
     from oss_helper import oss_sign_get
 
-    conn = sqlite3.connect('monoi.db', timeout=2)
-    conn.row_factory = sqlite3.Row
+    db_path = _find_monoi_db()
     try:
-        rows = conn.execute("""
-            SELECT id, name, category, oss_key, duration_seconds, license_note
-            FROM bgm_library
-            ORDER BY category, created_at DESC
-        """).fetchall()
-    finally:
-        conn.close()
+        conn = sqlite3.connect(db_path, timeout=2)
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = conn.execute("""
+                SELECT id, name, category, oss_key, duration_seconds, license_note
+                FROM bgm_library
+                ORDER BY category, created_at DESC
+            """).fetchall()
+        finally:
+            conn.close()
+    except sqlite3.OperationalError as e:
+        # 大概率是 "no such table" — 表是 main.py 的 init_billing_tables 建的, 但 voice-server 在子目录
+        # 走 cosyvoice/monoi.db 这个空 db 时会触发. 把诊断信息回去, 而不是 500
+        return JSONResponse(status_code=500, content={
+            'error': 'bgm_library table not found',
+            'db_path_tried': db_path,
+            'sqlite_error': str(e),
+            'hint': 'monoi.db 路径不对, 或 main.py 还没起来建表',
+        })
 
     tracks = []
     for r in rows:
