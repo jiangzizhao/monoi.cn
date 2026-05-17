@@ -928,9 +928,6 @@ function ReferralTab({ refCode, refStatus, refBalance, onShowQr, onReload }: {
             <div className="space-y-1.5">
               <ProgressLine label={(eligibility.progressUsers as any).label || '累计付费用户'}
                 got={eligibility.progressUsers.got} need={eligibility.progressUsers.need} unit="人"/>
-              <ProgressLine label={(eligibility.progressRevenue as any).label || '累计流水'}
-                got={eligibility.progressRevenue.got} need={eligibility.progressRevenue.need} unit="" prefix="¥"/>
-              <div className="text-[10px] text-[var(--text-3)] mt-1">两个条件**任意达成一个**即可升级</div>
             </div>
           </div>
         )}
