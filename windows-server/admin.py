@@ -738,6 +738,7 @@ class CoverPersonSlot(BaseModel):
     stroke_color: str = '#FFFFFF'
     stroke_width: int = 12                 # 像素, 1080×1440 上 12px 比较合适
     fit_mode: str = 'cover'                # cover (按比例填满裁多余) / contain (按比例完整显示)
+    rotation: float = 0                    # 旋转角度 (°), 用户可调
 
 
 class AddCoverTemplateRequest(BaseModel):

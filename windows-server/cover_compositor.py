@@ -295,11 +295,20 @@ def render_cover(
     overrides = text_overrides or {}
     hidden = set(hidden_labels or [])
 
-    # 1. 人物坑
+    # 1. 人物坑 — 支持 rotation (PIL rotate + center align)
     if person_slot and person_png_path and os.path.exists(person_png_path):
         person_img = Image.open(person_png_path).convert('RGBA')
         fitted = _fit_person(person_img, person_slot)
-        bg.alpha_composite(fitted, (int(person_slot['x']), int(person_slot['y'])))
+        person_rotation = float(person_slot.get('rotation') or 0)
+        if abs(person_rotation) > 0.01:
+            rotated = fitted.rotate(-person_rotation, expand=True, resample=Image.BICUBIC)
+            slot_cx = int(person_slot['x']) + int(person_slot['w']) // 2
+            slot_cy = int(person_slot['y']) + int(person_slot['h']) // 2
+            paste_x = slot_cx - rotated.width // 2
+            paste_y = slot_cy - rotated.height // 2
+            bg.alpha_composite(rotated, (paste_x, paste_y))
+        else:
+            bg.alpha_composite(fitted, (int(person_slot['x']), int(person_slot['y'])))
 
     # 2. 把 admin 字段 (没隐藏的) + 用户 extra 字段拼到一起
     all_fields = []

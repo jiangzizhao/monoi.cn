@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Loader2, Upload, Sparkles, CheckCircle2, Download, ArrowLeft, ImageIcon } from 'lucide-react'
 import {
   listCoverTemplates, coverRemoveBg, renderCoverFromTemplate,
-  type CoverTemplate, type TextFieldOverride, type UserCoverTextField,
+  type CoverTemplate, type TextFieldOverride, type UserCoverTextField, type PersonSlotOverride,
 } from '../../../services/cover'
 import { useChatStore, makeAssistantMsg } from '../../../store/chatStore'
 import { loadFont, fontFamily, parseSegments } from '../../../utils/coverFonts'
@@ -29,6 +29,8 @@ export function TemplateCoverPicker() {
   const [extraFields, setExtraFields] = useState<UserCoverTextField[]>([])
   // 用户隐藏的 admin 字段 label
   const [hiddenLabels, setHiddenLabels] = useState<Set<string>>(new Set())
+  // 用户调整后的人物坑 (空对象 = 没改, 走 admin 默认)
+  const [personSlotOverride, setPersonSlotOverride] = useState<PersonSlotOverride>({})
   const [fontsList, setFontsList] = useState<FontOpt[]>([])
   const [personFile, setPersonFile] = useState<File | null>(null)
   const [personLocalUrl, setPersonLocalUrl] = useState('')      // 本地 ObjectURL 临时预览
@@ -63,6 +65,7 @@ export function TemplateCoverPicker() {
     setTextOverrides({})          // 清空, 默认走 admin 设的
     setExtraFields([])
     setHiddenLabels(new Set())
+    setPersonSlotOverride({})
     setPersonFile(null); setPersonLocalUrl(''); setPersonOssKey(''); setPersonPreviewUrl(''); setPersonErr('')
     setResult(null); setGenErr('')
     // 预加载模板里所有字段的字体, 让左侧预览能用真字体显示
@@ -136,6 +139,7 @@ export function TemplateCoverPicker() {
         extra_fields: extraFields.length > 0 ? extraFields : undefined,
         hidden_labels: hiddenLabels.size > 0 ? Array.from(hiddenLabels) : undefined,
         person_oss_key: personOssKey || undefined,
+        person_slot_override: Object.keys(personSlotOverride).length > 0 ? personSlotOverride : undefined,
       })
       setResult({ download_url: r.download_url, width: r.width, height: r.height })
     } catch (e: any) {
@@ -226,10 +230,18 @@ export function TemplateCoverPicker() {
             extraFields={extraFields}
             hiddenLabels={hiddenLabels}
             personPreviewUrl={personPreviewUrl}
+            personSlotOverride={personSlotOverride}
             onMoveField={(label, dx, dy) => {
+              if (label === '__person__') {
+                setPersonSlotOverride(prev => ({
+                  ...prev,
+                  x: (prev.x ?? selected.person_slot?.x ?? 0) + dx,
+                  y: (prev.y ?? selected.person_slot?.y ?? 0) + dy,
+                }))
+                return
+              }
               const adminField = selected.text_fields.find(ff => ff.label === label)
               if (adminField) {
-                // functional update 拿最新 state (mousemove 高频, closure 旧值会丢累加)
                 setTextOverrides(prev => {
                   const cur = prev[label] || {}
                   const curX = cur.x ?? adminField.x
@@ -252,6 +264,18 @@ export function TemplateCoverPicker() {
                 w = Math.max(20, w); h = Math.max(20, h)
                 return { x, y, w, h }
               }
+              if (label === '__person__') {
+                setPersonSlotOverride(prev => {
+                  const slot = selected.person_slot
+                  if (!slot) return prev
+                  const baseline = {
+                    x: prev.x ?? slot.x, y: prev.y ?? slot.y,
+                    w: prev.w ?? slot.w, h: prev.h ?? slot.h,
+                  }
+                  return { ...prev, ...apply(baseline) }
+                })
+                return
+              }
               const adminField = selected.text_fields.find(ff => ff.label === label)
               if (adminField) {
                 setTextOverrides(prev => {
@@ -269,6 +293,13 @@ export function TemplateCoverPicker() {
               }
             }}
             onRotateField={(label, deltaRotation) => {
+              if (label === '__person__') {
+                setPersonSlotOverride(prev => ({
+                  ...prev,
+                  rotation: Math.round(((prev.rotation ?? selected.person_slot?.rotation ?? 0) + deltaRotation)),
+                }))
+                return
+              }
               // 累加增量, 必须用 functional update 拿最新 state — 多次 mousemove
               // 触发时 closure 里的 textOverrides 是旧的, 直接 updateOverride 会丢累加
               const adminField = selected.text_fields.find(ff => ff.label === label)
@@ -559,16 +590,20 @@ export function TemplateCoverPicker() {
 
 /** 模板实时预览 — 底图 + 人物 overlay + 文字 overlay (跟最终 Pillow 渲染基本一致).
  * 关键: 文字位置/尺寸按 admin 上传时**底图真实像素尺寸**算, 不是 1080. */
-function TemplatePreview({ template, userTexts, textOverrides, extraFields, hiddenLabels, personPreviewUrl, onMoveField, onResizeField, onRotateField }: {
+// 特殊 label 给人物用 (跟用户字段 label 不冲突, 因为字段不允许 __ 开头)
+const PERSON_LABEL = '__person__'
+
+function TemplatePreview({ template, userTexts, textOverrides, extraFields, hiddenLabels, personPreviewUrl, personSlotOverride, onMoveField, onResizeField, onRotateField }: {
   template: CoverTemplate
   userTexts: Record<string, string>
   textOverrides: Record<string, TextFieldOverride>
   extraFields?: UserCoverTextField[]
   hiddenLabels?: Set<string>
   personPreviewUrl: string
+  personSlotOverride?: PersonSlotOverride
   onMoveField?: (label: string, dx: number, dy: number) => void
   onResizeField?: (label: string, dx: number, dy: number, corner: 'nw' | 'ne' | 'sw' | 'se') => void
-  onRotateField?: (label: string, deltaRotation: number) => void   // 每次 mousemove 转过的度数 (增量)
+  onRotateField?: (label: string, deltaRotation: number) => void
 }) {
   const personSlot = template.person_slot
   const imgRef = useRef<HTMLImageElement>(null)
@@ -665,17 +700,89 @@ function TemplatePreview({ template, userTexts, textOverrides, extraFields, hidd
           className="absolute inset-0 w-full h-full object-cover pointer-events-none"/>
       )}
 
-      {/* 2. 抠完的人物 */}
-      {personPreviewUrl && personSlot && (
-        <img src={personPreviewUrl} alt=""
-          className="absolute object-cover pointer-events-none"
-          style={{
-            left: `${personSlot.x / tplW * 100}%`,
-            top: `${personSlot.y / tplH * 100}%`,
-            width: `${personSlot.w / tplW * 100}%`,
-            height: `${personSlot.h / tplH * 100}%`,
-          }}/>
-      )}
+      {/* 2. 抠完的人物 — 也支持拖移/缩放/旋转 (跟字段一样的手柄) */}
+      {personPreviewUrl && personSlot && (() => {
+        const ovr = personSlotOverride || {}
+        const px = ovr.x ?? personSlot.x
+        const py = ovr.y ?? personSlot.y
+        const pw = ovr.w ?? personSlot.w
+        const ph = ovr.h ?? personSlot.h
+        const pRot = ovr.rotation ?? (personSlot.rotation || 0)
+        const isPersonActive = activeLabel === PERSON_LABEL
+        const interactive = !!(onMoveField && onResizeField && onRotateField)
+        return (
+          <div
+            className={`absolute select-none ${interactive ? `cursor-move ${isPersonActive ? 'outline outline-2 outline-pink-500' : 'hover:outline hover:outline-2 hover:outline-pink-400/70'}` : 'pointer-events-none'}`}
+            style={{
+              left: `${px / tplW * 100}%`,
+              top: `${py / tplH * 100}%`,
+              width: `${pw / tplW * 100}%`,
+              height: `${ph / tplH * 100}%`,
+              transform: Math.abs(pRot) > 0.01 ? `rotate(${pRot}deg)` : undefined,
+              transformOrigin: 'center',
+            }}
+            onMouseDown={interactive ? (e) => {
+              e.preventDefault(); e.stopPropagation()
+              setActiveLabel(PERSON_LABEL)
+              interactionRef.current = { type: 'move', label: PERSON_LABEL, startMouseX: e.clientX, startMouseY: e.clientY }
+              document.body.style.cursor = 'move'
+            } : undefined}
+            title={interactive ? '拖动调位置, 点选中显示手柄' : undefined}
+          >
+            <img src={personPreviewUrl} alt=""
+              className="w-full h-full object-cover pointer-events-none"
+              draggable={false}/>
+
+            {/* 选中时显示手柄 (跟字段一样, 但用粉色区分) */}
+            {isPersonActive && interactive && (
+              <>
+                {(['nw', 'ne', 'sw', 'se'] as const).map(corner => {
+                  const pos: React.CSSProperties = {
+                    position: 'absolute',
+                    top: corner.startsWith('n') ? -6 : 'auto',
+                    bottom: corner.startsWith('s') ? -6 : 'auto',
+                    left: corner.endsWith('w') ? -6 : 'auto',
+                    right: corner.endsWith('e') ? -6 : 'auto',
+                    cursor: `${corner}-resize`,
+                  }
+                  return (
+                    <div key={corner}
+                      onMouseDown={(e) => {
+                        e.preventDefault(); e.stopPropagation()
+                        interactionRef.current = { type: 'resize', label: PERSON_LABEL, corner,
+                          startMouseX: e.clientX, startMouseY: e.clientY }
+                        document.body.style.cursor = `${corner}-resize`
+                      }}
+                      className="w-3 h-3 bg-pink-500 border-2 border-white rounded-sm shadow"
+                      style={pos}/>
+                  )
+                })}
+                <div
+                  onMouseDown={(e) => {
+                    e.preventDefault(); e.stopPropagation()
+                    const rect = containerRef.current?.getBoundingClientRect()
+                    if (!rect) return
+                    const cx = rect.left + (px + pw / 2) / tplW * rect.width
+                    const cy = rect.top + (py + ph / 2) / tplH * rect.height
+                    interactionRef.current = {
+                      type: 'rotate', label: PERSON_LABEL,
+                      startMouseX: e.clientX, startMouseY: e.clientY,
+                      centerX: cx, centerY: cy,
+                      startRotation: pRot,
+                    }
+                    document.body.style.cursor = 'crosshair'
+                  }}
+                  className="absolute w-6 h-6 bg-pink-500 border-2 border-white rounded-full shadow-lg cursor-grab active:cursor-grabbing flex items-center justify-center text-white text-[10px] font-bold"
+                  style={{ top: -32, left: '50%', transform: 'translateX(-50%)', zIndex: 20 }}
+                  title="拖动旋转"
+                >↻</div>
+                <div className="absolute pointer-events-none border-l border-pink-500"
+                  style={{ top: -20, left: '50%', width: 0, height: 12, transform: 'translateX(-0.5px)' }}/>
+              </>
+            )}
+          </div>
+        )
+      })()}
 
       {/* 3. 文字 overlay — admin 字段 (没隐藏的) + 用户 extra 字段, 一起渲染 */}
       {[

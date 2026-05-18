@@ -2057,8 +2057,9 @@ class RenderCoverFromTemplateRequest(BaseModel):
     user_texts: dict                       # {field_label: 用户填的文字}
     person_oss_key: Optional[str] = None   # /cover-remove-bg 返的, 无人物模板留空
     text_overrides: Optional[dict] = None  # 用户对 admin 字段的微调
-    extra_fields: Optional[list] = None    # 用户自己加的额外字段 (admin 没设的). 跟 admin 字段同结构
+    extra_fields: Optional[list] = None    # 用户自己加的额外字段
     hidden_labels: Optional[list] = None   # 用户隐藏的 admin 字段 label 列表
+    person_slot_override: Optional[dict] = None  # 用户调整后的人物坑 {x,y,w,h,rotation,...}
 
 
 @app.post("/render-cover-from-template")
@@ -2120,11 +2121,16 @@ def render_cover_from_template(req: RenderCoverFromTemplateRequest):
         # 4. 合成
         from cover_compositor import render_cover
         try:
+            # 合并 person_slot 跟用户 override (用户改了什么覆盖什么, 没改的保留 admin 默认)
+            merged_person_slot = person_slot
+            if person_slot and req.person_slot_override:
+                merged_person_slot = {**person_slot, **req.person_slot_override}
+
             out_img = render_cover(
                 bg_path=bg_path,
                 text_fields=text_fields,
                 user_texts=req.user_texts or {},
-                person_slot=person_slot,
+                person_slot=merged_person_slot,
                 person_png_path=person_path,
                 text_overrides=req.text_overrides or None,
                 extra_fields=req.extra_fields or None,
