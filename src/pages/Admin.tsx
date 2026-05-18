@@ -1347,6 +1347,15 @@ function CoverTemplateEditor({ onClose, onSaved }: { onClose: () => void; onSave
   // 拖框状态
   const canvasRef = useRef<HTMLDivElement>(null)
   const [drawing, setDrawing] = useState<{ startX: number; startY: number; curX: number; curY: number } | null>(null)
+  // Canva 风格交互: move / resize / rotate. mousedown 记下, 全局 mousemove 算位移
+  const interactionRef = useRef<{
+    type: 'move' | 'resize' | 'rotate'
+    fieldId: string
+    startMouseX: number; startMouseY: number
+    corner?: 'nw' | 'ne' | 'sw' | 'se'
+    centerX?: number; centerY?: number
+    startRotation?: number
+  } | null>(null)
 
   // 拉字体列表 (跟用户端 cover-fonts 一样)
   useEffect(() => {
@@ -1362,6 +1371,54 @@ function CoverTemplateEditor({ onClose, onSaved }: { onClose: () => void; onSave
       if (f.font_file) loadFont(f.font_file)
     }
   }, [fields])
+
+  // Canva 风手柄全局交互 (move/resize/rotate) — 用 ref 跟踪当前操作
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      const it = interactionRef.current
+      if (!it || !canvasRef.current || bgNaturalSize.w === 0) return
+      const imgEl = canvasRef.current.querySelector('img')
+      const rect = imgEl?.getBoundingClientRect()
+      if (!rect) return
+      // 屏幕 px 位移 → 底图 px 位移 (canvas 显示尺寸 vs 底图 natural 尺寸)
+      const scale = bgNaturalSize.w / rect.width
+
+      if (it.type === 'move') {
+        const dx = Math.round((e.clientX - it.startMouseX) * scale)
+        const dy = Math.round((e.clientY - it.startMouseY) * scale)
+        if (dx === 0 && dy === 0) return
+        setFields(prev => prev.map(f => f._id === it.fieldId ? { ...f, x: f.x + dx, y: f.y + dy } : f))
+        interactionRef.current = { ...it, startMouseX: e.clientX, startMouseY: e.clientY }
+      } else if (it.type === 'resize' && it.corner) {
+        const dx = Math.round((e.clientX - it.startMouseX) * scale)
+        const dy = Math.round((e.clientY - it.startMouseY) * scale)
+        if (dx === 0 && dy === 0) return
+        setFields(prev => prev.map(f => {
+          if (f._id !== it.fieldId) return f
+          let { x, y, w, h } = f
+          if (it.corner === 'nw') { x += dx; y += dy; w -= dx; h -= dy }
+          else if (it.corner === 'ne') { y += dy; w += dx; h -= dy }
+          else if (it.corner === 'sw') { x += dx; w -= dx; h += dy }
+          else { w += dx; h += dy }
+          w = Math.max(20, w); h = Math.max(20, h)
+          return { ...f, x, y, w, h }
+        }))
+        interactionRef.current = { ...it, startMouseX: e.clientX, startMouseY: e.clientY }
+      } else if (it.type === 'rotate' && it.centerX !== undefined && it.centerY !== undefined && it.startRotation !== undefined) {
+        const a0 = Math.atan2(it.startMouseY - it.centerY, it.startMouseX - it.centerX) * 180 / Math.PI
+        const a1 = Math.atan2(e.clientY - it.centerY, e.clientX - it.centerX) * 180 / Math.PI
+        const deg = Math.round(it.startRotation + (a1 - a0))
+        setFields(prev => prev.map(f => f._id === it.fieldId ? { ...f, rotation: deg } : f))
+      }
+    }
+    const onUp = () => { interactionRef.current = null; document.body.style.cursor = '' }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [bgNaturalSize.w])
 
   // 处理底图选择 + OSS 直传
   const handleBgFile = async (f: File) => {
@@ -1639,11 +1696,17 @@ function CoverTemplateEditor({ onClose, onSaved }: { onClose: () => void; onSave
                   const justify = f.align === 'center' ? 'center' : f.align === 'right' ? 'flex-end' : 'flex-start'
                   const rotation = f.rotation || 0
                   const hasRotation = Math.abs(rotation) > 0.01
+                  const isActive = activeFieldId === f._id
                   return (
                     <div key={f._id} data-field-box
-                      onClick={(e) => { e.stopPropagation(); setActiveFieldId(f._id); setPersonSelected(false) }}
-                      className={`absolute border-2 cursor-pointer flex items-center select-none ${hasRotation ? '' : 'overflow-hidden'} ${
-                        activeFieldId === f._id ? 'border-amber-400 bg-amber-400/5' : 'border-blue-400 bg-blue-400/5'
+                      onMouseDown={(e) => {
+                        e.preventDefault(); e.stopPropagation()
+                        setActiveFieldId(f._id); setPersonSelected(false)
+                        interactionRef.current = { type: 'move', fieldId: f._id, startMouseX: e.clientX, startMouseY: e.clientY }
+                        document.body.style.cursor = 'move'
+                      }}
+                      className={`absolute border-2 cursor-move flex items-center select-none ${hasRotation ? '' : 'overflow-hidden'} ${
+                        isActive ? 'border-blue-500' : 'border-blue-400 bg-blue-400/5 hover:border-amber-400'
                       }`}
                       style={{
                         left: f.x * sx, top: f.y * sy, width: f.w * sx, height: f.h * sy,
@@ -1673,6 +1736,54 @@ function CoverTemplateEditor({ onClose, onSaved }: { onClose: () => void; onSave
                           <span key={j} style={{ color: s.highlight ? (f.highlight_color || f.color) : f.color }}>{s.text}</span>
                         ))}
                       </div>
+
+                      {/* Canva 风手柄 — 选中时显示 */}
+                      {isActive && (
+                        <>
+                          {(['nw', 'ne', 'sw', 'se'] as const).map(corner => {
+                            const pos: React.CSSProperties = {
+                              position: 'absolute',
+                              top: corner.startsWith('n') ? -6 : 'auto',
+                              bottom: corner.startsWith('s') ? -6 : 'auto',
+                              left: corner.endsWith('w') ? -6 : 'auto',
+                              right: corner.endsWith('e') ? -6 : 'auto',
+                              cursor: `${corner}-resize`,
+                            }
+                            return (
+                              <div key={corner}
+                                onMouseDown={(e) => {
+                                  e.preventDefault(); e.stopPropagation()
+                                  interactionRef.current = { type: 'resize', fieldId: f._id, corner,
+                                    startMouseX: e.clientX, startMouseY: e.clientY }
+                                  document.body.style.cursor = `${corner}-resize`
+                                }}
+                                className="w-3 h-3 bg-blue-500 border-2 border-white rounded-sm shadow"
+                                style={pos}/>
+                            )
+                          })}
+                          {/* 顶部旋转手柄 */}
+                          <div
+                            onMouseDown={(e) => {
+                              e.preventDefault(); e.stopPropagation()
+                              // 字段中心 (屏幕坐标) — 用底图缩放算
+                              const imgEl2 = canvasRef.current?.querySelector('img')
+                              const r2 = imgEl2?.getBoundingClientRect()
+                              if (!r2) return
+                              const cx = r2.left + (f.x + f.w / 2) * sx
+                              const cy = r2.top + (f.y + f.h / 2) * sy
+                              interactionRef.current = {
+                                type: 'rotate', fieldId: f._id,
+                                startMouseX: e.clientX, startMouseY: e.clientY,
+                                centerX: cx, centerY: cy,
+                                startRotation: rotation,
+                              }
+                              document.body.style.cursor = 'crosshair'
+                            }}
+                            className="absolute w-3 h-3 bg-amber-500 border-2 border-white rounded-full shadow cursor-crosshair"
+                            style={{ top: -24, left: '50%', transform: 'translateX(-50%)' }}
+                            title="拖动旋转"/>
+                        </>
+                      )}
                     </div>
                   )
                 })}
