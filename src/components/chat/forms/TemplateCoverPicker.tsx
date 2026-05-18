@@ -10,6 +10,45 @@ const directBase = (import.meta as any).env?.VITE_DIRECT_API_URL || 'https://mon
 
 interface FontOpt { file: string; label: string; tag?: string }
 
+// 全局: 已经加载过的字体 family 缓存, 避免重复 fetch + add
+const _loadedFonts = new Set<string>()
+
+/** 字体文件名 → CSS font-family. 把 .ttf/.otf/.ttc 去掉 */
+function fontFamily(file: string): string {
+  return file.replace(/\.(ttf|otf|ttc)$/i, '')
+}
+
+/** 动态加载字体到浏览器, 让 CSS font-family 能用 */
+async function loadFont(file: string) {
+  const family = fontFamily(file)
+  if (_loadedFonts.has(family)) return
+  _loadedFonts.add(family)
+  try {
+    const url = `${directBase}/api/voice/cover-font-file/${encodeURIComponent(file)}`
+    const ff = new FontFace(family, `url("${url}")`)
+    await ff.load()
+    ;(document as any).fonts.add(ff)
+  } catch (e) {
+    console.warn('字体加载失败', file, e)
+    _loadedFonts.delete(family)        // 失败 retry 时再试
+  }
+}
+
+/** 把 "封面{邪修}" 拆成段, 每段标记是否高亮 */
+function parseSegments(text: string): { text: string; highlight: boolean }[] {
+  const segs: { text: string; highlight: boolean }[] = []
+  const re = /\{([^{}]*)\}/g
+  let last = 0
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) segs.push({ text: text.slice(last, m.index), highlight: false })
+    segs.push({ text: m[1], highlight: true })
+    last = m.index + m[0].length
+  }
+  if (last < text.length) segs.push({ text: text.slice(last), highlight: false })
+  return segs
+}
+
 const CAT_LABEL: Record<string, string> = {
   kepu: '科普', zhenjing: '震惊', gushi: '故事', jiaocheng: '教程',
   jianji: '极简', zhichang: '职场', xuexi: '学习', licai: '理财', other: '其他',
@@ -49,7 +88,7 @@ export function TemplateCoverPicker() {
       .catch(() => setFontsList([]))
   }, [])
 
-  // 选模板时, 用 placeholder 初始化每个字段输入 + 清空 overrides
+  // 选模板时, 用 placeholder 初始化每个字段输入 + 清空 overrides + 预加载字体
   useEffect(() => {
     if (!selected) return
     const init: Record<string, string> = {}
@@ -58,7 +97,18 @@ export function TemplateCoverPicker() {
     setTextOverrides({})          // 清空, 默认走 admin 设的
     setPersonFile(null); setPersonLocalUrl(''); setPersonOssKey(''); setPersonPreviewUrl(''); setPersonErr('')
     setResult(null); setGenErr('')
+    // 预加载模板里所有字段的字体, 让左侧预览能用真字体显示
+    for (const f of selected.text_fields) {
+      if (f.font_file) loadFont(f.font_file)
+    }
   }, [selected?.id])
+
+  // 用户切换字体下拉时也实时加载
+  useEffect(() => {
+    for (const ovr of Object.values(textOverrides)) {
+      if (ovr.font_file) loadFont(ovr.font_file)
+    }
+  }, [textOverrides])
 
   const updateOverride = (label: string, patch: Partial<TextFieldOverride>) => {
     setTextOverrides(prev => ({
@@ -185,24 +235,16 @@ export function TemplateCoverPicker() {
       </button>
 
       <div className="flex flex-col sm:flex-row gap-4">
-        {/* 左: 模板预览 + 已抠人物覆盖 */}
-        <div className="sm:w-48 flex-shrink-0">
-          <div className="relative aspect-[3/4] rounded-lg overflow-hidden border border-[var(--border)] bg-[var(--bg)]">
-            {selected.bg_url && <img src={selected.bg_url} alt="" className="absolute inset-0 w-full h-full object-cover"/>}
-            {/* 抠完的人物盖在底图上 (只是参考, 实际渲染服务器算) */}
-            {personPreviewUrl && personSlot && (
-              <img src={personPreviewUrl} alt=""
-                className="absolute object-cover pointer-events-none"
-                style={{
-                  left: `${personSlot.x / 1080 * 100}%`,
-                  top: `${personSlot.y / (selected.ratio === '3:4' ? 1440 : 1920) * 100}%`,
-                  width: `${personSlot.w / 1080 * 100}%`,
-                  height: `${personSlot.h / (selected.ratio === '3:4' ? 1440 : 1920) * 100}%`,
-                }}/>
-            )}
-          </div>
+        {/* 左: 模板预览 + 已抠人物覆盖 + 实时文字预览 */}
+        <div className="sm:w-56 flex-shrink-0">
+          <TemplatePreview
+            template={selected}
+            userTexts={userTexts}
+            textOverrides={textOverrides}
+            personPreviewUrl={personPreviewUrl}
+          />
           <div className="text-xs text-[var(--text-2)] mt-2 text-center">{selected.name}</div>
-          <div className="text-[10px] text-[var(--text-3)] text-center">{selected.ratio}</div>
+          <div className="text-[10px] text-[var(--text-3)] text-center">{selected.ratio} · 实时预览 (跟最终图基本一致)</div>
         </div>
 
         {/* 右: 填字 + 人物 */}
@@ -360,6 +402,103 @@ export function TemplateCoverPicker() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+
+/** 模板实时预览 — 底图 + 人物 overlay + 文字 overlay (跟最终 Pillow 渲染基本一致).
+ * 文字用 absolute div + CSS, @font-face 加载字体. {} 高亮分段 span 染色. */
+function TemplatePreview({ template, userTexts, textOverrides, personPreviewUrl }: {
+  template: CoverTemplate
+  userTexts: Record<string, string>
+  textOverrides: Record<string, TextFieldOverride>
+  personPreviewUrl: string
+}) {
+  const personSlot = template.person_slot
+  // 模板原始尺寸 (1080×H), 用来按比例换算
+  const tplW = 1080
+  const tplH = template.ratio === '3:4' ? 1440
+    : template.ratio === '9:16' ? 1920
+    : template.ratio === '16:9' ? Math.round(1080 * 9 / 16)    // 16:9 实际 1920×1080, 但 bg 短边 1080
+    : 1080
+  // 注意 16:9 / 1:1 比例下底图实际宽高跟上面不一样. 简化: 这个预览只对 3:4 / 9:16 严格准确.
+  // 16:9 横版 admin 拖框时用 1920×1080 也得对应换算 — 这是 v1 已知简化
+
+  return (
+    <div className="relative rounded-lg overflow-hidden border border-[var(--border)] bg-[var(--bg)]"
+         style={{ aspectRatio: template.ratio.replace(':', ' / ') }}>
+      {/* 1. 底图 */}
+      {template.bg_url && (
+        <img src={template.bg_url} alt=""
+          className="absolute inset-0 w-full h-full object-cover pointer-events-none"/>
+      )}
+
+      {/* 2. 抠完的人物 */}
+      {personPreviewUrl && personSlot && (
+        <img src={personPreviewUrl} alt=""
+          className="absolute object-cover pointer-events-none"
+          style={{
+            left: `${personSlot.x / tplW * 100}%`,
+            top: `${personSlot.y / tplH * 100}%`,
+            width: `${personSlot.w / tplW * 100}%`,
+            height: `${personSlot.h / tplH * 100}%`,
+          }}/>
+      )}
+
+      {/* 3. 文字 overlay (每个字段一个 absolute div, 用 @font-face 加载的真字体) */}
+      {template.text_fields.map((f, i) => {
+        const ovr = textOverrides[f.label] || {}
+        const text = userTexts[f.label] || ''
+        if (!text.trim()) return null
+
+        const fontFile = ovr.font_file || f.font_file
+        const fontScale = ovr.font_scale ?? 1.0
+        const fontSize = f.font_size * fontScale
+        const color = ovr.color || f.color
+        const highlightColor = ovr.highlight_color || f.highlight_color || color
+        const strokeColor = ovr.stroke_color || f.stroke_color
+        const strokeWidth = ovr.stroke_width ?? f.stroke_width
+        const align = f.align || 'left'
+
+        const segs = parseSegments(text)
+        const justify = align === 'center' ? 'center' : align === 'right' ? 'flex-end' : 'flex-start'
+        const textAlign: any = align
+
+        // 描边用 -webkit-text-stroke (Chrome/Safari 支持, 跟 Pillow stroke 视觉接近)
+        // 注意: -webkit-text-stroke 是双侧描边 px 半径, Pillow stroke_width 是膨胀半径, 大致 1:1
+        const strokeCss = strokeColor && strokeWidth > 0
+          ? { WebkitTextStroke: `${strokeWidth / tplW * 100}cqw ${strokeColor}`, paintOrder: 'stroke fill' as const }
+          : {}
+
+        return (
+          <div key={i}
+            className="absolute flex items-center pointer-events-none overflow-hidden"
+            style={{
+              left: `${f.x / tplW * 100}%`,
+              top: `${f.y / tplH * 100}%`,
+              width: `${f.w / tplW * 100}%`,
+              height: `${f.h / tplH * 100}%`,
+              justifyContent: justify,
+              containerType: 'inline-size',     // 给 cqw 单位用 (字号按预览宽度 cqw 算)
+            }}>
+            <div style={{
+              fontFamily: `"${fontFamily(fontFile)}", sans-serif`,
+              fontSize: `${fontSize / tplW * 100}cqw`,
+              color,
+              fontWeight: 900,
+              lineHeight: 1,
+              textAlign,
+              whiteSpace: 'nowrap',
+              ...strokeCss,
+            }}>
+              {segs.map((s, j) => (
+                <span key={j} style={{ color: s.highlight ? highlightColor : color }}>{s.text}</span>
+              ))}
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }
