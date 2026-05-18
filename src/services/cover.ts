@@ -86,10 +86,20 @@ export interface RenderCoverResp {
   height: number
 }
 
-/** 按模板渲染封面: 模板 id + 用户填的文字 + 抠好的人物 oss_key (没人物的模板留空) */
+export interface TextFieldOverride {
+  font_file?: string                     // 字体库文件名 (覆盖 admin 设的)
+  font_scale?: number                    // 字号倍数 (admin 字号 × scale)
+  color?: string                         // 主色 #FFFFFF (覆盖)
+  highlight_color?: string               // {} 大括号包字的色
+  stroke_color?: string                  // 描边色
+  stroke_width?: number                  // 描边宽
+}
+
+/** 按模板渲染封面: 模板 id + 用户填的文字 + (可选) 用户微调样式 + 抠好的人物 oss_key */
 export async function renderCoverFromTemplate(req: {
   template_id: number
   user_texts: Record<string, string>     // {field_label: 用户填的文字}
+  text_overrides?: Record<string, TextFieldOverride>   // 用户微调, 覆盖 admin 默认
   person_oss_key?: string                 // 没人物的模板留空
 }): Promise<RenderCoverResp> {
   const res = await fetch(directBase + '/api/voice/render-cover-from-template', {

@@ -277,6 +277,7 @@ def render_cover(
     user_texts: dict,
     person_slot: Optional[dict] = None,
     person_png_path: Optional[str] = None,
+    text_overrides: Optional[dict] = None,
 ) -> Image.Image:
     """合成一张封面.
 
@@ -286,9 +287,13 @@ def render_cover(
     - user_texts: dict {field_label: user_input}, 例 {'主标题': '封面{邪修}', '副标题': '太香啦'}
     - person_slot: 模板的人物坑配置 (有人物的话), 例 {x, y, w, h, stroke_*, fit_mode}
     - person_png_path: 用户人物图 (已经 rembg 抠完 + 描边的透明 PNG) 本地路径
+    - text_overrides: dict {field_label: {font_file?, font_size?, font_scale?, color?,
+                                           highlight_color?, stroke_color?, stroke_width?}}
+                      用户在前端微调的值, 覆盖 admin 默认. font_scale 是字号倍数 (admin 设的 × scale)
 
     返回: PIL Image (RGBA), 调用方自己 .save() 到 OSS"""
     bg = Image.open(bg_path).convert('RGBA')
+    overrides = text_overrides or {}
 
     # 1. 人物坑 (在文字之前画, 文字盖在人物上)
     if person_slot and person_png_path and os.path.exists(person_png_path):
@@ -296,12 +301,28 @@ def render_cover(
         fitted = _fit_person(person_img, person_slot)
         bg.alpha_composite(fitted, (int(person_slot['x']), int(person_slot['y'])))
 
-    # 2. 文字字段
+    # 2. 文字字段 — 合并 admin 默认 + 用户 override
     for field in text_fields:
         label = field.get('label', '')
         user_text = user_texts.get(label, field.get('placeholder', ''))
         if not user_text:
             continue
-        _draw_text_field(bg, field, user_text)
+
+        # 合并: admin 字段配置 + 用户 override (override 优先)
+        merged = dict(field)
+        ovr = overrides.get(label) or {}
+        # 字号: 支持 font_scale 倍数 (前端 slider 用) 和 font_size 直接覆盖
+        if ovr.get('font_scale') and ovr.get('font_scale') != 1.0:
+            base_size = merged.get('font_size', 80)
+            merged['font_size'] = int(base_size * float(ovr['font_scale']))
+        if ovr.get('font_size'):
+            merged['font_size'] = int(ovr['font_size'])
+        # 其他直接覆盖 (None / 空字符串跳过, 保留 admin 默认)
+        for k in ('font_file', 'color', 'highlight_color', 'stroke_color', 'stroke_width'):
+            v = ovr.get(k)
+            if v not in (None, ''):
+                merged[k] = v
+
+        _draw_text_field(bg, merged, user_text)
 
     return bg

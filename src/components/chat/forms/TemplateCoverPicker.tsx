@@ -2,9 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import { Loader2, Upload, Sparkles, CheckCircle2, Download, ArrowLeft, ImageIcon } from 'lucide-react'
 import {
   listCoverTemplates, coverRemoveBg, renderCoverFromTemplate,
-  type CoverTemplate,
+  type CoverTemplate, type TextFieldOverride,
 } from '../../../services/cover'
 import { useChatStore, makeAssistantMsg } from '../../../store/chatStore'
+
+const directBase = (import.meta as any).env?.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'
+
+interface FontOpt { file: string; label: string; tag?: string }
 
 const CAT_LABEL: Record<string, string> = {
   kepu: '科普', zhenjing: '震惊', gushi: '故事', jiaocheng: '教程',
@@ -17,8 +21,10 @@ export function TemplateCoverPicker() {
   const [loadErr, setLoadErr] = useState('')
   const [selected, setSelected] = useState<CoverTemplate | null>(null)
 
-  // 选中模板后: 用户填的每个字段 + 人物图 + 生成结果
+  // 选中模板后: 用户填的每个字段 + 微调样式 + 人物图 + 生成结果
   const [userTexts, setUserTexts] = useState<Record<string, string>>({})
+  const [textOverrides, setTextOverrides] = useState<Record<string, TextFieldOverride>>({})
+  const [fontsList, setFontsList] = useState<FontOpt[]>([])
   const [personFile, setPersonFile] = useState<File | null>(null)
   const [personLocalUrl, setPersonLocalUrl] = useState('')      // 本地 ObjectURL 临时预览
   const [personOssKey, setPersonOssKey] = useState('')          // 抠完后的 OSS key
@@ -36,17 +42,30 @@ export function TemplateCoverPicker() {
     listCoverTemplates()
       .then(r => setTemplates(r.templates || []))
       .catch(e => setLoadErr(e.message || '加载失败'))
+    // 同时拉字体库 (admin 跟内置合并)
+    fetch(directBase + '/api/voice/cover-fonts')
+      .then(r => r.json())
+      .then(d => setFontsList(d.fonts || []))
+      .catch(() => setFontsList([]))
   }, [])
 
-  // 选模板时, 用 placeholder 初始化每个字段输入
+  // 选模板时, 用 placeholder 初始化每个字段输入 + 清空 overrides
   useEffect(() => {
     if (!selected) return
     const init: Record<string, string> = {}
     for (const f of selected.text_fields) init[f.label] = f.placeholder || ''
     setUserTexts(init)
+    setTextOverrides({})          // 清空, 默认走 admin 设的
     setPersonFile(null); setPersonLocalUrl(''); setPersonOssKey(''); setPersonPreviewUrl(''); setPersonErr('')
     setResult(null); setGenErr('')
   }, [selected?.id])
+
+  const updateOverride = (label: string, patch: Partial<TextFieldOverride>) => {
+    setTextOverrides(prev => ({
+      ...prev,
+      [label]: { ...(prev[label] || {}), ...patch },
+    }))
+  }
 
   const handlePersonFile = async (f: File) => {
     if (!selected?.person_slot) return
@@ -73,9 +92,22 @@ export function TemplateCoverPicker() {
     if (!selected) return
     setGenerating(true); setGenErr(''); setResult(null)
     try {
+      // 只传非空 override (减少 payload, 后端跳过 None)
+      const cleanOverrides: Record<string, TextFieldOverride> = {}
+      for (const [label, ovr] of Object.entries(textOverrides)) {
+        const trimmed: TextFieldOverride = {}
+        if (ovr.font_file) trimmed.font_file = ovr.font_file
+        if (ovr.font_scale !== undefined && ovr.font_scale !== 1.0) trimmed.font_scale = ovr.font_scale
+        if (ovr.color) trimmed.color = ovr.color
+        if (ovr.highlight_color) trimmed.highlight_color = ovr.highlight_color
+        if (ovr.stroke_color) trimmed.stroke_color = ovr.stroke_color
+        if (ovr.stroke_width !== undefined) trimmed.stroke_width = ovr.stroke_width
+        if (Object.keys(trimmed).length > 0) cleanOverrides[label] = trimmed
+      }
       const r = await renderCoverFromTemplate({
         template_id: selected.id,
         user_texts: userTexts,
+        text_overrides: Object.keys(cleanOverrides).length > 0 ? cleanOverrides : undefined,
         person_oss_key: personOssKey || undefined,
       })
       setResult({ download_url: r.download_url, width: r.width, height: r.height })
@@ -175,28 +207,89 @@ export function TemplateCoverPicker() {
 
         {/* 右: 填字 + 人物 */}
         <div className="flex-1 min-w-0 flex flex-col gap-3">
-          {/* 文字字段 */}
-          {selected.text_fields.map((f, i) => (
-            <div key={i} className="flex flex-col gap-1">
-              <label className="text-xs text-[var(--text-3)] flex items-center gap-2">
-                <span>{f.label}</span>
-                {f.highlight_color && (
-                  <span className="text-[10px] text-amber-500" title={`{} 包的字会用颜色 ${f.highlight_color}`}>
-                    支持 {'{}'} 高亮
-                  </span>
-                )}
-                {f.max_chars > 0 && (
-                  <span className="text-[10px] text-[var(--text-3)]">最多 {f.max_chars} 字</span>
-                )}
-              </label>
-              <input
-                value={userTexts[f.label] || ''}
-                onChange={e => setUserTexts(prev => ({ ...prev, [f.label]: e.target.value }))}
-                placeholder={f.placeholder || `输入${f.label}`}
-                className="bg-[var(--bg-input)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-[var(--text)] placeholder:text-[var(--text-3)] focus:outline-none focus:border-[var(--text-3)]"
-              />
-            </div>
-          ))}
+          {/* 文字字段 + 微调控件 (字体/字号/主色/高亮色/描边色) */}
+          {selected.text_fields.map((f, i) => {
+            const ovr = textOverrides[f.label] || {}
+            const curFont = ovr.font_file || f.font_file
+            const curScale = ovr.font_scale ?? 1.0
+            const curColor = ovr.color || f.color
+            const curHighlight = ovr.highlight_color || f.highlight_color || ''
+            const curStroke = ovr.stroke_color || f.stroke_color || ''
+            return (
+              <div key={i} className="flex flex-col gap-1.5">
+                <label className="text-xs text-[var(--text-3)] flex items-center gap-2">
+                  <span>{f.label}</span>
+                  {f.highlight_color && (
+                    <span className="text-[10px] text-amber-500" title={`{} 包的字会用颜色 ${f.highlight_color}`}>
+                      支持 {'{}'} 高亮
+                    </span>
+                  )}
+                  {f.max_chars > 0 && (
+                    <span className="text-[10px] text-[var(--text-3)]">最多 {f.max_chars} 字</span>
+                  )}
+                </label>
+                <input
+                  value={userTexts[f.label] || ''}
+                  onChange={e => setUserTexts(prev => ({ ...prev, [f.label]: e.target.value }))}
+                  placeholder={f.placeholder || `输入${f.label}`}
+                  className="bg-[var(--bg-input)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-[var(--text)] placeholder:text-[var(--text-3)] focus:outline-none focus:border-[var(--text-3)]"
+                />
+                {/* 紧凑微调控件 — 默认按 admin 设的, 用户能改 */}
+                <div className="flex items-center gap-2 flex-wrap text-[11px] text-[var(--text-3)] pl-1">
+                  <select
+                    value={curFont}
+                    onChange={e => updateOverride(f.label, { font_file: e.target.value })}
+                    className="bg-[var(--bg)] border border-[var(--border)] rounded px-1.5 py-0.5 text-[11px] max-w-[120px] truncate"
+                    title="字体"
+                  >
+                    {fontsList.length === 0 && <option value={curFont}>{curFont}</option>}
+                    {fontsList.map(opt => (
+                      <option key={opt.file} value={opt.file}>{opt.label}</option>
+                    ))}
+                  </select>
+                  <label className="flex items-center gap-1" title="字号倍数">
+                    <span>字号</span>
+                    <input type="range" min={0.5} max={2.0} step={0.1} value={curScale}
+                      onChange={e => updateOverride(f.label, { font_scale: +e.target.value })}
+                      className="w-16 accent-current cursor-pointer"/>
+                    <span className="font-mono w-7">{curScale.toFixed(1)}x</span>
+                  </label>
+                  <label className="flex items-center gap-1" title="主色">
+                    <span>主</span>
+                    <input type="color" value={curColor}
+                      onChange={e => updateOverride(f.label, { color: e.target.value })}
+                      className="w-5 h-5 rounded cursor-pointer border border-[var(--border)] bg-transparent"/>
+                  </label>
+                  {f.highlight_color && (
+                    <label className="flex items-center gap-1" title="{}内字的高亮色">
+                      <span>高</span>
+                      <input type="color" value={curHighlight || '#FFD700'}
+                        onChange={e => updateOverride(f.label, { highlight_color: e.target.value })}
+                        className="w-5 h-5 rounded cursor-pointer border border-[var(--border)] bg-transparent"/>
+                    </label>
+                  )}
+                  {(f.stroke_width || 0) > 0 && (
+                    <label className="flex items-center gap-1" title="描边色">
+                      <span>描</span>
+                      <input type="color" value={curStroke || '#000000'}
+                        onChange={e => updateOverride(f.label, { stroke_color: e.target.value })}
+                        className="w-5 h-5 rounded cursor-pointer border border-[var(--border)] bg-transparent"/>
+                    </label>
+                  )}
+                  {/* 重置按钮: 这个字段所有 override 清掉 */}
+                  {textOverrides[f.label] && Object.keys(textOverrides[f.label]).length > 0 && (
+                    <button
+                      onClick={() => setTextOverrides(prev => { const n = { ...prev }; delete n[f.label]; return n })}
+                      className="text-[10px] text-[var(--text-3)] hover:text-[var(--text)] cursor-pointer ml-auto"
+                      title="清掉这个字段的微调, 回到 admin 默认"
+                    >
+                      重置
+                    </button>
+                  )}
+                </div>
+              </div>
+            )
+          })}
 
           {/* 人物上传 (有人物坑才显示) */}
           {personSlot && (

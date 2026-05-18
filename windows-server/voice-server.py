@@ -2039,6 +2039,8 @@ class RenderCoverFromTemplateRequest(BaseModel):
     template_id: int
     user_texts: dict                       # {field_label: 用户填的文字} 例 {'主标题': '封面{邪修}', '副标题': '太香啦'}
     person_oss_key: Optional[str] = None   # /cover-remove-bg 返的, 无人物模板留空
+    text_overrides: Optional[dict] = None  # {field_label: {font_file?, font_scale?, color?, highlight_color?, stroke_color?, stroke_width?}}
+                                            # 用户前端微调, 覆盖 admin 默认
 
 
 @app.post("/render-cover-from-template")
@@ -2106,6 +2108,7 @@ def render_cover_from_template(req: RenderCoverFromTemplateRequest):
                 user_texts=req.user_texts or {},
                 person_slot=person_slot,
                 person_png_path=person_path,
+                text_overrides=req.text_overrides or None,
             )
         except Exception as e:
             raise HTTPException(500, f'封面合成失败: {e}')
