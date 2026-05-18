@@ -1716,13 +1716,15 @@ function CoverTemplateEditor({ onClose, onSaved }: { onClose: () => void; onSave
                       }`}
                       style={{
                         left: f.x * sx, top: f.y * sy, width: f.w * sx, height: f.h * sy,
-                        justifyContent: justify,
+                        justifyContent: hasRotation ? 'center' : justify,
+                        transform: hasRotation ? `rotate(${rotation}deg)` : undefined,
+                        transformOrigin: 'center',
                       }}
                     >
                       <div className="absolute -top-5 left-0 text-[10px] bg-[var(--text)] text-[var(--bg)] px-1 rounded whitespace-nowrap z-10">
                         #{i + 1} {f.label}
                       </div>
-                      {/* 字体预览 */}
+                      {/* 字体预览 — wrapper 自己旋转, 这里不再 rotate */}
                       <div style={{
                         fontFamily: `"${fontFamily(f.font_file)}", sans-serif`,
                         fontSize: `${scaledFontSize}px`,
@@ -1731,8 +1733,6 @@ function CoverTemplateEditor({ onClose, onSaved }: { onClose: () => void; onSave
                         lineHeight: 1,
                         textAlign: f.align as any,
                         whiteSpace: 'nowrap',
-                        transform: hasRotation ? `rotate(${rotation}deg)` : undefined,
-                        transformOrigin: 'center',
                         WebkitTextStroke: (f.stroke_color && f.stroke_width > 0)
                           ? `${f.stroke_width * 2 * sx}px ${f.stroke_color}` : undefined,
                         paintOrder: 'stroke fill' as const,

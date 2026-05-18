@@ -229,10 +229,13 @@ export function TemplateCoverPicker() {
             onMoveField={(label, dx, dy) => {
               const adminField = selected.text_fields.find(ff => ff.label === label)
               if (adminField) {
-                const curOvr = textOverrides[label] || {}
-                const curX = curOvr.x ?? adminField.x
-                const curY = curOvr.y ?? adminField.y
-                updateOverride(label, { x: curX + dx, y: curY + dy })
+                // functional update 拿最新 state (mousemove 高频, closure 旧值会丢累加)
+                setTextOverrides(prev => {
+                  const cur = prev[label] || {}
+                  const curX = cur.x ?? adminField.x
+                  const curY = cur.y ?? adminField.y
+                  return { ...prev, [label]: { ...cur, x: curX + dx, y: curY + dy } }
+                })
               } else {
                 setExtraFields(prev => prev.map(f =>
                   f.label === label ? { ...f, x: f.x + dx, y: f.y + dy } : f
@@ -240,29 +243,25 @@ export function TemplateCoverPicker() {
               }
             }}
             onResizeField={(label, dx, dy, corner) => {
-              // 4 角拖动算法:
-              //   nw: x += dx, y += dy, w -= dx, h -= dy
-              //   ne: y += dy, w += dx, h -= dy
-              //   sw: x += dx, w -= dx, h += dy
-              //   se: w += dx, h += dy
               const apply = (cur: { x: number; y: number; w: number; h: number }) => {
                 let { x, y, w, h } = cur
                 if (corner === 'nw') { x += dx; y += dy; w -= dx; h -= dy }
                 else if (corner === 'ne') { y += dy; w += dx; h -= dy }
                 else if (corner === 'sw') { x += dx; w -= dx; h += dy }
-                else { w += dx; h += dy }     // se
-                // 最小尺寸 20
+                else { w += dx; h += dy }
                 w = Math.max(20, w); h = Math.max(20, h)
                 return { x, y, w, h }
               }
               const adminField = selected.text_fields.find(ff => ff.label === label)
               if (adminField) {
-                const curOvr = textOverrides[label] || {}
-                const cur = {
-                  x: curOvr.x ?? adminField.x, y: curOvr.y ?? adminField.y,
-                  w: curOvr.w ?? adminField.w, h: curOvr.h ?? adminField.h,
-                }
-                updateOverride(label, apply(cur))
+                setTextOverrides(prev => {
+                  const cur = prev[label] || {}
+                  const baseline = {
+                    x: cur.x ?? adminField.x, y: cur.y ?? adminField.y,
+                    w: cur.w ?? adminField.w, h: cur.h ?? adminField.h,
+                  }
+                  return { ...prev, [label]: { ...cur, ...apply(baseline) } }
+                })
               } else {
                 setExtraFields(prev => prev.map(f =>
                   f.label === label ? { ...f, ...apply({ x: f.x, y: f.y, w: f.w, h: f.h }) } : f
@@ -270,12 +269,15 @@ export function TemplateCoverPicker() {
               }
             }}
             onRotateField={(label, deltaRotation) => {
-              // 累加增量到当前 rotation
+              // 累加增量, 必须用 functional update 拿最新 state — 多次 mousemove
+              // 触发时 closure 里的 textOverrides 是旧的, 直接 updateOverride 会丢累加
               const adminField = selected.text_fields.find(ff => ff.label === label)
               if (adminField) {
-                const curOvr = textOverrides[label] || {}
-                const curRot = curOvr.rotation ?? adminField.rotation ?? 0
-                updateOverride(label, { rotation: Math.round(curRot + deltaRotation) })
+                setTextOverrides(prev => {
+                  const cur = prev[label] || {}
+                  const curRot = cur.rotation ?? adminField.rotation ?? 0
+                  return { ...prev, [label]: { ...cur, rotation: Math.round(curRot + deltaRotation) } }
+                })
               } else {
                 setExtraFields(prev => prev.map(f =>
                   f.label === label ? { ...f, rotation: Math.round((f.rotation || 0) + deltaRotation) } : f
@@ -707,27 +709,22 @@ function TemplatePreview({ template, userTexts, textOverrides, extraFields, hidd
           ? { WebkitTextStroke: `${strokeWidth * 2 / tplW * 100}cqw ${strokeColor}`, paintOrder: 'stroke fill' as const }
           : {}
 
-        const rotation = f.rotation || 0
+        // 用户/admin 改 rotation 时, 优先用 override 的 (admin 字段), 否则用 field 自带的
+        const rotation = (isAdmin ? (ovr.rotation ?? f.rotation) : f.rotation) || 0
         const hasRotation = Math.abs(rotation) > 0.01
-        const wrapperStyle: React.CSSProperties = hasRotation
-          ? {
-              left: `${posX / tplW * 100}%`,
-              top: `${posY / tplH * 100}%`,
-              width: `${posW / tplW * 100}%`,
-              height: `${posH / tplH * 100}%`,
-              justifyContent: 'center',
-              alignItems: 'center',
-              containerType: 'inline-size',
-              overflow: 'visible',
-            }
-          : {
-              left: `${posX / tplW * 100}%`,
-              top: `${posY / tplH * 100}%`,
-              width: `${posW / tplW * 100}%`,
-              height: `${posH / tplH * 100}%`,
-              justifyContent: justify,
-              containerType: 'inline-size',
-            }
+        // wrapper 整体旋转 — 字 + handles 一起转 (跟 Canva 一致)
+        const wrapperStyle: React.CSSProperties = {
+          left: `${posX / tplW * 100}%`,
+          top: `${posY / tplH * 100}%`,
+          width: `${posW / tplW * 100}%`,
+          height: `${posH / tplH * 100}%`,
+          justifyContent: hasRotation ? 'center' : justify,
+          alignItems: 'center',
+          containerType: 'inline-size',
+          transform: hasRotation ? `rotate(${rotation}deg)` : undefined,
+          transformOrigin: 'center',
+          overflow: 'visible',
+        }
         const isActive = activeLabel === f.label
         return (
           <div key={i}
@@ -749,17 +746,12 @@ function TemplatePreview({ template, userTexts, textOverrides, extraFields, hidd
               lineHeight: 1,
               textAlign,
               whiteSpace: 'nowrap',
-              transform: hasRotation ? `rotate(${rotation}deg)` : 'scale(1)',
-              transformOrigin: hasRotation ? 'center' : (align === 'center' ? 'center' : align === 'right' ? 'right' : 'left'),
+              transformOrigin: align === 'center' ? 'center' : align === 'right' ? 'right' : 'left',
               ...strokeCss,
             }}
               ref={el => {
                 if (!el || !el.parentElement) return
-                if (hasRotation) {
-                  el.style.transform = `rotate(${rotation}deg)`
-                  return
-                }
-                // 字超长时按比例缩小 (无旋转才用)
+                // 字超长时按比例缩小 (wrapper 自己旋转, 这里只管 scale)
                 const parentW = el.parentElement.clientWidth
                 el.style.transform = 'scale(1)'
                 const naturalW = el.scrollWidth
