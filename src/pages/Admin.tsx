@@ -1825,6 +1825,7 @@ function CoverTemplateEditor({ onClose, onSaved }: { onClose: () => void; onSave
               <FieldEditor
                 field={activeField}
                 fonts={fonts}
+                bgWidth={bgNaturalSize.w}
                 onChange={patch => updateField(activeField._id, patch)}
                 onRemove={() => removeField(activeField._id)}
               />
@@ -1842,9 +1843,10 @@ function CoverTemplateEditor({ onClose, onSaved }: { onClose: () => void; onSave
 }
 
 /** 右侧字段属性面板 */
-function FieldEditor({ field, fonts, onChange, onRemove }: {
+function FieldEditor({ field, fonts, bgWidth, onChange, onRemove }: {
   field: UiTextField
   fonts: FontOption[]
+  bgWidth?: number                    // 底图宽 (px), 用来算字号占宽 % 提示
   onChange: (patch: Partial<UiTextField>) => void
   onRemove: () => void
 }) {
@@ -1880,9 +1882,19 @@ function FieldEditor({ field, fonts, onChange, onRemove }: {
 
       <div className="grid grid-cols-2 gap-2">
         <div>
-          <label className="text-xs text-[var(--text-3)]">字号 (px)</label>
+          <label className="text-xs text-[var(--text-3)]">
+            字号 (px)
+            {bgWidth && bgWidth > 0 && (
+              <span className="ml-1 text-[10px] text-amber-500">
+                占图宽 {(field.font_size / bgWidth * 100).toFixed(1)}%
+              </span>
+            )}
+          </label>
           <input type="number" value={field.font_size} onChange={e => onChange({ font_size: +e.target.value })}
             className="w-full bg-[var(--bg)] border border-[var(--border)] rounded px-2 py-1.5 text-sm mt-1"/>
+          <div className="text-[10px] text-[var(--text-3)] mt-0.5">
+            参考: 主标题占图宽 10-15% (粗大), 副标题 5-8%
+          </div>
         </div>
         <div>
           <label className="text-xs text-[var(--text-3)]">对齐</label>
