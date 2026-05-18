@@ -259,16 +259,8 @@ export function TemplateCoverPicker() {
             const curStroke = ovr.stroke_color || f.stroke_color || ''
             return (
               <div key={i} className="flex flex-col gap-1.5">
-                <label className="text-xs text-[var(--text-3)] flex items-center gap-2">
-                  <span>{f.label}</span>
-                  {f.highlight_color && (
-                    <span className="text-[10px] text-amber-500" title={`{} 包的字会用颜色 ${f.highlight_color}`}>
-                      支持 {'{}'} 高亮
-                    </span>
-                  )}
-                  {f.max_chars > 0 && (
-                    <span className="text-[10px] text-[var(--text-3)]">最多 {f.max_chars} 字</span>
-                  )}
+                <label className="text-xs text-[var(--text-2)] font-medium">
+                  {f.label}
                 </label>
                 <input
                   value={userTexts[f.label] || ''}
@@ -281,49 +273,56 @@ export function TemplateCoverPicker() {
                   <select
                     value={curFont}
                     onChange={e => updateOverride(f.label, { font_file: e.target.value })}
-                    className="bg-[var(--bg)] border border-[var(--border)] rounded px-1.5 py-0.5 text-[11px] max-w-[120px] truncate"
-                    title="字体"
+                    className="bg-[var(--bg)] border border-[var(--border)] rounded px-1.5 py-0.5 text-[11px] max-w-[120px] truncate cursor-pointer"
                   >
                     {fontsList.length === 0 && <option value={curFont}>{curFont}</option>}
                     {fontsList.map(opt => (
                       <option key={opt.file} value={opt.file}>{opt.label}</option>
                     ))}
                   </select>
-                  <label className="flex items-center gap-1" title="字号倍数">
+                  <label className="flex items-center gap-1.5 cursor-pointer">
                     <span>字号</span>
                     <input type="range" min={0.5} max={2.0} step={0.1} value={curScale}
                       onChange={e => updateOverride(f.label, { font_scale: +e.target.value })}
                       className="w-16 accent-current cursor-pointer"/>
-                    <span className="font-mono w-7">{curScale.toFixed(1)}x</span>
                   </label>
-                  <label className="flex items-center gap-1" title="主色">
-                    <span>主</span>
-                    <input type="color" value={curColor}
-                      onChange={e => updateOverride(f.label, { color: e.target.value })}
-                      className="w-5 h-5 rounded cursor-pointer border border-[var(--border)] bg-transparent"/>
+                  {/* 主色 — 圆形色块, 一眼看到是颜色 */}
+                  <label className="flex items-center gap-1.5 cursor-pointer hover:opacity-80" title="点击改文字颜色">
+                    <span>文字色</span>
+                    <span className="relative inline-block w-5 h-5 rounded-full border-2 border-[var(--border)] overflow-hidden"
+                      style={{ backgroundColor: curColor }}>
+                      <input type="color" value={curColor}
+                        onChange={e => updateOverride(f.label, { color: e.target.value })}
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"/>
+                    </span>
                   </label>
                   {f.highlight_color && (
-                    <label className="flex items-center gap-1" title="{}内字的高亮色">
-                      <span>高</span>
-                      <input type="color" value={curHighlight || '#FFD700'}
-                        onChange={e => updateOverride(f.label, { highlight_color: e.target.value })}
-                        className="w-5 h-5 rounded cursor-pointer border border-[var(--border)] bg-transparent"/>
+                    <label className="flex items-center gap-1.5 cursor-pointer hover:opacity-80" title="点击改 {} 包字的颜色">
+                      <span>高亮</span>
+                      <span className="relative inline-block w-5 h-5 rounded-full border-2 border-[var(--border)] overflow-hidden"
+                        style={{ backgroundColor: curHighlight || '#FFD700' }}>
+                        <input type="color" value={curHighlight || '#FFD700'}
+                          onChange={e => updateOverride(f.label, { highlight_color: e.target.value })}
+                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"/>
+                      </span>
                     </label>
                   )}
                   {(f.stroke_width || 0) > 0 && (
-                    <label className="flex items-center gap-1" title="描边色">
-                      <span>描</span>
-                      <input type="color" value={curStroke || '#000000'}
-                        onChange={e => updateOverride(f.label, { stroke_color: e.target.value })}
-                        className="w-5 h-5 rounded cursor-pointer border border-[var(--border)] bg-transparent"/>
+                    <label className="flex items-center gap-1.5 cursor-pointer hover:opacity-80" title="点击改描边色">
+                      <span>描边</span>
+                      <span className="relative inline-block w-5 h-5 rounded-full border-2 border-[var(--border)] overflow-hidden"
+                        style={{ backgroundColor: curStroke || '#000000' }}>
+                        <input type="color" value={curStroke || '#000000'}
+                          onChange={e => updateOverride(f.label, { stroke_color: e.target.value })}
+                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"/>
+                      </span>
                     </label>
                   )}
-                  {/* 重置按钮: 这个字段所有 override 清掉 */}
+                  {/* 重置 */}
                   {textOverrides[f.label] && Object.keys(textOverrides[f.label]).length > 0 && (
                     <button
                       onClick={() => setTextOverrides(prev => { const n = { ...prev }; delete n[f.label]; return n })}
                       className="text-[10px] text-[var(--text-3)] hover:text-[var(--text)] cursor-pointer ml-auto"
-                      title="清掉这个字段的微调, 回到 admin 默认"
                     >
                       重置
                     </button>
@@ -338,7 +337,7 @@ export function TemplateCoverPicker() {
             <div className="flex flex-col gap-2 border border-[var(--border)] rounded-lg p-3">
               <div className="text-xs text-[var(--text-2)] flex items-center gap-1.5">
                 <Sparkles size={12} className="text-amber-500"/>
-                人物图 (AI 自动抠背景 {personSlot.stroke_enabled ? `+ ${personSlot.stroke_color} 描边` : ''})
+                人物图 (AI 自动抠图{personSlot.stroke_enabled ? ', 含描边' : ''})
               </div>
               {!personFile && (
                 <button onClick={() => personFileRef.current?.click()}
