@@ -269,13 +269,16 @@ export function TemplateCoverPicker() {
                 ))
               }
             }}
-            onRotateField={(label, rotation) => {
+            onRotateField={(label, deltaRotation) => {
+              // 累加增量到当前 rotation
               const adminField = selected.text_fields.find(ff => ff.label === label)
               if (adminField) {
-                updateOverride(label, { rotation })
+                const curOvr = textOverrides[label] || {}
+                const curRot = curOvr.rotation ?? adminField.rotation ?? 0
+                updateOverride(label, { rotation: Math.round(curRot + deltaRotation) })
               } else {
                 setExtraFields(prev => prev.map(f =>
-                  f.label === label ? { ...f, rotation } : f
+                  f.label === label ? { ...f, rotation: Math.round((f.rotation || 0) + deltaRotation) } : f
                 ))
               }
             }}
@@ -563,7 +566,7 @@ function TemplatePreview({ template, userTexts, textOverrides, extraFields, hidd
   personPreviewUrl: string
   onMoveField?: (label: string, dx: number, dy: number) => void
   onResizeField?: (label: string, dx: number, dy: number, corner: 'nw' | 'ne' | 'sw' | 'se') => void
-  onRotateField?: (label: string, rotation: number) => void
+  onRotateField?: (label: string, deltaRotation: number) => void   // 每次 mousemove 转过的度数 (增量)
 }) {
   const personSlot = template.person_slot
   const imgRef = useRef<HTMLImageElement>(null)
@@ -629,13 +632,16 @@ function TemplatePreview({ template, userTexts, textOverrides, extraFields, hidd
         if (dx === 0 && dy === 0) return
         onResizeField(it.label, dx, dy, it.corner)
         interactionRef.current = { ...it, startMouseX: e.clientX, startMouseY: e.clientY }
-      } else if (it.type === 'rotate' && onRotateField && it.centerX !== undefined && it.centerY !== undefined && it.startRotation !== undefined) {
-        // atan2(0, -1) = 180° = 顶部. 起点向量是 (startMouse - center), 当前向量是 (cur - center).
-        // 旋转 = angle(cur) - angle(start)
-        const a0 = Math.atan2(it.startMouseY - it.centerY, it.startMouseX - it.centerX) * 180 / Math.PI
-        const a1 = Math.atan2(e.clientY - it.centerY, e.clientX - it.centerX) * 180 / Math.PI
-        const deg = it.startRotation + (a1 - a0)
-        onRotateField(it.label, Math.round(deg))
+      } else if (it.type === 'rotate' && onRotateField && it.centerX !== undefined && it.centerY !== undefined) {
+        // 增量算法跨象限不跳: 算从上次 mousemove 到现在转过的角度差, 调用方累加
+        const a0 = Math.atan2(it.startMouseY - it.centerY, it.startMouseX - it.centerX)
+        const a1 = Math.atan2(e.clientY - it.centerY, e.clientX - it.centerX)
+        let delta = (a1 - a0) * 180 / Math.PI
+        if (delta > 180) delta -= 360
+        if (delta < -180) delta += 360
+        if (Math.abs(delta) < 0.5) return
+        onRotateField(it.label, delta)
+        interactionRef.current = { ...it, startMouseX: e.clientX, startMouseY: e.clientY }
       }
     }
     const onUp = () => { interactionRef.current = null; document.body.style.cursor = '' }

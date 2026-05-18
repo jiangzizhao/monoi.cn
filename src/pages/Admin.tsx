@@ -1404,11 +1404,17 @@ function CoverTemplateEditor({ onClose, onSaved }: { onClose: () => void; onSave
           return { ...f, x, y, w, h }
         }))
         interactionRef.current = { ...it, startMouseX: e.clientX, startMouseY: e.clientY }
-      } else if (it.type === 'rotate' && it.centerX !== undefined && it.centerY !== undefined && it.startRotation !== undefined) {
-        const a0 = Math.atan2(it.startMouseY - it.centerY, it.startMouseX - it.centerX) * 180 / Math.PI
-        const a1 = Math.atan2(e.clientY - it.centerY, e.clientX - it.centerX) * 180 / Math.PI
-        const deg = Math.round(it.startRotation + (a1 - a0))
-        setFields(prev => prev.map(f => f._id === it.fieldId ? { ...f, rotation: deg } : f))
+      } else if (it.type === 'rotate' && it.centerX !== undefined && it.centerY !== undefined) {
+        // 增量算: 每次 mousemove 算从上次到现在转过的角度差, 加到当前 rotation
+        // 这样跨象限不会跳 (a0/a1 用 atan2 直接做差会跳 360, 用增量小步走没问题)
+        const a0 = Math.atan2(it.startMouseY - it.centerY, it.startMouseX - it.centerX)
+        const a1 = Math.atan2(e.clientY - it.centerY, e.clientX - it.centerX)
+        let delta = (a1 - a0) * 180 / Math.PI
+        if (delta > 180) delta -= 360
+        if (delta < -180) delta += 360
+        if (Math.abs(delta) < 0.5) return
+        setFields(prev => prev.map(f => f._id === it.fieldId ? { ...f, rotation: Math.round((f.rotation || 0) + delta) } : f))
+        interactionRef.current = { ...it, startMouseX: e.clientX, startMouseY: e.clientY }
       }
     }
     const onUp = () => { interactionRef.current = null; document.body.style.cursor = '' }
