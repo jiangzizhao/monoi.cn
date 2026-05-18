@@ -2028,13 +2028,20 @@ async def cover_remove_bg(
     except Exception as e:
         raise HTTPException(500, f'抠图失败: {e}')
 
-    # 上传 OSS
+    # 上传 OSS (oss_upload 要文件路径不能传 bytes, 写临时文件)
+    import tempfile as _tf
     out_key = f"cover_person/{int(time.time())}_{_uuid.uuid4().hex[:8]}.png"
+    tmp_path = os.path.join(_tf.gettempdir(), f"cover_person_{int(time.time())}_{_uuid.uuid4().hex[:8]}.png")
     try:
-        oss_upload(out_key, out_png, content_type='image/png')
+        with open(tmp_path, 'wb') as _f:
+            _f.write(out_png)
+        oss_upload(out_key, tmp_path, content_type='image/png')
         signed = oss_sign_get(out_key, expires=24 * 3600)
     except Exception as e:
         raise HTTPException(502, f'OSS 上传失败: {e}')
+    finally:
+        try: os.remove(tmp_path)
+        except: pass
 
     return {
         'success': True,
@@ -2124,15 +2131,14 @@ def render_cover_from_template(req: RenderCoverFromTemplateRequest):
             raise HTTPException(500, f'封面合成失败: {e}')
 
         # 5. 上传 OSS, 返签名 URL
-        out_path = os.path.join(work_dir, 'cover.png')
-        # 注意: 转 RGB 存 JPG 体积更小, 但有人物坑透明区会变白; 保留 PNG 兼容性更好
+        out_path = os.path.join(work_dir, 'cover.jpg')
+        # 转 RGB 存 JPG 体积更小. 有人物坑透明区会变白, 不过模板底图本身就不透明, 没影响
         out_img.convert('RGB').save(out_path, 'JPEG', quality=92)
         out_key = f"cover_rendered/{int(time.time())}_{_uuid.uuid4().hex[:8]}.jpg"
-        with open(out_path, 'rb') as f:
-            data = f.read()
         try:
-            oss_upload(out_key, data, content_type='image/jpeg')
+            oss_upload(out_key, out_path, content_type='image/jpeg')   # 传 path 不传 bytes
             signed = oss_sign_get(out_key, expires=24 * 3600)
+            data_size = os.path.getsize(out_path)
         except Exception as e:
             raise HTTPException(502, f'OSS 上传失败: {e}')
 
@@ -2140,7 +2146,7 @@ def render_cover_from_template(req: RenderCoverFromTemplateRequest):
             'success': True,
             'oss_key': out_key,
             'download_url': signed,
-            'size_kb': round(len(data) / 1024, 1),
+            'size_kb': round(data_size / 1024, 1),
             'width': out_img.width, 'height': out_img.height,
         }
     finally:
