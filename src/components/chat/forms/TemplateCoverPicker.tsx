@@ -593,7 +593,7 @@ export function TemplateCoverPicker() {
 // 特殊 label 给人物用 (跟用户字段 label 不冲突, 因为字段不允许 __ 开头)
 const PERSON_LABEL = '__person__'
 
-function TemplatePreview({ template, userTexts, textOverrides, extraFields, hiddenLabels, personPreviewUrl, personSlotOverride, onMoveField, onResizeField, onRotateField }: {
+export function TemplatePreview({ template, userTexts, textOverrides, extraFields, hiddenLabels, personPreviewUrl, personSlotOverride, onMoveField, onResizeField, onRotateField }: {
   template: CoverTemplate
   userTexts: Record<string, string>
   textOverrides: Record<string, TextFieldOverride>
