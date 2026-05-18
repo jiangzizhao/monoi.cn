@@ -425,7 +425,9 @@ export function useChat() {
             if (block.type === 'video_player') {
               const ks = (block as any).data?.kept_segments
               if (Array.isArray(ks) && ks.length > 0) {
-                segments = ks.flatMap((s: any) => splitSegmentByPause(s, 0.25, 1.0))
+                // 0.15s 停顿 + 0.5s 短句下限: 抓小气口, 句子更细 (跟人说话节奏一致).
+                // 之前 0.25 + 1.0 拆出 5-6 秒长句, 像"按标点"不像"按气口".
+                segments = ks.flatMap((s: any) => splitSegmentByPause(s, 0.15, 0.5))
                 break
               }
             }
