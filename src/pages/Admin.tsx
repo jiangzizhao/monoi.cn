@@ -1449,7 +1449,7 @@ function CoverTemplateEditor({ onClose, onSaved }: { onClose: () => void; onSave
       highlight_color: '#FFD700',
       stroke_color: '#000000', stroke_width: 6,
       shadow_color: null, shadow_offset_x: 0, shadow_offset_y: 0, shadow_blur: 0,
-      align: 'left', max_chars: 0, placeholder: '',
+      align: 'left', rotation: 0, max_chars: 0, placeholder: '',
     }
     setFields(prev => [...prev, newField])
     setActiveFieldId(newField._id); setPersonSelected(false)
@@ -1785,6 +1785,18 @@ function FieldEditor({ field, fonts, onChange, onRemove }: {
               className="w-full h-7 bg-[var(--bg)] border border-[var(--border)] rounded px-1.5 text-sm mt-0.5"/>
           </div>
         </div>
+      </div>
+
+      <div>
+        <label className="text-xs text-[var(--text-3)]">旋转角度 ({(field.rotation || 0).toFixed(0)}°)</label>
+        <div className="flex items-center gap-2 mt-1">
+          <input type="range" min={-45} max={45} step={1} value={field.rotation || 0}
+            onChange={e => onChange({ rotation: +e.target.value })}
+            className="flex-1 accent-current cursor-pointer"/>
+          <button onClick={() => onChange({ rotation: 0 })}
+            className="text-[10px] text-[var(--text-3)] hover:text-[var(--text)] cursor-pointer">归零</button>
+        </div>
+        <div className="text-[10px] text-[var(--text-3)] mt-0.5">震惊/街头封面常用 -10° ~ +10° 倾斜</div>
       </div>
 
       <div>

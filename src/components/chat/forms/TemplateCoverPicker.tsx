@@ -484,17 +484,32 @@ function TemplatePreview({ template, userTexts, textOverrides, personPreviewUrl 
           ? { WebkitTextStroke: `${strokeWidth * 2 / tplW * 100}cqw ${strokeColor}`, paintOrder: 'stroke fill' as const }
           : {}
 
-        return (
-          <div key={i}
-            className="absolute flex items-center pointer-events-none overflow-hidden"
-            style={{
+        const rotation = f.rotation || 0
+        // 有旋转时, 内层 div 不限 nowrap 缩字, 而是按中心旋转. 容器允许 overflow 文字超出
+        const hasRotation = Math.abs(rotation) > 0.01
+        const wrapperStyle: React.CSSProperties = hasRotation
+          ? {
+              left: `${f.x / tplW * 100}%`,
+              top: `${f.y / tplH * 100}%`,
+              width: `${f.w / tplW * 100}%`,
+              height: `${f.h / tplH * 100}%`,
+              justifyContent: 'center',                            // 旋转时统一中心
+              alignItems: 'center',
+              containerType: 'inline-size',
+              overflow: 'visible',                                  // 让旋转后伸出的字不裁
+            }
+          : {
               left: `${f.x / tplW * 100}%`,
               top: `${f.y / tplH * 100}%`,
               width: `${f.w / tplW * 100}%`,
               height: `${f.h / tplH * 100}%`,
               justifyContent: justify,
               containerType: 'inline-size',
-            }}>
+            }
+        return (
+          <div key={i}
+            className={`absolute flex items-center pointer-events-none ${hasRotation ? '' : 'overflow-hidden'}`}
+            style={wrapperStyle}>
             <div style={{
               fontFamily: `"${fontFamily(fontFile)}", sans-serif`,
               fontSize: `${fontSize / tplW * 100}cqw`,
@@ -503,16 +518,19 @@ function TemplatePreview({ template, userTexts, textOverrides, personPreviewUrl 
               lineHeight: 1,
               textAlign,
               whiteSpace: 'nowrap',
-              // 字超出容器自动等比缩小, 跟 Pillow 自动缩字号行为对齐
-              transform: 'scale(1)',
-              transformOrigin: align === 'center' ? 'center' : align === 'right' ? 'right' : 'left',
+              transform: hasRotation ? `rotate(${rotation}deg)` : 'scale(1)',
+              transformOrigin: hasRotation ? 'center' : (align === 'center' ? 'center' : align === 'right' ? 'right' : 'left'),
               ...strokeCss,
             }}
               ref={el => {
-                // 字超长时按比例缩小 transform: scale, 视觉跟 Pillow 缩字号一致
                 if (!el || !el.parentElement) return
+                if (hasRotation) {
+                  el.style.transform = `rotate(${rotation}deg)`
+                  return
+                }
+                // 字超长时按比例缩小 (无旋转才用)
                 const parentW = el.parentElement.clientWidth
-                el.style.transform = 'scale(1)'   // 重置先量
+                el.style.transform = 'scale(1)'
                 const naturalW = el.scrollWidth
                 if (naturalW > parentW && parentW > 0) {
                   el.style.transform = `scale(${parentW / naturalW})`

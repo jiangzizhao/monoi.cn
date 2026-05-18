@@ -722,6 +722,7 @@ class CoverTextField(BaseModel):
     shadow_offset_y: int = 0
     shadow_blur: int = 0
     align: str = 'left'                   # left / center / right
+    rotation: float = 0                   # 旋转角度 (°), -45 ~ +45. 0 = 不旋转
     max_chars: int = 0                    # 0 = 不限. 超过提示用户裁剪
     placeholder: str = ''                 # 给用户的提示文字 例 "封面{邪修}"
 

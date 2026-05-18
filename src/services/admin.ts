@@ -247,6 +247,7 @@ export interface CoverTextField {
   shadow_offset_y: number
   shadow_blur: number
   align: 'left' | 'center' | 'right'
+  rotation: number                    // 旋转角度 (°), -45 ~ +45
   max_chars: number
   placeholder: string
 }

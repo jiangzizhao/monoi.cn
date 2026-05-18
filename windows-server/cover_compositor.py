@@ -140,8 +140,10 @@ def _parse_segments(text: str) -> list:
 
 def _draw_text_field(img: Image.Image, field: dict, user_text: str):
     """把 user_text 按 field 配置画到 img 上 (in-place).
-    支持 {} 多色, 描边, 阴影, 对齐, 自动缩字号. 单行渲染 (不自动换行, 用户控制长度)."""
-    draw = ImageDraw.Draw(img)
+    支持 {} 多色, 描边, 对齐, 自动缩字号, 旋转. 单行渲染.
+
+    实现: 先画到临时 RGBA layer → 如有 rotation 旋转 → paste 到主图. 这样旋转不会模糊."""
+    measure_draw = ImageDraw.Draw(img)    # 借主图做测量
 
     font_file = field.get('font_file', 'SourceHanSansCN-Heavy.otf')
     font_size = int(field.get('font_size', 80))
@@ -149,11 +151,8 @@ def _draw_text_field(img: Image.Image, field: dict, user_text: str):
     highlight_rgb = _hex_to_rgb(field.get('highlight_color') or field.get('color', '#FFFFFF'))
     stroke_color = field.get('stroke_color')
     stroke_width = int(field.get('stroke_width', 0))
-    shadow_color = field.get('shadow_color')
-    shadow_offset_x = int(field.get('shadow_offset_x', 0))
-    shadow_offset_y = int(field.get('shadow_offset_y', 0))
-    shadow_blur = int(field.get('shadow_blur', 0))
     align = field.get('align', 'left')
+    rotation = float(field.get('rotation') or 0)
 
     box_x = int(field.get('x', 0))
     box_y = int(field.get('y', 0))
@@ -164,61 +163,59 @@ def _draw_text_field(img: Image.Image, field: dict, user_text: str):
     if not segments:
         return
 
-    # 自动缩字号: 测量总宽, 超过 box_w 就缩字号
+    # 自动缩字号: 测量总宽, 超过 box_w 就缩 (描边宽度也算总宽里, stroke 扩两侧)
     cur_size = font_size
     while cur_size > 12:
         font = _load_font(font_file, cur_size)
-        total_w = sum(_measure_text(draw, t, font) for t, _ in segments)
+        total_w = sum(_measure_text(measure_draw, t, font) for t, _ in segments) + stroke_width * 2
         if total_w <= box_w:
             break
         cur_size = int(cur_size * 0.92)
 
     font = _load_font(font_file, cur_size)
-    total_w = sum(_measure_text(draw, t, font) for t, _ in segments)
-
-    # 起始 X (对齐)
-    if align == 'center':
-        start_x = box_x + (box_w - total_w) // 2
-    elif align == 'right':
-        start_x = box_x + box_w - total_w
-    else:
-        start_x = box_x
-
-    # 起始 Y — 跟随字号居中到 box 里
+    total_w = sum(_measure_text(measure_draw, t, font) for t, _ in segments)
     asc = font.getmetrics()[0]
-    start_y = box_y + (box_h - asc) // 2
+    desc = font.getmetrics()[1]
+    text_h = asc + desc
 
-    # 每段独立画
-    cur_x = start_x
+    # 1. 在临时 layer 上画文字 (layer 比 text 大一点留 margin, 防描边/旋转裁边)
+    margin = max(stroke_width * 2 + 4, int(cur_size * 0.3))
+    layer_w = total_w + margin * 2
+    layer_h = text_h + margin * 2
+    layer = Image.new('RGBA', (layer_w, layer_h), (0, 0, 0, 0))
+    layer_draw = ImageDraw.Draw(layer)
+
+    cur_x_in_layer = margin
+    y_in_layer = margin
     for seg_text, is_highlight in segments:
         if not seg_text:
             continue
         fill = highlight_rgb if is_highlight else color_rgb
-
-        # 阴影 (先画)
-        if shadow_color and (shadow_offset_x or shadow_offset_y):
-            shadow_rgb = _hex_to_rgb(shadow_color)
-            if shadow_blur > 0:
-                # 阴影模糊: 单独画到临时层 → 高斯模糊 → 叠回
-                tmp = Image.new('RGBA', img.size, (0, 0, 0, 0))
-                tmp_draw = ImageDraw.Draw(tmp)
-                tmp_draw.text((cur_x + shadow_offset_x, start_y + shadow_offset_y),
-                              seg_text, font=font, fill=shadow_rgb + (180,))
-                tmp = tmp.filter(ImageFilter.GaussianBlur(shadow_blur))
-                img.alpha_composite(tmp)
-            else:
-                draw.text((cur_x + shadow_offset_x, start_y + shadow_offset_y),
-                          seg_text, font=font, fill=shadow_rgb)
-
-        # 描边 + 文字
         if stroke_color and stroke_width > 0:
             stroke_rgb = _hex_to_rgb(stroke_color)
-            draw.text((cur_x, start_y), seg_text, font=font, fill=fill,
-                      stroke_width=stroke_width, stroke_fill=stroke_rgb)
+            layer_draw.text((cur_x_in_layer, y_in_layer), seg_text, font=font, fill=fill,
+                            stroke_width=stroke_width, stroke_fill=stroke_rgb)
         else:
-            draw.text((cur_x, start_y), seg_text, font=font, fill=fill)
+            layer_draw.text((cur_x_in_layer, y_in_layer), seg_text, font=font, fill=fill)
+        cur_x_in_layer += _measure_text(layer_draw, seg_text, font)
 
-        cur_x += _measure_text(draw, seg_text, font)
+    # 2. 如有 rotation 旋转 (PIL rotate 正数为逆时针, CSS 正数为顺时针. 统一用 CSS 习惯, 这里取负)
+    if abs(rotation) > 0.01:
+        layer = layer.rotate(-rotation, expand=True, resample=Image.BICUBIC)
+
+    # 3. paste: layer 中心对齐到 box 中心 (跟 admin 拖框时 box 视觉一致)
+    box_cx = box_x + box_w // 2
+    box_cy = box_y + box_h // 2
+    # 对齐方式: 没旋转时按 align 左/中/右; 有旋转时统一用中心 (避免对齐+旋转交互混乱)
+    if abs(rotation) > 0.01 or align == 'center':
+        paste_x = box_cx - layer.width // 2
+    elif align == 'right':
+        paste_x = box_x + box_w - (total_w + margin)    # 文字右缘对齐 box 右
+    else:                                                # left
+        paste_x = box_x - margin                         # 文字左缘对齐 box 左
+    paste_y = box_cy - layer.height // 2
+
+    img.alpha_composite(layer, (paste_x, paste_y))
 
 
 def _measure_text(draw: ImageDraw.ImageDraw, text: str, font) -> int:
