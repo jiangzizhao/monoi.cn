@@ -100,11 +100,13 @@ export interface TextFieldOverride {
   h?: number
 }
 
-/** 按模板渲染封面: 模板 id + 用户填的文字 + (可选) 用户微调样式 + 抠好的人物 oss_key */
+/** 按模板渲染封面 */
 export async function renderCoverFromTemplate(req: {
   template_id: number
   user_texts: Record<string, string>     // {field_label: 用户填的文字}
-  text_overrides?: Record<string, TextFieldOverride>   // 用户微调, 覆盖 admin 默认
+  text_overrides?: Record<string, TextFieldOverride>   // 对 admin 字段的微调
+  extra_fields?: UserCoverTextField[]    // 用户自己加的额外字段 (admin 没设的)
+  hidden_labels?: string[]                // 用户隐藏的 admin 字段 label
   person_oss_key?: string                 // 没人物的模板留空
 }): Promise<RenderCoverResp> {
   const res = await fetch(directBase + '/api/voice/render-cover-from-template', {

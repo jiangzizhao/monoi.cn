@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Loader2, Upload, Sparkles, CheckCircle2, Download, ArrowLeft, ImageIcon } from 'lucide-react'
 import {
   listCoverTemplates, coverRemoveBg, renderCoverFromTemplate,
-  type CoverTemplate, type TextFieldOverride,
+  type CoverTemplate, type TextFieldOverride, type UserCoverTextField,
 } from '../../../services/cover'
 import { useChatStore, makeAssistantMsg } from '../../../store/chatStore'
 
@@ -63,6 +63,10 @@ export function TemplateCoverPicker() {
   // 选中模板后: 用户填的每个字段 + 微调样式 + 人物图 + 生成结果
   const [userTexts, setUserTexts] = useState<Record<string, string>>({})
   const [textOverrides, setTextOverrides] = useState<Record<string, TextFieldOverride>>({})
+  // 用户自己加的额外字段 (admin 没设的). label 用 'extra_${id}' 避免跟 admin 字段冲突
+  const [extraFields, setExtraFields] = useState<UserCoverTextField[]>([])
+  // 用户隐藏的 admin 字段 label
+  const [hiddenLabels, setHiddenLabels] = useState<Set<string>>(new Set())
   const [fontsList, setFontsList] = useState<FontOpt[]>([])
   const [personFile, setPersonFile] = useState<File | null>(null)
   const [personLocalUrl, setPersonLocalUrl] = useState('')      // 本地 ObjectURL 临时预览
@@ -95,6 +99,8 @@ export function TemplateCoverPicker() {
     for (const f of selected.text_fields) init[f.label] = f.placeholder || ''
     setUserTexts(init)
     setTextOverrides({})          // 清空, 默认走 admin 设的
+    setExtraFields([])
+    setHiddenLabels(new Set())
     setPersonFile(null); setPersonLocalUrl(''); setPersonOssKey(''); setPersonPreviewUrl(''); setPersonErr('')
     setResult(null); setGenErr('')
     // 预加载模板里所有字段的字体, 让左侧预览能用真字体显示
@@ -162,6 +168,8 @@ export function TemplateCoverPicker() {
         template_id: selected.id,
         user_texts: userTexts,
         text_overrides: Object.keys(cleanOverrides).length > 0 ? cleanOverrides : undefined,
+        extra_fields: extraFields.length > 0 ? extraFields : undefined,
+        hidden_labels: hiddenLabels.size > 0 ? Array.from(hiddenLabels) : undefined,
         person_oss_key: personOssKey || undefined,
       })
       setResult({ download_url: r.download_url, width: r.width, height: r.height })
@@ -245,15 +253,22 @@ export function TemplateCoverPicker() {
             template={selected}
             userTexts={userTexts}
             textOverrides={textOverrides}
+            extraFields={extraFields}
+            hiddenLabels={hiddenLabels}
             personPreviewUrl={personPreviewUrl}
             onMoveField={(label, dx, dy) => {
-              // dx/dy 是相对底图 px 的位移 (TemplatePreview 内部已经按 bgSize 换算)
-              const baseField = selected.text_fields.find(ff => ff.label === label)
-              if (!baseField) return
-              const curOvr = textOverrides[label] || {}
-              const curX = curOvr.x ?? baseField.x
-              const curY = curOvr.y ?? baseField.y
-              updateOverride(label, { x: curX + dx, y: curY + dy })
+              // 区分: admin 字段改 override.x/y, extra 字段直接改 extraFields[i].x/y
+              const adminField = selected.text_fields.find(ff => ff.label === label)
+              if (adminField) {
+                const curOvr = textOverrides[label] || {}
+                const curX = curOvr.x ?? adminField.x
+                const curY = curOvr.y ?? adminField.y
+                updateOverride(label, { x: curX + dx, y: curY + dy })
+              } else {
+                setExtraFields(prev => prev.map(f =>
+                  f.label === label ? { ...f, x: f.x + dx, y: f.y + dy } : f
+                ))
+              }
             }}
           />
           <div className="text-xs text-[var(--text-2)] mt-2 text-center">{selected.name}</div>
@@ -262,8 +277,8 @@ export function TemplateCoverPicker() {
 
         {/* 右: 填字 + 人物 */}
         <div className="flex-1 min-w-0 flex flex-col gap-3">
-          {/* 文字字段 + 微调控件 (字体/字号/主色/高亮色/描边色) */}
-          {selected.text_fields.map((f, i) => {
+          {/* admin 设的字段 (没隐藏的) */}
+          {selected.text_fields.filter(f => !hiddenLabels.has(f.label)).map((f, i) => {
             const ovr = textOverrides[f.label] || {}
             const curFont = ovr.font_file || f.font_file
             const curScale = ovr.font_scale ?? 1.0
@@ -272,9 +287,18 @@ export function TemplateCoverPicker() {
             const curStroke = ovr.stroke_color || f.stroke_color || ''
             return (
               <div key={i} className="flex flex-col gap-1.5">
-                <label className="text-xs text-[var(--text-2)] font-medium">
-                  {f.label}
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="text-xs text-[var(--text-2)] font-medium">
+                    {f.label}
+                  </label>
+                  <button
+                    onClick={() => setHiddenLabels(prev => { const n = new Set(prev); n.add(f.label); return n })}
+                    className="text-[10px] text-[var(--text-3)] hover:text-red-400 cursor-pointer"
+                    title="隐藏这个字段, 不在封面上显示"
+                  >
+                    × 隐藏
+                  </button>
+                </div>
                 <input
                   value={userTexts[f.label] || ''}
                   onChange={e => setUserTexts(prev => ({ ...prev, [f.label]: e.target.value }))}
@@ -344,6 +368,106 @@ export function TemplateCoverPicker() {
               </div>
             )
           })}
+
+          {/* 隐藏了的 admin 字段, 给个一键恢复 */}
+          {hiddenLabels.size > 0 && (
+            <div className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--text-3)] pl-1">
+              <span>已隐藏:</span>
+              {Array.from(hiddenLabels).map(label => (
+                <button key={label}
+                  onClick={() => setHiddenLabels(prev => { const n = new Set(prev); n.delete(label); return n })}
+                  className="px-2 py-0.5 rounded border border-dashed border-[var(--border)] hover:text-[var(--text)] cursor-pointer"
+                  title="点击恢复显示"
+                >
+                  + {label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* 用户加的 extra 字段 */}
+          {extraFields.map((f, i) => {
+            const updateExtra = (patch: Partial<UserCoverTextField>) => {
+              setExtraFields(prev => prev.map((ff, idx) => idx === i ? { ...ff, ...patch } : ff))
+            }
+            return (
+              <div key={f.label} className="flex flex-col gap-1.5 border border-dashed border-[var(--border)] rounded-lg p-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs text-amber-500 font-medium">+ 自定义文字 #{i + 1}</label>
+                  <button
+                    onClick={() => setExtraFields(prev => prev.filter((_, idx) => idx !== i))}
+                    className="text-[10px] text-red-400 hover:text-red-300 cursor-pointer">
+                    × 删掉
+                  </button>
+                </div>
+                <input
+                  value={userTexts[f.label] || ''}
+                  onChange={e => setUserTexts(prev => ({ ...prev, [f.label]: e.target.value }))}
+                  placeholder="自定义文字内容"
+                  className="bg-[var(--bg-input)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-[var(--text)] placeholder:text-[var(--text-3)] focus:outline-none focus:border-[var(--text-3)]"
+                />
+                <div className="flex items-center gap-2 flex-wrap text-[11px] text-[var(--text-3)] pl-1">
+                  <select value={f.font_file}
+                    onChange={e => updateExtra({ font_file: e.target.value })}
+                    className="bg-[var(--bg)] border border-[var(--border)] rounded px-1.5 py-0.5 text-[11px] max-w-[120px] truncate cursor-pointer">
+                    {fontsList.map(opt => <option key={opt.file} value={opt.file}>{opt.label}</option>)}
+                  </select>
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <span>字号</span>
+                    <input type="number" min={20} max={400} value={f.font_size}
+                      onChange={e => updateExtra({ font_size: +e.target.value })}
+                      className="w-14 bg-[var(--bg)] border border-[var(--border)] rounded px-1 py-0.5 text-[11px]"/>
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer hover:opacity-80">
+                    <span>文字色</span>
+                    <span className="relative inline-block w-5 h-5 rounded-full border-2 border-[var(--border)] overflow-hidden"
+                      style={{ backgroundColor: f.color }}>
+                      <input type="color" value={f.color}
+                        onChange={e => updateExtra({ color: e.target.value })}
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"/>
+                    </span>
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer hover:opacity-80">
+                    <span>描边</span>
+                    <span className="relative inline-block w-5 h-5 rounded-full border-2 border-[var(--border)] overflow-hidden"
+                      style={{ backgroundColor: f.stroke_color || '#000000' }}>
+                      <input type="color" value={f.stroke_color || '#000000'}
+                        onChange={e => updateExtra({ stroke_color: e.target.value, stroke_width: f.stroke_width || 4 })}
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"/>
+                    </span>
+                  </label>
+                </div>
+              </div>
+            )
+          })}
+
+          {/* +加文字 按钮 */}
+          <button
+            onClick={() => {
+              const id = `extra_${Date.now()}`
+              const tplW = 1080            // 默认位置假设, 用户拖拽会改
+              const newField: UserCoverTextField = {
+                label: id,
+                x: Math.round(tplW * 0.1),
+                y: Math.round((selected.ratio === '16:9' ? 1080 : 1440) * 0.4),
+                w: Math.round(tplW * 0.8),
+                h: 200,
+                font_file: fontsList[0]?.file || 'SourceHanSansCN-Heavy.otf',
+                font_size: 100,
+                color: '#FFFFFF',
+                highlight_color: null,
+                stroke_color: '#000000',
+                stroke_width: 4,
+                shadow_color: null,
+                shadow_offset_x: 0, shadow_offset_y: 0, shadow_blur: 0,
+                align: 'left', rotation: 0, max_chars: 0, placeholder: '',
+              }
+              setExtraFields(prev => [...prev, newField])
+              setUserTexts(prev => ({ ...prev, [id]: '新文字' }))
+            }}
+            className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-dashed border-[var(--border)] text-xs text-[var(--text-2)] hover:bg-[var(--bg-hover)] hover:border-[var(--text-3)] cursor-pointer">
+            + 加一个自定义文字
+          </button>
 
           {/* 人物上传 (有人物坑才显示) */}
           {personSlot && (
@@ -421,12 +545,14 @@ export function TemplateCoverPicker() {
 
 /** 模板实时预览 — 底图 + 人物 overlay + 文字 overlay (跟最终 Pillow 渲染基本一致).
  * 关键: 文字位置/尺寸按 admin 上传时**底图真实像素尺寸**算, 不是 1080. */
-function TemplatePreview({ template, userTexts, textOverrides, personPreviewUrl, onMoveField }: {
+function TemplatePreview({ template, userTexts, textOverrides, extraFields, hiddenLabels, personPreviewUrl, onMoveField }: {
   template: CoverTemplate
   userTexts: Record<string, string>
   textOverrides: Record<string, TextFieldOverride>
+  extraFields?: UserCoverTextField[]
+  hiddenLabels?: Set<string>
   personPreviewUrl: string
-  onMoveField?: (label: string, dx: number, dy: number) => void   // dx/dy = 相对底图的 px 位移
+  onMoveField?: (label: string, dx: number, dy: number) => void
 }) {
   const personSlot = template.person_slot
   const imgRef = useRef<HTMLImageElement>(null)
@@ -501,9 +627,13 @@ function TemplatePreview({ template, userTexts, textOverrides, personPreviewUrl,
           }}/>
       )}
 
-      {/* 3. 文字 overlay (每个字段一个 absolute div, 用 @font-face 加载的真字体) */}
-      {template.text_fields.map((f, i) => {
-        const ovr = textOverrides[f.label] || {}
+      {/* 3. 文字 overlay — admin 字段 (没隐藏的) + 用户 extra 字段, 一起渲染 */}
+      {[
+        ...template.text_fields.filter(f => !(hiddenLabels?.has(f.label))).map(f => ({ field: f, isAdmin: true })),
+        ...(extraFields || []).map(f => ({ field: f, isAdmin: false })),
+      ].map(({ field: f, isAdmin }, i) => {
+        // admin 字段走 override 合并; extra 字段直接用本身值
+        const ovr = isAdmin ? (textOverrides[f.label] || {}) : {}
         const text = (userTexts[f.label] || '').trim() || f.placeholder || f.label
 
         const fontFile = ovr.font_file || f.font_file
@@ -515,7 +645,7 @@ function TemplatePreview({ template, userTexts, textOverrides, personPreviewUrl,
         const strokeWidth = ovr.stroke_width ?? f.stroke_width
         const align = f.align || 'left'
 
-        // 位置: 用户拖拽 override 优先, 否则 admin 默认
+        // 位置: admin 字段优先用 override; extra 字段直接用本身值
         const posX = ovr.x ?? f.x
         const posY = ovr.y ?? f.y
         const posW = ovr.w ?? f.w

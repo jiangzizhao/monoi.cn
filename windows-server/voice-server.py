@@ -2054,10 +2054,11 @@ async def cover_remove_bg(
 
 class RenderCoverFromTemplateRequest(BaseModel):
     template_id: int
-    user_texts: dict                       # {field_label: 用户填的文字} 例 {'主标题': '封面{邪修}', '副标题': '太香啦'}
+    user_texts: dict                       # {field_label: 用户填的文字}
     person_oss_key: Optional[str] = None   # /cover-remove-bg 返的, 无人物模板留空
-    text_overrides: Optional[dict] = None  # {field_label: {font_file?, font_scale?, color?, highlight_color?, stroke_color?, stroke_width?}}
-                                            # 用户前端微调, 覆盖 admin 默认
+    text_overrides: Optional[dict] = None  # 用户对 admin 字段的微调
+    extra_fields: Optional[list] = None    # 用户自己加的额外字段 (admin 没设的). 跟 admin 字段同结构
+    hidden_labels: Optional[list] = None   # 用户隐藏的 admin 字段 label 列表
 
 
 @app.post("/render-cover-from-template")
@@ -2126,6 +2127,8 @@ def render_cover_from_template(req: RenderCoverFromTemplateRequest):
                 person_slot=person_slot,
                 person_png_path=person_path,
                 text_overrides=req.text_overrides or None,
+                extra_fields=req.extra_fields or None,
+                hidden_labels=req.hidden_labels or None,
             )
         except Exception as e:
             raise HTTPException(500, f'封面合成失败: {e}')

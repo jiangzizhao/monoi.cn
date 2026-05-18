@@ -275,55 +275,67 @@ def render_cover(
     person_slot: Optional[dict] = None,
     person_png_path: Optional[str] = None,
     text_overrides: Optional[dict] = None,
+    extra_fields: Optional[list] = None,
+    hidden_labels: Optional[list] = None,
 ) -> Image.Image:
     """合成一张封面.
 
     参数:
     - bg_path: 底图 PNG 本地路径 (已从 OSS 下载)
-    - text_fields: 模板里的 text_fields 数组 [{label, x, y, w, h, font_file, ...}, ...]
-    - user_texts: dict {field_label: user_input}, 例 {'主标题': '封面{邪修}', '副标题': '太香啦'}
-    - person_slot: 模板的人物坑配置 (有人物的话), 例 {x, y, w, h, stroke_*, fit_mode}
-    - person_png_path: 用户人物图 (已经 rembg 抠完 + 描边的透明 PNG) 本地路径
-    - text_overrides: dict {field_label: {font_file?, font_size?, font_scale?, color?,
-                                           highlight_color?, stroke_color?, stroke_width?}}
-                      用户在前端微调的值, 覆盖 admin 默认. font_scale 是字号倍数 (admin 设的 × scale)
+    - text_fields: 模板里 admin 设的字段数组
+    - user_texts: dict {field_label: user_input}
+    - person_slot / person_png_path: 人物配置
+    - text_overrides: 用户对 admin 字段的微调 (font/color/x/y/...)
+    - extra_fields: 用户自己加的额外字段 (admin 没设的, 用户在画布上加的). 跟 admin 字段同结构,
+                    自带 text 在 user_texts 里取 (label 不冲突)
+    - hidden_labels: 用户隐藏的 admin 字段 label 列表 — 渲染时跳过这些
 
-    返回: PIL Image (RGBA), 调用方自己 .save() 到 OSS"""
+    返回: PIL Image (RGBA)"""
     bg = Image.open(bg_path).convert('RGBA')
     overrides = text_overrides or {}
+    hidden = set(hidden_labels or [])
 
-    # 1. 人物坑 (在文字之前画, 文字盖在人物上)
+    # 1. 人物坑
     if person_slot and person_png_path and os.path.exists(person_png_path):
         person_img = Image.open(person_png_path).convert('RGBA')
         fitted = _fit_person(person_img, person_slot)
         bg.alpha_composite(fitted, (int(person_slot['x']), int(person_slot['y'])))
 
-    # 2. 文字字段 — 合并 admin 默认 + 用户 override
-    for field in text_fields:
+    # 2. 把 admin 字段 (没隐藏的) + 用户 extra 字段拼到一起
+    all_fields = []
+    for f in text_fields or []:
+        if f.get('label') not in hidden:
+            all_fields.append((f, True))   # (field, is_admin)
+    for f in extra_fields or []:
+        all_fields.append((f, False))
+
+    # 3. 文字字段 — admin 字段走 override 合并, extra 字段不走 (本身就是用户配置)
+    for field, is_admin in all_fields:
         label = field.get('label', '')
         user_text = user_texts.get(label, field.get('placeholder', ''))
         if not user_text:
             continue
 
-        # 合并: admin 字段配置 + 用户 override (override 优先)
-        merged = dict(field)
-        ovr = overrides.get(label) or {}
-        # 字号: 支持 font_scale 倍数 (前端 slider 用) 和 font_size 直接覆盖
-        if ovr.get('font_scale') and ovr.get('font_scale') != 1.0:
-            base_size = merged.get('font_size', 80)
-            merged['font_size'] = int(base_size * float(ovr['font_scale']))
-        if ovr.get('font_size'):
-            merged['font_size'] = int(ovr['font_size'])
-        # 位置/尺寸 override (用户拖拽时改 x/y)
-        for k in ('x', 'y', 'w', 'h'):
-            v = ovr.get(k)
-            if v is not None:
-                merged[k] = int(v)
-        # 其他直接覆盖 (None / 空字符串跳过, 保留 admin 默认)
-        for k in ('font_file', 'color', 'highlight_color', 'stroke_color', 'stroke_width', 'rotation'):
-            v = ovr.get(k)
-            if v not in (None, ''):
-                merged[k] = v
+        if is_admin:
+            # 合并: admin 字段配置 + 用户 override (override 优先)
+            merged = dict(field)
+            ovr = overrides.get(label) or {}
+            if ovr.get('font_scale') and ovr.get('font_scale') != 1.0:
+                base_size = merged.get('font_size', 80)
+                merged['font_size'] = int(base_size * float(ovr['font_scale']))
+            if ovr.get('font_size'):
+                merged['font_size'] = int(ovr['font_size'])
+            for k in ('x', 'y', 'w', 'h'):
+                v = ovr.get(k)
+                if v is not None:
+                    merged[k] = int(v)
+            for k in ('font_file', 'color', 'highlight_color', 'stroke_color', 'stroke_width', 'rotation'):
+                v = ovr.get(k)
+                if v not in (None, ''):
+                    merged[k] = v
+        else:
+            # extra 字段直接用 (前端传啥就是啥)
+            merged = dict(field)
 
         _draw_text_field(bg, merged, user_text)
 
