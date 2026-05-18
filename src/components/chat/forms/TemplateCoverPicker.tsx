@@ -449,8 +449,9 @@ function TemplatePreview({ template, userTexts, textOverrides, personPreviewUrl 
       {/* 3. 文字 overlay (每个字段一个 absolute div, 用 @font-face 加载的真字体) */}
       {template.text_fields.map((f, i) => {
         const ovr = textOverrides[f.label] || {}
-        const text = userTexts[f.label] || ''
-        if (!text.trim()) return null
+        // 用户没填字时, 用 placeholder 当预览 (这样不填字也能看到模板长啥样)
+        // placeholder 没设的话, fallback 到字段 label
+        const text = (userTexts[f.label] || '').trim() || f.placeholder || f.label
 
         const fontFile = ovr.font_file || f.font_file
         const fontScale = ovr.font_scale ?? 1.0
