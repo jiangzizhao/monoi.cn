@@ -407,7 +407,7 @@ export function TemplateCoverPicker() {
 
 
 /** 模板实时预览 — 底图 + 人物 overlay + 文字 overlay (跟最终 Pillow 渲染基本一致).
- * 文字用 absolute div + CSS, @font-face 加载字体. {} 高亮分段 span 染色. */
+ * 关键: 文字位置/尺寸按 admin 上传时**底图真实像素尺寸**算, 不是 1080. */
 function TemplatePreview({ template, userTexts, textOverrides, personPreviewUrl }: {
   template: CoverTemplate
   userTexts: Record<string, string>
@@ -415,21 +415,35 @@ function TemplatePreview({ template, userTexts, textOverrides, personPreviewUrl 
   personPreviewUrl: string
 }) {
   const personSlot = template.person_slot
-  // 模板原始尺寸 (1080×H), 用来按比例换算
-  const tplW = 1080
-  const tplH = template.ratio === '3:4' ? 1440
+  const imgRef = useRef<HTMLImageElement>(null)
+  // 底图真实像素尺寸 (admin 上传时是多少这就是多少, e.g. 1242×1656)
+  const [bgSize, setBgSize] = useState<{ w: number; h: number } | null>(null)
+
+  // 底图加载后拿真实 naturalWidth/naturalHeight
+  useEffect(() => {
+    const img = imgRef.current
+    if (!img) return
+    if (img.complete && img.naturalWidth) {
+      setBgSize({ w: img.naturalWidth, h: img.naturalHeight })
+    }
+  }, [template.bg_url])
+
+  // 没拿到真实尺寸前用比例反推一个合理的 fallback
+  const fallbackW = 1080
+  const fallbackH = template.ratio === '3:4' ? 1440
     : template.ratio === '9:16' ? 1920
-    : template.ratio === '16:9' ? Math.round(1080 * 9 / 16)    // 16:9 实际 1920×1080, 但 bg 短边 1080
+    : template.ratio === '16:9' ? Math.round(1080 * 9 / 16)
     : 1080
-  // 注意 16:9 / 1:1 比例下底图实际宽高跟上面不一样. 简化: 这个预览只对 3:4 / 9:16 严格准确.
-  // 16:9 横版 admin 拖框时用 1920×1080 也得对应换算 — 这是 v1 已知简化
+  const tplW = bgSize?.w || fallbackW
+  const tplH = bgSize?.h || fallbackH
 
   return (
     <div className="relative rounded-lg overflow-hidden border border-[var(--border)] bg-[var(--bg)]"
          style={{ aspectRatio: template.ratio.replace(':', ' / ') }}>
       {/* 1. 底图 */}
       {template.bg_url && (
-        <img src={template.bg_url} alt=""
+        <img ref={imgRef} src={template.bg_url} alt=""
+          onLoad={e => setBgSize({ w: (e.target as HTMLImageElement).naturalWidth, h: (e.target as HTMLImageElement).naturalHeight })}
           className="absolute inset-0 w-full h-full object-cover pointer-events-none"/>
       )}
 
@@ -449,7 +463,6 @@ function TemplatePreview({ template, userTexts, textOverrides, personPreviewUrl 
       {template.text_fields.map((f, i) => {
         const ovr = textOverrides[f.label] || {}
         // 用户没填字时, 用 placeholder 当预览 (这样不填字也能看到模板长啥样)
-        // placeholder 没设的话, fallback 到字段 label
         const text = (userTexts[f.label] || '').trim() || f.placeholder || f.label
 
         const fontFile = ovr.font_file || f.font_file
@@ -465,10 +478,10 @@ function TemplatePreview({ template, userTexts, textOverrides, personPreviewUrl 
         const justify = align === 'center' ? 'center' : align === 'right' ? 'flex-end' : 'flex-start'
         const textAlign: any = align
 
-        // 描边用 -webkit-text-stroke (Chrome/Safari 支持, 跟 Pillow stroke 视觉接近)
-        // 注意: -webkit-text-stroke 是双侧描边 px 半径, Pillow stroke_width 是膨胀半径, 大致 1:1
+        // 描边: Pillow stroke_width 是膨胀半径 (实际视觉粗度 ~ stroke_width 像素),
+        //       -webkit-text-stroke 是中心半径双侧, 视觉外缘粗度 ~ 一半. 要视觉一致 ×2.
         const strokeCss = strokeColor && strokeWidth > 0
-          ? { WebkitTextStroke: `${strokeWidth / tplW * 100}cqw ${strokeColor}`, paintOrder: 'stroke fill' as const }
+          ? { WebkitTextStroke: `${strokeWidth * 2 / tplW * 100}cqw ${strokeColor}`, paintOrder: 'stroke fill' as const }
           : {}
 
         return (
@@ -480,7 +493,7 @@ function TemplatePreview({ template, userTexts, textOverrides, personPreviewUrl 
               width: `${f.w / tplW * 100}%`,
               height: `${f.h / tplH * 100}%`,
               justifyContent: justify,
-              containerType: 'inline-size',     // 给 cqw 单位用 (字号按预览宽度 cqw 算)
+              containerType: 'inline-size',
             }}>
             <div style={{
               fontFamily: `"${fontFamily(fontFile)}", sans-serif`,
@@ -490,8 +503,22 @@ function TemplatePreview({ template, userTexts, textOverrides, personPreviewUrl 
               lineHeight: 1,
               textAlign,
               whiteSpace: 'nowrap',
+              // 字超出容器自动等比缩小, 跟 Pillow 自动缩字号行为对齐
+              transform: 'scale(1)',
+              transformOrigin: align === 'center' ? 'center' : align === 'right' ? 'right' : 'left',
               ...strokeCss,
-            }}>
+            }}
+              ref={el => {
+                // 字超长时按比例缩小 transform: scale, 视觉跟 Pillow 缩字号一致
+                if (!el || !el.parentElement) return
+                const parentW = el.parentElement.clientWidth
+                el.style.transform = 'scale(1)'   // 重置先量
+                const naturalW = el.scrollWidth
+                if (naturalW > parentW && parentW > 0) {
+                  el.style.transform = `scale(${parentW / naturalW})`
+                }
+              }}
+            >
               {segs.map((s, j) => (
                 <span key={j} style={{ color: s.highlight ? highlightColor : color }}>{s.text}</span>
               ))}
