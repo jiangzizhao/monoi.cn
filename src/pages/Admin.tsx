@@ -1193,23 +1193,10 @@ function CoverTemplateTab() {
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
   const [showEditor, setShowEditor] = useState(false)
-  // admin list 端点不签 URL, 复用公共端点 /api/voice/cover-templates 拿带签 bg_url
-  const [bgUrlMap, setBgUrlMap] = useState<Record<number, string>>({})
 
   const reload = () => {
     setLoading(true); setErr('')
     adminListCoverTemplates().then(r => setList(r.templates || [])).catch(e => setErr(e.message)).finally(() => setLoading(false))
-    // 同时拉公共端点拿签名 URL (复用阶段 2 已有的端点, 不动后端)
-    fetch(directBase + '/api/voice/cover-templates')
-      .then(r => r.json())
-      .then(d => {
-        const m: Record<number, string> = {}
-        for (const t of (d.templates || [])) {
-          if (t.bg_url) m[t.id] = t.bg_url
-        }
-        setBgUrlMap(m)
-      })
-      .catch(() => {})
   }
   useEffect(() => { reload() }, [])
 
@@ -1267,7 +1254,7 @@ function CoverTemplateTab() {
               </div>
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 p-3">
                 {ts.map(t => {
-                  const bgUrl = bgUrlMap[t.id]
+                  const bgUrl = t.bg_url || ''
                   // 按 ratio 推算容器宽高比 + 字段 % 的基准 (字段坐标是按底图实际像素存的,
                   // 但底图本身就是这个比例, 所以 x/y 占比 = x/(W) 这种相对值跟具体像素无关).
                   // 这里假设 admin 上传底图比例跟 ratio 一致, 用 ratio 比例算就行.

@@ -266,6 +266,7 @@ export interface AdminCoverTemplate {
   category: string                    // kepu/zhenjing/gushi/jiaocheng/jianji/zhichang/xuexi/licai/other
   ratio: '9:16' | '3:4' | '16:9' | '1:1'
   bg_oss_key: string
+  bg_url?: string                     // 后端签好的 1h 签名 URL (给 admin 缩略图)
   preview_oss_key?: string | null
   text_fields: CoverTextField[]
   person_slot: CoverPersonSlot | null  // 没人物的模板是 null

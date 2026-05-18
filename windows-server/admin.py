@@ -778,7 +778,8 @@ def admin_add_cover_template(req: AddCoverTemplateRequest, request: Request):
 
 
 def _parse_template_row(r):
-    """sqlite Row → dict, 把 text_fields_json / person_slot_json 解出来"""
+    """sqlite Row → dict, 把 text_fields_json / person_slot_json 解出来,
+    顺手签底图 bg_url (1h 签名), admin 端缩略图能直接展示"""
     import json as _json
     d = dict(r)
     try:
@@ -793,6 +794,19 @@ def _parse_template_row(r):
             d['person_slot'] = None
     else:
         d['person_slot'] = None
+    # 签底图 URL (admin 后台缩略图用)
+    bg_key = d.get('bg_oss_key')
+    if bg_key:
+        try:
+            import sys, os as _os
+            sys.path.insert(0, _os.path.dirname(__file__))
+            from oss_helper import oss_sign_get
+            d['bg_url'] = oss_sign_get(bg_key, expires=3600)
+        except Exception as e:
+            print(f"[admin] bg 签名失败 id={d.get('id')}: {e}", flush=True)
+            d['bg_url'] = ''
+    else:
+        d['bg_url'] = ''
     return d
 
 
