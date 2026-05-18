@@ -71,12 +71,15 @@ export function TemplateCoverPicker() {
     }
   }, [selected?.id])
 
-  // 用户切换字体下拉时也实时加载
+  // 用户切换字体下拉时也实时加载 (admin 字段 override 改字体 + extra 字段加字体, 都监听)
   useEffect(() => {
     for (const ovr of Object.values(textOverrides)) {
       if (ovr.font_file) loadFont(ovr.font_file)
     }
-  }, [textOverrides])
+    for (const f of extraFields) {
+      if (f.font_file) loadFont(f.font_file)
+    }
+  }, [textOverrides, extraFields])
 
   const updateOverride = (label: string, patch: Partial<TextFieldOverride>) => {
     setTextOverrides(prev => ({
@@ -219,7 +222,6 @@ export function TemplateCoverPicker() {
             hiddenLabels={hiddenLabels}
             personPreviewUrl={personPreviewUrl}
             onMoveField={(label, dx, dy) => {
-              // 区分: admin 字段改 override.x/y, extra 字段直接改 extraFields[i].x/y
               const adminField = selected.text_fields.find(ff => ff.label === label)
               if (adminField) {
                 const curOvr = textOverrides[label] || {}
@@ -229,6 +231,46 @@ export function TemplateCoverPicker() {
               } else {
                 setExtraFields(prev => prev.map(f =>
                   f.label === label ? { ...f, x: f.x + dx, y: f.y + dy } : f
+                ))
+              }
+            }}
+            onResizeField={(label, dx, dy, corner) => {
+              // 4 角拖动算法:
+              //   nw: x += dx, y += dy, w -= dx, h -= dy
+              //   ne: y += dy, w += dx, h -= dy
+              //   sw: x += dx, w -= dx, h += dy
+              //   se: w += dx, h += dy
+              const apply = (cur: { x: number; y: number; w: number; h: number }) => {
+                let { x, y, w, h } = cur
+                if (corner === 'nw') { x += dx; y += dy; w -= dx; h -= dy }
+                else if (corner === 'ne') { y += dy; w += dx; h -= dy }
+                else if (corner === 'sw') { x += dx; w -= dx; h += dy }
+                else { w += dx; h += dy }     // se
+                // 最小尺寸 20
+                w = Math.max(20, w); h = Math.max(20, h)
+                return { x, y, w, h }
+              }
+              const adminField = selected.text_fields.find(ff => ff.label === label)
+              if (adminField) {
+                const curOvr = textOverrides[label] || {}
+                const cur = {
+                  x: curOvr.x ?? adminField.x, y: curOvr.y ?? adminField.y,
+                  w: curOvr.w ?? adminField.w, h: curOvr.h ?? adminField.h,
+                }
+                updateOverride(label, apply(cur))
+              } else {
+                setExtraFields(prev => prev.map(f =>
+                  f.label === label ? { ...f, ...apply({ x: f.x, y: f.y, w: f.w, h: f.h }) } : f
+                ))
+              }
+            }}
+            onRotateField={(label, rotation) => {
+              const adminField = selected.text_fields.find(ff => ff.label === label)
+              if (adminField) {
+                updateOverride(label, { rotation })
+              } else {
+                setExtraFields(prev => prev.map(f =>
+                  f.label === label ? { ...f, rotation } : f
                 ))
               }
             }}
@@ -507,7 +549,7 @@ export function TemplateCoverPicker() {
 
 /** 模板实时预览 — 底图 + 人物 overlay + 文字 overlay (跟最终 Pillow 渲染基本一致).
  * 关键: 文字位置/尺寸按 admin 上传时**底图真实像素尺寸**算, 不是 1080. */
-function TemplatePreview({ template, userTexts, textOverrides, extraFields, hiddenLabels, personPreviewUrl, onMoveField }: {
+function TemplatePreview({ template, userTexts, textOverrides, extraFields, hiddenLabels, personPreviewUrl, onMoveField, onResizeField, onRotateField }: {
   template: CoverTemplate
   userTexts: Record<string, string>
   textOverrides: Record<string, TextFieldOverride>
@@ -515,14 +557,25 @@ function TemplatePreview({ template, userTexts, textOverrides, extraFields, hidd
   hiddenLabels?: Set<string>
   personPreviewUrl: string
   onMoveField?: (label: string, dx: number, dy: number) => void
+  onResizeField?: (label: string, dx: number, dy: number, corner: 'nw' | 'ne' | 'sw' | 'se') => void
+  onRotateField?: (label: string, rotation: number) => void
 }) {
   const personSlot = template.person_slot
   const imgRef = useRef<HTMLImageElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
-  // 底图真实像素尺寸 (admin 上传时是多少这就是多少, e.g. 1242×1656)
   const [bgSize, setBgSize] = useState<{ w: number; h: number } | null>(null)
-  // 当前在拖的字段 (label) + 起点鼠标位置
-  const draggingRef = useRef<{ label: string; startX: number; startY: number } | null>(null)
+  // 当前选中的字段 label (画手柄用)
+  const [activeLabel, setActiveLabel] = useState<string | null>(null)
+
+  // 鼠标交互状态: move | resize | rotate
+  const interactionRef = useRef<{
+    type: 'move' | 'resize' | 'rotate'
+    label: string
+    startMouseX: number; startMouseY: number
+    corner?: 'nw' | 'ne' | 'sw' | 'se'
+    centerX?: number; centerY?: number          // rotate 用
+    startRotation?: number                        // rotate 起点角度
+  } | null>(null)
 
   // 底图加载后拿真实 naturalWidth/naturalHeight
   useEffect(() => {
@@ -533,7 +586,6 @@ function TemplatePreview({ template, userTexts, textOverrides, extraFields, hidd
     }
   }, [template.bg_url])
 
-  // 没拿到真实尺寸前用比例反推一个合理的 fallback
   const fallbackW = 1080
   const fallbackH = template.ratio === '3:4' ? 1440
     : template.ratio === '9:16' ? 1920
@@ -542,30 +594,43 @@ function TemplatePreview({ template, userTexts, textOverrides, extraFields, hidd
   const tplW = bgSize?.w || fallbackW
   const tplH = bgSize?.h || fallbackH
 
-  // 拖拽: mousedown 记起点, mousemove 算位移 → 触发 onMoveField, mouseup 结束.
-  // 用 ref 存中间状态 + 全局 mousemove/mouseup listener (确保鼠标拖出容器也能跟踪)
+  // 全局 mousemove/mouseup, 处理 3 种交互
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
-      const d = draggingRef.current
-      if (!d || !containerRef.current || !onMoveField) return
+      const it = interactionRef.current
+      if (!it || !containerRef.current) return
       const rect = containerRef.current.getBoundingClientRect()
-      // 浏览器 px 位移 → 底图 px 位移 (按预览容器/底图真实尺寸的缩放比)
       const scale = tplW / rect.width
-      const dx = Math.round((e.clientX - d.startX) * scale)
-      const dy = Math.round((e.clientY - d.startY) * scale)
-      if (dx === 0 && dy === 0) return
-      onMoveField(d.label, dx, dy)
-      // 重置起点 (这样每次 mousemove 都是增量, 不会累积)
-      draggingRef.current = { label: d.label, startX: e.clientX, startY: e.clientY }
+
+      if (it.type === 'move' && onMoveField) {
+        const dx = Math.round((e.clientX - it.startMouseX) * scale)
+        const dy = Math.round((e.clientY - it.startMouseY) * scale)
+        if (dx === 0 && dy === 0) return
+        onMoveField(it.label, dx, dy)
+        interactionRef.current = { ...it, startMouseX: e.clientX, startMouseY: e.clientY }
+      } else if (it.type === 'resize' && onResizeField && it.corner) {
+        const dx = Math.round((e.clientX - it.startMouseX) * scale)
+        const dy = Math.round((e.clientY - it.startMouseY) * scale)
+        if (dx === 0 && dy === 0) return
+        onResizeField(it.label, dx, dy, it.corner)
+        interactionRef.current = { ...it, startMouseX: e.clientX, startMouseY: e.clientY }
+      } else if (it.type === 'rotate' && onRotateField && it.centerX !== undefined && it.centerY !== undefined && it.startRotation !== undefined) {
+        // atan2(0, -1) = 180° = 顶部. 起点向量是 (startMouse - center), 当前向量是 (cur - center).
+        // 旋转 = angle(cur) - angle(start)
+        const a0 = Math.atan2(it.startMouseY - it.centerY, it.startMouseX - it.centerX) * 180 / Math.PI
+        const a1 = Math.atan2(e.clientY - it.centerY, e.clientX - it.centerX) * 180 / Math.PI
+        const deg = it.startRotation + (a1 - a0)
+        onRotateField(it.label, Math.round(deg))
+      }
     }
-    const onUp = () => { draggingRef.current = null; document.body.style.cursor = '' }
+    const onUp = () => { interactionRef.current = null; document.body.style.cursor = '' }
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
     return () => {
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
     }
-  }, [tplW, onMoveField])
+  }, [tplW, onMoveField, onResizeField, onRotateField])
 
   return (
     <div ref={containerRef} className="relative rounded-lg overflow-hidden border border-[var(--border)] bg-[var(--bg)]"
@@ -642,16 +707,19 @@ function TemplatePreview({ template, userTexts, textOverrides, extraFields, hidd
               justifyContent: justify,
               containerType: 'inline-size',
             }
+        const isActive = activeLabel === f.label
         return (
           <div key={i}
-            className={`absolute flex items-center select-none ${hasRotation ? '' : 'overflow-hidden'} ${onMoveField ? 'cursor-move hover:outline hover:outline-2 hover:outline-amber-400/70' : 'pointer-events-none'}`}
+            className={`absolute flex items-center select-none ${hasRotation ? '' : 'overflow-hidden'} ${onMoveField ? `cursor-move ${isActive ? 'outline outline-2 outline-blue-500' : 'hover:outline hover:outline-2 hover:outline-amber-400/70'}` : 'pointer-events-none'}`}
             style={wrapperStyle}
             onMouseDown={onMoveField ? (e) => {
               e.preventDefault()
-              draggingRef.current = { label: f.label, startX: e.clientX, startY: e.clientY }
+              e.stopPropagation()
+              setActiveLabel(f.label)
+              interactionRef.current = { type: 'move', label: f.label, startMouseX: e.clientX, startMouseY: e.clientY }
               document.body.style.cursor = 'move'
             } : undefined}
-            title={onMoveField ? '拖动调位置' : undefined}>
+            title={onMoveField ? '拖动调位置, 点选中显示手柄' : undefined}>
             <div style={{
               fontFamily: `"${fontFamily(fontFile)}", sans-serif`,
               fontSize: `${fontSize / tplW * 100}cqw`,
@@ -683,6 +751,55 @@ function TemplatePreview({ template, userTexts, textOverrides, extraFields, hidd
                 <span key={j} style={{ color: s.highlight ? highlightColor : color }}>{s.text}</span>
               ))}
             </div>
+
+            {/* Canva 风手柄: 4 角缩放 + 顶部旋转 (只在选中时显示, 只有支持 resize/rotate 回调时) */}
+            {isActive && onResizeField && (
+              <>
+                {(['nw', 'ne', 'sw', 'se'] as const).map(corner => {
+                  const pos: React.CSSProperties = {
+                    position: 'absolute',
+                    top: corner.startsWith('n') ? -6 : 'auto',
+                    bottom: corner.startsWith('s') ? -6 : 'auto',
+                    left: corner.endsWith('w') ? -6 : 'auto',
+                    right: corner.endsWith('e') ? -6 : 'auto',
+                    cursor: `${corner}-resize`,
+                  }
+                  return (
+                    <div key={corner}
+                      onMouseDown={(e) => {
+                        e.preventDefault(); e.stopPropagation()
+                        interactionRef.current = { type: 'resize', label: f.label, corner,
+                          startMouseX: e.clientX, startMouseY: e.clientY }
+                        document.body.style.cursor = `${corner}-resize`
+                      }}
+                      className="w-3 h-3 bg-blue-500 border-2 border-white rounded-sm shadow"
+                      style={pos}/>
+                  )
+                })}
+              </>
+            )}
+            {isActive && onRotateField && (
+              <div
+                onMouseDown={(e) => {
+                  e.preventDefault(); e.stopPropagation()
+                  // 算字段中心点 (屏幕坐标) — 用 containerRef + 字段 % 反算
+                  const rect = containerRef.current?.getBoundingClientRect()
+                  if (!rect) return
+                  const cx = rect.left + (posX + posW / 2) / tplW * rect.width
+                  const cy = rect.top + (posY + posH / 2) / tplH * rect.height
+                  interactionRef.current = {
+                    type: 'rotate', label: f.label,
+                    startMouseX: e.clientX, startMouseY: e.clientY,
+                    centerX: cx, centerY: cy,
+                    startRotation: rotation,
+                  }
+                  document.body.style.cursor = 'crosshair'
+                }}
+                className="absolute w-3 h-3 bg-amber-500 border-2 border-white rounded-full shadow cursor-crosshair"
+                style={{ top: -24, left: '50%', transform: 'translateX(-50%)' }}
+                title="拖动旋转"
+              />
+            )}
           </div>
         )
       })}

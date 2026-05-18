@@ -98,6 +98,7 @@ export interface TextFieldOverride {
   y?: number
   w?: number
   h?: number
+  rotation?: number                      // 旋转角度 (°)
 }
 
 /** 按模板渲染封面 */
