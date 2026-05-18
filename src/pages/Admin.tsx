@@ -1761,11 +1761,10 @@ function CoverTemplateEditor({ onClose, onSaved }: { onClose: () => void; onSave
                                 style={pos}/>
                             )
                           })}
-                          {/* 顶部旋转手柄 */}
+                          {/* 顶部旋转手柄 — 圆形带 ↻ 图标, 大一点显眼 */}
                           <div
                             onMouseDown={(e) => {
                               e.preventDefault(); e.stopPropagation()
-                              // 字段中心 (屏幕坐标) — 用底图缩放算
                               const imgEl2 = canvasRef.current?.querySelector('img')
                               const r2 = imgEl2?.getBoundingClientRect()
                               if (!r2) return
@@ -1779,9 +1778,13 @@ function CoverTemplateEditor({ onClose, onSaved }: { onClose: () => void; onSave
                               }
                               document.body.style.cursor = 'crosshair'
                             }}
-                            className="absolute w-3 h-3 bg-amber-500 border-2 border-white rounded-full shadow cursor-crosshair"
-                            style={{ top: -24, left: '50%', transform: 'translateX(-50%)' }}
-                            title="拖动旋转"/>
+                            className="absolute w-6 h-6 bg-blue-500 border-2 border-white rounded-full shadow-lg cursor-grab active:cursor-grabbing flex items-center justify-center text-white text-[10px] font-bold"
+                            style={{ top: -32, left: '50%', transform: 'translateX(-50%)', zIndex: 20 }}
+                            title="拖动旋转"
+                          >↻</div>
+                          {/* 旋转手柄到框顶的连线 (视觉指示) */}
+                          <div className="absolute pointer-events-none border-l border-blue-500"
+                            style={{ top: -20, left: '50%', width: 0, height: 12, transform: 'translateX(-0.5px)' }}/>
                         </>
                       )}
                     </div>

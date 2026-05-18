@@ -176,22 +176,27 @@ export function TemplateCoverPicker() {
           <div key={cat}>
             <div className="text-[11px] text-[var(--text-3)] px-1 mb-2">{CAT_LABEL[cat] || cat} · {ts.length} 个</div>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              {ts.map(t => (
-                <button
-                  key={t.id}
-                  onClick={() => setSelected(t)}
-                  className="relative group rounded-lg border border-[var(--border)] overflow-hidden hover:border-[var(--text-3)] cursor-pointer transition-colors"
-                >
-                  <div className="aspect-[3/4] bg-[var(--bg)] relative">
-                    {t.bg_url ? (
-                      <img src={t.bg_url} alt={t.name} className="w-full h-full object-cover"/>
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-[var(--text-3)] text-xs">{t.ratio}</div>
-                    )}
-                  </div>
-                  <div className="px-2 py-1.5 bg-[var(--bg-card)] text-xs text-[var(--text)] truncate text-left">{t.name}</div>
-                </button>
-              ))}
+              {ts.map(t => {
+                // 卡片用 TemplatePreview 显示底图 + 字体预览, 但是 read-only (没 onMove/onResize/onRotate)
+                // userTexts 默认 = 每个字段的 placeholder, 让缩略图能看到字
+                const cardTexts: Record<string, string> = {}
+                for (const f of t.text_fields) cardTexts[f.label] = f.placeholder || f.label
+                return (
+                  <button
+                    key={t.id}
+                    onClick={() => setSelected(t)}
+                    className="relative group rounded-lg border border-[var(--border)] overflow-hidden hover:border-[var(--text-3)] cursor-pointer transition-colors text-left"
+                  >
+                    <TemplatePreview
+                      template={t}
+                      userTexts={cardTexts}
+                      textOverrides={{}}
+                      personPreviewUrl=""
+                    />
+                    <div className="px-2 py-1.5 bg-[var(--bg-card)] text-xs text-[var(--text)] truncate">{t.name}</div>
+                  </button>
+                )
+              })}
             </div>
           </div>
         ))}
@@ -212,8 +217,8 @@ export function TemplateCoverPicker() {
       </button>
 
       <div className="flex flex-col sm:flex-row gap-4">
-        {/* 左: 模板预览 + 已抠人物覆盖 + 实时文字预览 */}
-        <div className="sm:w-56 flex-shrink-0">
+        {/* 左: 模板预览 + 已抠人物覆盖 + 实时文字预览 — 容器加大让字号显大 */}
+        <div className="sm:w-80 flex-shrink-0">
           <TemplatePreview
             template={selected}
             userTexts={userTexts}
@@ -586,6 +591,16 @@ function TemplatePreview({ template, userTexts, textOverrides, extraFields, hidd
     }
   }, [template.bg_url])
 
+  // 模板内每个字段用的字体, 自己负责加载 (让卡片缩略图也能用真字体显示)
+  useEffect(() => {
+    for (const f of template.text_fields) {
+      if (f.font_file) loadFont(f.font_file)
+    }
+    for (const f of (extraFields || [])) {
+      if (f.font_file) loadFont(f.font_file)
+    }
+  }, [template.id, template.text_fields, extraFields])
+
   const fallbackW = 1080
   const fallbackH = template.ratio === '3:4' ? 1440
     : template.ratio === '9:16' ? 1920
@@ -779,26 +794,29 @@ function TemplatePreview({ template, userTexts, textOverrides, extraFields, hidd
               </>
             )}
             {isActive && onRotateField && (
-              <div
-                onMouseDown={(e) => {
-                  e.preventDefault(); e.stopPropagation()
-                  // 算字段中心点 (屏幕坐标) — 用 containerRef + 字段 % 反算
-                  const rect = containerRef.current?.getBoundingClientRect()
-                  if (!rect) return
-                  const cx = rect.left + (posX + posW / 2) / tplW * rect.width
-                  const cy = rect.top + (posY + posH / 2) / tplH * rect.height
-                  interactionRef.current = {
-                    type: 'rotate', label: f.label,
-                    startMouseX: e.clientX, startMouseY: e.clientY,
-                    centerX: cx, centerY: cy,
-                    startRotation: rotation,
-                  }
-                  document.body.style.cursor = 'crosshair'
-                }}
-                className="absolute w-3 h-3 bg-amber-500 border-2 border-white rounded-full shadow cursor-crosshair"
-                style={{ top: -24, left: '50%', transform: 'translateX(-50%)' }}
-                title="拖动旋转"
-              />
+              <>
+                <div
+                  onMouseDown={(e) => {
+                    e.preventDefault(); e.stopPropagation()
+                    const rect = containerRef.current?.getBoundingClientRect()
+                    if (!rect) return
+                    const cx = rect.left + (posX + posW / 2) / tplW * rect.width
+                    const cy = rect.top + (posY + posH / 2) / tplH * rect.height
+                    interactionRef.current = {
+                      type: 'rotate', label: f.label,
+                      startMouseX: e.clientX, startMouseY: e.clientY,
+                      centerX: cx, centerY: cy,
+                      startRotation: rotation,
+                    }
+                    document.body.style.cursor = 'crosshair'
+                  }}
+                  className="absolute w-6 h-6 bg-blue-500 border-2 border-white rounded-full shadow-lg cursor-grab active:cursor-grabbing flex items-center justify-center text-white text-[10px] font-bold"
+                  style={{ top: -32, left: '50%', transform: 'translateX(-50%)', zIndex: 20 }}
+                  title="拖动旋转"
+                >↻</div>
+                <div className="absolute pointer-events-none border-l border-blue-500"
+                  style={{ top: -20, left: '50%', width: 0, height: 12, transform: 'translateX(-0.5px)' }}/>
+              </>
             )}
           </div>
         )
