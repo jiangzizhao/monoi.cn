@@ -1466,7 +1466,7 @@ function CoverTemplateEditor({ onClose, onSaved }: { onClose: () => void; onSave
   const handleSave = async () => {
     if (!name.trim()) { setEditorErr('请填模板名'); return }
     if (!bgOssKey) { setEditorErr('请先上传底图'); return }
-    if (fields.length === 0) { setEditorErr('请至少拖框定义 1 个文字字段'); return }
+    // 字段为空也允许 (纯底图模板, 用户自己加文字)
     setSaving(true); setEditorErr('')
     try {
       const cleanFields: CoverTextField[] = fields.map(({ _id, ...f }) => f)
