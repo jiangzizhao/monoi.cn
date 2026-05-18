@@ -1936,7 +1936,8 @@ def list_cover_templates():
         conn.row_factory = _sq.Row
         try:
             rows = conn.execute("""
-                SELECT id, name, category, ratio, bg_oss_key, text_fields_json, preview_oss_key, created_at
+                SELECT id, name, category, ratio, bg_oss_key, text_fields_json,
+                       person_slot_json, preview_oss_key, created_at
                 FROM cover_template ORDER BY category, created_at DESC
             """).fetchall()
         finally:
@@ -1968,6 +1969,14 @@ def list_cover_templates():
             text_fields = _json.loads(r['text_fields_json'] or '[]')
         except Exception:
             text_fields = []
+        # person_slot 是可选的 (没人物的模板返 null), 前端要这个判断有没有人物坑显示上传按钮
+        person_slot = None
+        try:
+            raw_ps = r['person_slot_json']
+            if raw_ps:
+                person_slot = _json.loads(raw_ps)
+        except Exception:
+            person_slot = None
         templates.append({
             'id': r['id'],
             'name': r['name'],
@@ -1976,6 +1985,7 @@ def list_cover_templates():
             'bg_url': bg_url,
             'preview_url': preview_url,
             'text_fields': text_fields,
+            'person_slot': person_slot,
             'created_at': r['created_at'],
         })
     return {'templates': templates}
