@@ -314,8 +314,13 @@ def render_cover(
             merged['font_size'] = int(base_size * float(ovr['font_scale']))
         if ovr.get('font_size'):
             merged['font_size'] = int(ovr['font_size'])
+        # 位置/尺寸 override (用户拖拽时改 x/y)
+        for k in ('x', 'y', 'w', 'h'):
+            v = ovr.get(k)
+            if v is not None:
+                merged[k] = int(v)
         # 其他直接覆盖 (None / 空字符串跳过, 保留 admin 默认)
-        for k in ('font_file', 'color', 'highlight_color', 'stroke_color', 'stroke_width'):
+        for k in ('font_file', 'color', 'highlight_color', 'stroke_color', 'stroke_width', 'rotation'):
             v = ovr.get(k)
             if v not in (None, ''):
                 merged[k] = v

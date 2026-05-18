@@ -152,6 +152,10 @@ export function TemplateCoverPicker() {
         if (ovr.highlight_color) trimmed.highlight_color = ovr.highlight_color
         if (ovr.stroke_color) trimmed.stroke_color = ovr.stroke_color
         if (ovr.stroke_width !== undefined) trimmed.stroke_width = ovr.stroke_width
+        if (ovr.x !== undefined) trimmed.x = ovr.x      // 用户拖拽位置
+        if (ovr.y !== undefined) trimmed.y = ovr.y
+        if (ovr.w !== undefined) trimmed.w = ovr.w
+        if (ovr.h !== undefined) trimmed.h = ovr.h
         if (Object.keys(trimmed).length > 0) cleanOverrides[label] = trimmed
       }
       const r = await renderCoverFromTemplate({
@@ -242,9 +246,18 @@ export function TemplateCoverPicker() {
             userTexts={userTexts}
             textOverrides={textOverrides}
             personPreviewUrl={personPreviewUrl}
+            onMoveField={(label, dx, dy) => {
+              // dx/dy 是相对底图 px 的位移 (TemplatePreview 内部已经按 bgSize 换算)
+              const baseField = selected.text_fields.find(ff => ff.label === label)
+              if (!baseField) return
+              const curOvr = textOverrides[label] || {}
+              const curX = curOvr.x ?? baseField.x
+              const curY = curOvr.y ?? baseField.y
+              updateOverride(label, { x: curX + dx, y: curY + dy })
+            }}
           />
           <div className="text-xs text-[var(--text-2)] mt-2 text-center">{selected.name}</div>
-          <div className="text-[10px] text-[var(--text-3)] text-center">{selected.ratio} · 实时预览 (跟最终图基本一致)</div>
+          <div className="text-[10px] text-[var(--text-3)] text-center">{selected.ratio} · 拖动文字调位置, 实时预览</div>
         </div>
 
         {/* 右: 填字 + 人物 */}
@@ -408,16 +421,20 @@ export function TemplateCoverPicker() {
 
 /** 模板实时预览 — 底图 + 人物 overlay + 文字 overlay (跟最终 Pillow 渲染基本一致).
  * 关键: 文字位置/尺寸按 admin 上传时**底图真实像素尺寸**算, 不是 1080. */
-function TemplatePreview({ template, userTexts, textOverrides, personPreviewUrl }: {
+function TemplatePreview({ template, userTexts, textOverrides, personPreviewUrl, onMoveField }: {
   template: CoverTemplate
   userTexts: Record<string, string>
   textOverrides: Record<string, TextFieldOverride>
   personPreviewUrl: string
+  onMoveField?: (label: string, dx: number, dy: number) => void   // dx/dy = 相对底图的 px 位移
 }) {
   const personSlot = template.person_slot
   const imgRef = useRef<HTMLImageElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
   // 底图真实像素尺寸 (admin 上传时是多少这就是多少, e.g. 1242×1656)
   const [bgSize, setBgSize] = useState<{ w: number; h: number } | null>(null)
+  // 当前在拖的字段 (label) + 起点鼠标位置
+  const draggingRef = useRef<{ label: string; startX: number; startY: number } | null>(null)
 
   // 底图加载后拿真实 naturalWidth/naturalHeight
   useEffect(() => {
@@ -437,8 +454,33 @@ function TemplatePreview({ template, userTexts, textOverrides, personPreviewUrl 
   const tplW = bgSize?.w || fallbackW
   const tplH = bgSize?.h || fallbackH
 
+  // 拖拽: mousedown 记起点, mousemove 算位移 → 触发 onMoveField, mouseup 结束.
+  // 用 ref 存中间状态 + 全局 mousemove/mouseup listener (确保鼠标拖出容器也能跟踪)
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      const d = draggingRef.current
+      if (!d || !containerRef.current || !onMoveField) return
+      const rect = containerRef.current.getBoundingClientRect()
+      // 浏览器 px 位移 → 底图 px 位移 (按预览容器/底图真实尺寸的缩放比)
+      const scale = tplW / rect.width
+      const dx = Math.round((e.clientX - d.startX) * scale)
+      const dy = Math.round((e.clientY - d.startY) * scale)
+      if (dx === 0 && dy === 0) return
+      onMoveField(d.label, dx, dy)
+      // 重置起点 (这样每次 mousemove 都是增量, 不会累积)
+      draggingRef.current = { label: d.label, startX: e.clientX, startY: e.clientY }
+    }
+    const onUp = () => { draggingRef.current = null; document.body.style.cursor = '' }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [tplW, onMoveField])
+
   return (
-    <div className="relative rounded-lg overflow-hidden border border-[var(--border)] bg-[var(--bg)]"
+    <div ref={containerRef} className="relative rounded-lg overflow-hidden border border-[var(--border)] bg-[var(--bg)]"
          style={{ aspectRatio: template.ratio.replace(':', ' / ') }}>
       {/* 1. 底图 */}
       {template.bg_url && (
@@ -462,7 +504,6 @@ function TemplatePreview({ template, userTexts, textOverrides, personPreviewUrl 
       {/* 3. 文字 overlay (每个字段一个 absolute div, 用 @font-face 加载的真字体) */}
       {template.text_fields.map((f, i) => {
         const ovr = textOverrides[f.label] || {}
-        // 用户没填字时, 用 placeholder 当预览 (这样不填字也能看到模板长啥样)
         const text = (userTexts[f.label] || '').trim() || f.placeholder || f.label
 
         const fontFile = ovr.font_file || f.font_file
@@ -474,42 +515,51 @@ function TemplatePreview({ template, userTexts, textOverrides, personPreviewUrl 
         const strokeWidth = ovr.stroke_width ?? f.stroke_width
         const align = f.align || 'left'
 
+        // 位置: 用户拖拽 override 优先, 否则 admin 默认
+        const posX = ovr.x ?? f.x
+        const posY = ovr.y ?? f.y
+        const posW = ovr.w ?? f.w
+        const posH = ovr.h ?? f.h
+
         const segs = parseSegments(text)
         const justify = align === 'center' ? 'center' : align === 'right' ? 'flex-end' : 'flex-start'
         const textAlign: any = align
 
-        // 描边: Pillow stroke_width 是膨胀半径 (实际视觉粗度 ~ stroke_width 像素),
-        //       -webkit-text-stroke 是中心半径双侧, 视觉外缘粗度 ~ 一半. 要视觉一致 ×2.
         const strokeCss = strokeColor && strokeWidth > 0
           ? { WebkitTextStroke: `${strokeWidth * 2 / tplW * 100}cqw ${strokeColor}`, paintOrder: 'stroke fill' as const }
           : {}
 
         const rotation = f.rotation || 0
-        // 有旋转时, 内层 div 不限 nowrap 缩字, 而是按中心旋转. 容器允许 overflow 文字超出
         const hasRotation = Math.abs(rotation) > 0.01
         const wrapperStyle: React.CSSProperties = hasRotation
           ? {
-              left: `${f.x / tplW * 100}%`,
-              top: `${f.y / tplH * 100}%`,
-              width: `${f.w / tplW * 100}%`,
-              height: `${f.h / tplH * 100}%`,
-              justifyContent: 'center',                            // 旋转时统一中心
+              left: `${posX / tplW * 100}%`,
+              top: `${posY / tplH * 100}%`,
+              width: `${posW / tplW * 100}%`,
+              height: `${posH / tplH * 100}%`,
+              justifyContent: 'center',
               alignItems: 'center',
               containerType: 'inline-size',
-              overflow: 'visible',                                  // 让旋转后伸出的字不裁
+              overflow: 'visible',
             }
           : {
-              left: `${f.x / tplW * 100}%`,
-              top: `${f.y / tplH * 100}%`,
-              width: `${f.w / tplW * 100}%`,
-              height: `${f.h / tplH * 100}%`,
+              left: `${posX / tplW * 100}%`,
+              top: `${posY / tplH * 100}%`,
+              width: `${posW / tplW * 100}%`,
+              height: `${posH / tplH * 100}%`,
               justifyContent: justify,
               containerType: 'inline-size',
             }
         return (
           <div key={i}
-            className={`absolute flex items-center pointer-events-none ${hasRotation ? '' : 'overflow-hidden'}`}
-            style={wrapperStyle}>
+            className={`absolute flex items-center select-none ${hasRotation ? '' : 'overflow-hidden'} ${onMoveField ? 'cursor-move hover:outline hover:outline-2 hover:outline-amber-400/70' : 'pointer-events-none'}`}
+            style={wrapperStyle}
+            onMouseDown={onMoveField ? (e) => {
+              e.preventDefault()
+              draggingRef.current = { label: f.label, startX: e.clientX, startY: e.clientY }
+              document.body.style.cursor = 'move'
+            } : undefined}
+            title={onMoveField ? '拖动调位置' : undefined}>
             <div style={{
               fontFamily: `"${fontFamily(fontFile)}", sans-serif`,
               fontSize: `${fontSize / tplW * 100}cqw`,

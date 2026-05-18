@@ -94,6 +94,10 @@ export interface TextFieldOverride {
   highlight_color?: string               // {} 大括号包字的色
   stroke_color?: string                  // 描边色
   stroke_width?: number                  // 描边宽
+  x?: number                             // 用户拖拽位置 (px, 相对底图)
+  y?: number
+  w?: number
+  h?: number
 }
 
 /** 按模板渲染封面: 模板 id + 用户填的文字 + (可选) 用户微调样式 + 抠好的人物 oss_key */
