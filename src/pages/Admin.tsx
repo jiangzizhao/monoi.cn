@@ -1266,34 +1266,29 @@ function CoverTemplateTab() {
               </div>
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 p-3">
                 {ts.map(t => {
-                  const bgUrl = bgUrlMap[t.id]    // 从公共端点拉到的签名 URL
+                  const bgUrl = bgUrlMap[t.id]
+                  // 按 ratio 推算容器宽高比 + 字段 % 的基准 (字段坐标是按底图实际像素存的,
+                  // 但底图本身就是这个比例, 所以 x/y 占比 = x/(W) 这种相对值跟具体像素无关).
+                  // 这里假设 admin 上传底图比例跟 ratio 一致, 用 ratio 比例算就行.
+                  const aspectClass = t.ratio === '3:4' ? 'aspect-[3/4]'
+                    : t.ratio === '9:16' ? 'aspect-[9/16]'
+                    : t.ratio === '16:9' ? 'aspect-[16/9]'
+                    : 'aspect-square'
+                  // 字段 % 计算: 用比例反推, e.g. 3:4 模板里 x=60, w=1080 → 60/1080 不对,
+                  // 实际 admin 编辑器存的是真实像素值. 用 ratio 比例算 % 时, 需要拿到真实底图 W.
+                  // 这里偷懒: 用 img 加载后的 naturalWidth 兜底; 没加载完就先 hidden 字段 overlay.
                   return (
                     <div key={t.id} className="relative group rounded-lg border border-[var(--border)] overflow-hidden">
-                      <div className="aspect-[3/4] bg-[var(--bg)] flex items-center justify-center text-xs text-[var(--text-3)] relative">
+                      <div className={`${aspectClass} bg-[var(--bg)] flex items-center justify-center text-xs text-[var(--text-3)] relative`}>
                         {bgUrl ? (
-                          <img src={bgUrl} alt={t.name} className="w-full h-full object-cover"/>
+                          <img src={bgUrl} alt={t.name}
+                            data-template-id={t.id}
+                            className="w-full h-full object-cover"/>
                         ) : (
                           <span>{t.ratio} · {t.text_fields.length} 个字段</span>
                         )}
-                        {/* 字段框 overlay (薄薄一层, 让 admin 看到布局) */}
-                        {bgUrl && t.text_fields.map((f, i) => (
-                          <div key={i} className="absolute border border-amber-400/70 bg-amber-400/10 pointer-events-none"
-                            style={{
-                              left: `${f.x / 1080 * 100}%`,
-                              top: `${f.y / (t.ratio === '3:4' ? 1440 : 1920) * 100}%`,
-                              width: `${f.w / 1080 * 100}%`,
-                              height: `${f.h / (t.ratio === '3:4' ? 1440 : 1920) * 100}%`,
-                            }}/>
-                        ))}
-                        {bgUrl && t.person_slot && (
-                          <div className="absolute border border-pink-400/70 bg-pink-400/10 pointer-events-none"
-                            style={{
-                              left: `${t.person_slot.x / 1080 * 100}%`,
-                              top: `${t.person_slot.y / (t.ratio === '3:4' ? 1440 : 1920) * 100}%`,
-                              width: `${t.person_slot.w / 1080 * 100}%`,
-                              height: `${t.person_slot.h / (t.ratio === '3:4' ? 1440 : 1920) * 100}%`,
-                            }}/>
-                        )}
+                        {/* 字段框 overlay — % 按底图 natural size 算 (跟 TemplatePreview 一致) */}
+                        {bgUrl && <TemplateOverlayBoxes template={t} bgUrl={bgUrl}/>}
                       </div>
                       <div className="px-2 py-1.5 bg-[var(--bg-card)] text-xs text-[var(--text)] truncate flex items-center gap-1">
                         <span className="flex-1 truncate">{t.name}</span>
@@ -1869,5 +1864,40 @@ function PersonSlotEditor({ slot, onChange, onRemove }: {
         )}
       </div>
     </div>
+  )
+}
+
+
+/** 用底图真实尺寸 (naturalWidth/Height) 算字段 + 人物坑的 % 定位,
+ * 这样 16:9 / 3:4 / 9:16 任何比例 admin 上传都对得上 */
+function TemplateOverlayBoxes({ template, bgUrl }: { template: AdminCoverTemplate; bgUrl: string }) {
+  const [size, setSize] = useState<{ w: number; h: number } | null>(null)
+  useEffect(() => {
+    const img = new Image()
+    img.onload = () => setSize({ w: img.naturalWidth, h: img.naturalHeight })
+    img.src = bgUrl
+  }, [bgUrl])
+  if (!size) return null
+  return (
+    <>
+      {template.text_fields.map((f, i) => (
+        <div key={i} className="absolute border border-amber-400/70 bg-amber-400/10 pointer-events-none"
+          style={{
+            left: `${f.x / size.w * 100}%`,
+            top: `${f.y / size.h * 100}%`,
+            width: `${f.w / size.w * 100}%`,
+            height: `${f.h / size.h * 100}%`,
+          }}/>
+      ))}
+      {template.person_slot && (
+        <div className="absolute border border-pink-400/70 bg-pink-400/10 pointer-events-none"
+          style={{
+            left: `${template.person_slot.x / size.w * 100}%`,
+            top: `${template.person_slot.y / size.h * 100}%`,
+            width: `${template.person_slot.w / size.w * 100}%`,
+            height: `${template.person_slot.h / size.h * 100}%`,
+          }}/>
+      )}
+    </>
   )
 }
