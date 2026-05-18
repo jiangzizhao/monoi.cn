@@ -16,6 +16,7 @@ import {
 } from '../services/admin'
 import { fetchMyProfile } from '../services/billing'
 import { isLoggedIn } from '../lib/auth'
+import { loadFont, fontFamily, parseSegments } from '../utils/coverFonts'
 
 
 type TabKey = 'dashboard' | 'users' | 'orders' | 'withdrawals' | 'bgm' | 'fonts' | 'covers'
@@ -1355,6 +1356,13 @@ function CoverTemplateEditor({ onClose, onSaved }: { onClose: () => void; onSave
       .catch(() => setFonts([]))
   }, [])
 
+  // 字段加/改字体时预加载, 让画布里的预览能用真字体
+  useEffect(() => {
+    for (const f of fields) {
+      if (f.font_file) loadFont(f.font_file)
+    }
+  }, [fields])
+
   // 处理底图选择 + OSS 直传
   const handleBgFile = async (f: File) => {
     setBgFile(f); setEditorErr('')
@@ -1616,24 +1624,54 @@ function CoverTemplateEditor({ onClose, onSaved }: { onClose: () => void; onSave
                 <img src={bgPreviewUrl} draggable={false} className="block max-w-full pointer-events-none"
                   style={{ maxHeight: '70vh' }}/>
 
-                {/* 已有的字段框 */}
+                {/* 已有的字段框 + 文字预览 (用 admin 设的字体/颜色/字号实时渲染示例文字) */}
                 {bgNaturalSize.w > 0 && fields.map((f, i) => {
-                  // canvas 尺寸 = 当前 img 显示尺寸. 取 img 当前实际尺寸
                   const imgEl = canvasRef.current?.querySelector('img')
                   const rect = imgEl?.getBoundingClientRect()
                   if (!rect) return null
                   const sx = rect.width / bgNaturalSize.w
                   const sy = rect.height / bgNaturalSize.h
+                  // 文字预览用 placeholder, 没有就用 label
+                  const previewText = f.placeholder || f.label
+                  const segs = parseSegments(previewText)
+                  // 字号按底图缩放, scaled to canvas
+                  const scaledFontSize = f.font_size * sx     // sx ≈ sy 假设
+                  const justify = f.align === 'center' ? 'center' : f.align === 'right' ? 'flex-end' : 'flex-start'
+                  const rotation = f.rotation || 0
+                  const hasRotation = Math.abs(rotation) > 0.01
                   return (
                     <div key={f._id} data-field-box
-                      onClick={(e) => { e.stopPropagation(); setActiveFieldId(f._id) }}
-                      className={`absolute border-2 cursor-pointer ${
-                        activeFieldId === f._id ? 'border-amber-400 bg-amber-400/10' : 'border-blue-400 bg-blue-400/5'
+                      onClick={(e) => { e.stopPropagation(); setActiveFieldId(f._id); setPersonSelected(false) }}
+                      className={`absolute border-2 cursor-pointer flex items-center select-none ${hasRotation ? '' : 'overflow-hidden'} ${
+                        activeFieldId === f._id ? 'border-amber-400 bg-amber-400/5' : 'border-blue-400 bg-blue-400/5'
                       }`}
-                      style={{ left: f.x * sx, top: f.y * sy, width: f.w * sx, height: f.h * sy }}
+                      style={{
+                        left: f.x * sx, top: f.y * sy, width: f.w * sx, height: f.h * sy,
+                        justifyContent: justify,
+                      }}
                     >
-                      <div className="absolute -top-5 left-0 text-[10px] bg-[var(--text)] text-[var(--bg)] px-1 rounded whitespace-nowrap">
+                      <div className="absolute -top-5 left-0 text-[10px] bg-[var(--text)] text-[var(--bg)] px-1 rounded whitespace-nowrap z-10">
                         #{i + 1} {f.label}
+                      </div>
+                      {/* 字体预览 */}
+                      <div style={{
+                        fontFamily: `"${fontFamily(f.font_file)}", sans-serif`,
+                        fontSize: `${scaledFontSize}px`,
+                        color: f.color,
+                        fontWeight: 900,
+                        lineHeight: 1,
+                        textAlign: f.align as any,
+                        whiteSpace: 'nowrap',
+                        transform: hasRotation ? `rotate(${rotation}deg)` : undefined,
+                        transformOrigin: 'center',
+                        WebkitTextStroke: (f.stroke_color && f.stroke_width > 0)
+                          ? `${f.stroke_width * 2 * sx}px ${f.stroke_color}` : undefined,
+                        paintOrder: 'stroke fill' as const,
+                        pointerEvents: 'none',
+                      }}>
+                        {segs.map((s, j) => (
+                          <span key={j} style={{ color: s.highlight ? (f.highlight_color || f.color) : f.color }}>{s.text}</span>
+                        ))}
                       </div>
                     </div>
                   )
