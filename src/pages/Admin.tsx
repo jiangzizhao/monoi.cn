@@ -1705,7 +1705,7 @@ function CoverTemplateEditor({ onClose, onSaved }: { onClose: () => void; onSave
                         interactionRef.current = { type: 'move', fieldId: f._id, startMouseX: e.clientX, startMouseY: e.clientY }
                         document.body.style.cursor = 'move'
                       }}
-                      className={`absolute border-2 cursor-move flex items-center select-none ${hasRotation ? '' : 'overflow-hidden'} ${
+                      className={`absolute border-2 cursor-move flex items-center select-none ${
                         isActive ? 'border-blue-500' : 'border-blue-400 bg-blue-400/5 hover:border-amber-400'
                       }`}
                       style={{

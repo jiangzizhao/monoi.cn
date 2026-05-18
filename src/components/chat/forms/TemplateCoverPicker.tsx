@@ -725,7 +725,7 @@ function TemplatePreview({ template, userTexts, textOverrides, extraFields, hidd
         const isActive = activeLabel === f.label
         return (
           <div key={i}
-            className={`absolute flex items-center select-none ${hasRotation ? '' : 'overflow-hidden'} ${onMoveField ? `cursor-move ${isActive ? 'outline outline-2 outline-blue-500' : 'hover:outline hover:outline-2 hover:outline-amber-400/70'}` : 'pointer-events-none'}`}
+            className={`absolute flex items-center select-none ${onMoveField ? `cursor-move ${isActive ? 'outline outline-2 outline-blue-500' : 'hover:outline hover:outline-2 hover:outline-amber-400/70'}` : 'pointer-events-none'}`}
             style={wrapperStyle}
             onMouseDown={onMoveField ? (e) => {
               e.preventDefault()
