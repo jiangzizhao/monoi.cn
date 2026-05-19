@@ -118,6 +118,16 @@ export default function Account() {
   useEffect(() => {
     window.location.hash = activeTab
   }, [activeTab])
+  // 监听 hash 变化 — 已经在 /account 页时, 别处 nav('/account#xxx') 也能切 tab
+  useEffect(() => {
+    const onHashChange = () => {
+      const h = window.location.hash.replace('#', '')
+      const matched = TABS.find(t => t.key === h)?.key as TabKey | undefined
+      if (matched) setActiveTab(matched)
+    }
+    window.addEventListener('hashchange', onHashChange)
+    return () => window.removeEventListener('hashchange', onHashChange)
+  }, [])
 
   // 共享数据
   const [plans, setPlans] = useState<PlansResponse | null>(null)
