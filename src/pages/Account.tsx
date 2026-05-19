@@ -659,9 +659,6 @@ function CreditsTab({ credits, plans, sub, onBuyPack }: {
   credits: CreditBalance | null; plans: PlansResponse | null; sub: UserSubscription | null
   onBuyPack: (code: string) => void
 }) {
-  const curTier = sub?.tier || 'free'
-  const tierRate = curTier === 'free' ? 10 : plans?.plans[curTier]?.credit_pack_rate || 10
-
   return (
     <>
       {/* 余额卡 */}
@@ -671,21 +668,6 @@ function CreditsTab({ credits, plans, sub, onBuyPack }: {
         <div className="text-xs text-[var(--text-2)] flex gap-4">
           <span>月送 <b className="text-[var(--text)]">{credits?.monthly ?? 0}</b> <span className="text-[10px] text-[var(--text-3)]">(月底清零)</span></span>
           <span>加买 <b className="text-[var(--text)]">{credits?.purchased ?? 0}</b> <span className="text-[10px] text-[var(--text-3)]">(永不过期)</span></span>
-        </div>
-      </div>
-
-      {/* 充值激励文案 */}
-      <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/30">
-        <div className="flex items-start gap-2.5">
-          <div className="text-lg">🎁</div>
-          <div className="flex-1">
-            <div className="text-sm font-medium text-amber-900 dark:text-amber-300">你是 {TIER_LABEL[curTier]} 用户, 加买积分有专属折扣</div>
-            <div className="text-xs text-amber-800 dark:text-amber-400 mt-1">
-              当前充值倍率: <b>¥1 = {tierRate} 积分</b>
-              {tierRate > 10 && <span> (比标准价多 {Math.round((tierRate - 10) / 10 * 100)}%)</span>}
-              {curTier === 'free' && <span> · 升级 Max 后 ¥1 = 20 积分, 充值更划算</span>}
-            </div>
-          </div>
         </div>
       </div>
 
@@ -728,15 +710,11 @@ function CreditsTab({ credits, plans, sub, onBuyPack }: {
         )
       })()}
 
-      {/* 积分用途 (笼统描述, 不显示每个功能精确扣多少 — 体验更顺, 后端 credit_log 仍记账给 admin) */}
+      {/* 积分用途 (笼统描述, 不暴露具体哪些免费哪些收费, 后端 credit_log 仍记账给 admin) */}
       <div className="p-5 rounded-2xl border border-[var(--border)] bg-[var(--bg-card)]">
-        <div className="text-sm font-medium mb-2">积分能做什么</div>
+        <div className="text-sm font-medium mb-2">积分说明</div>
         <div className="text-xs text-[var(--text-2)] leading-relaxed">
-          积分用于消耗类功能 (口播合成 / 一键合成 / 数字人 / 口播剪辑等). 月送积分每月 reset,
-          加买积分永不过期, 优先扣月送积分, 用完再扣加买积分.
-          <br/>
-          <span className="text-green-500">AI 文案 / 素材匹配 / 封面生成 / 自动发布</span> 免费,
-          不计积分.
+          月送积分每月 reset, 加买积分永不过期. 使用功能时优先扣月送积分, 用完再扣加买积分.
         </div>
       </div>
     </>
