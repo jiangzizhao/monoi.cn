@@ -2139,9 +2139,16 @@ def proxy_audio(name: str):
 
 
 @app.post("/api/voice/clean-narration")
-async def clean_narration(file: UploadFile = File(...), reference_text: str = Form("")):
-    """转发到 voice-server 处理录音清洗"""
+async def clean_narration(request: Request, file: UploadFile = File(...), reference_text: str = Form("")):
+    """转发到 voice-server 处理录音清洗. 扣 3 积分 (Whisper ASR)."""
     import requests as _req
+    try:
+        _uid = _user_id_from_request(request)
+        from billing import consume_credits
+        consume_credits(_uid, 'narration_clean', 3, ref_id='')
+    except HTTPException: raise
+    except Exception as _ce:
+        print(f"[clean-credit] 跳过扣费: {_ce}", flush=True)
 
     try:
         files = {"file": (file.filename, await file.read(), file.content_type or "audio/wav")}
@@ -2259,9 +2266,16 @@ def clean_narration_video_oss_proxy(req: CleanNarrationVideoOssRequest):
 
 
 @app.post("/api/voice/clean-narration-video")
-async def clean_narration_video_proxy(file: UploadFile = File(...)):
-    """旧 NATAPP 模式 (兼容 OSS 没配的情况): multipart 转发到 voice-server."""
+async def clean_narration_video_proxy(request: Request, file: UploadFile = File(...)):
+    """旧 NATAPP 模式: multipart 转发到 voice-server. 扣 3 积分."""
     import requests as _req
+    try:
+        _uid = _user_id_from_request(request)
+        from billing import consume_credits
+        consume_credits(_uid, 'narration_video_clean', 3, ref_id='')
+    except HTTPException: raise
+    except Exception as _ce:
+        print(f"[clean-video-credit] 跳过扣费: {_ce}", flush=True)
 
     raw = await file.read()
     try:
@@ -2356,9 +2370,17 @@ def cover_fonts_proxy():
 
 
 @app.post("/api/voice/generate-cover")
-def generate_cover_proxy(req: dict):
-    """转发到 voice-server: 截帧 + 模板叠字生成多比例封面"""
+def generate_cover_proxy(req: dict, request: Request):
+    """转发到 voice-server: 截帧 + 模板叠字生成多比例封面. 扣 5 积分."""
     import requests as _req
+    try:
+        _uid = _user_id_from_request(request)
+        from billing import consume_credits
+        consume_credits(_uid, 'cover_old', 5, ref_id='')
+    except HTTPException: raise
+    except Exception as _ce:
+        print(f"[cover-credit] 跳过扣费: {_ce}", flush=True)
+
     try:
         resp = _req.post(f"{VOICE_SERVER_URL}/generate-cover", json=req, timeout=300)
         if resp.status_code != 200:
@@ -2410,8 +2432,16 @@ def compose_jianying_draft_proxy(req: dict):
 
 @app.post("/api/voice/remove-vocals")
 async def remove_vocals_proxy(request: Request):
-    """转发到 voice-server: demucs 去人声. multipart 文件上传, 透传 body + content-type."""
+    """转发到 voice-server: demucs 去人声. 重消耗 (CPU 2-5 min), 扣 15 积分."""
     import requests as _req
+    try:
+        _uid = _user_id_from_request(request)
+        from billing import consume_credits
+        consume_credits(_uid, 'remove_vocals', 15, ref_id='')
+    except HTTPException: raise
+    except Exception as _ce:
+        print(f"[demucs-credit] 跳过扣费: {_ce}", flush=True)
+
     body = await request.body()
     content_type = request.headers.get('content-type', 'application/octet-stream')
     try:
@@ -2486,9 +2516,17 @@ async def cover_remove_bg_proxy(request: Request):
 
 
 @app.post("/api/voice/render-cover-from-template")
-def render_cover_from_template_proxy(req: dict):
-    """转发到 voice-server: 按模板渲染封面"""
+def render_cover_from_template_proxy(req: dict, request: Request):
+    """转发到 voice-server: 按模板渲染封面. 扣 5 积分 (rembg 抠图 + Pillow 渲染)."""
     import requests as _req
+    try:
+        _uid = _user_id_from_request(request)
+        from billing import consume_credits
+        consume_credits(_uid, 'cover_template', 5, ref_id=str(req.get('template_id') or ''))
+    except HTTPException: raise
+    except Exception as _ce:
+        print(f"[cover-tpl-credit] 跳过扣费: {_ce}", flush=True)
+
     try:
         resp = _req.post(f"{VOICE_SERVER_URL}/render-cover-from-template", json=req, timeout=120)
         if resp.status_code != 200:
@@ -2514,9 +2552,17 @@ def proxy_narration_video(name: str):
 
 
 @app.post("/api/publish/start")
-def publish_start_proxy(req: dict):
-    """转发到 voice-server: 起 Edge persistent profile 自动上传 + 填表, 立刻返 job_id"""
+def publish_start_proxy(req: dict, request: Request):
+    """转发到 voice-server: 起 Edge persistent profile 自动上传 + 填表, 立刻返 job_id. 扣 5 积分."""
     import requests as _req
+    try:
+        _uid = _user_id_from_request(request)
+        from billing import consume_credits
+        consume_credits(_uid, 'auto_publish', 5, ref_id=str(req.get('platform') or ''))
+    except HTTPException: raise
+    except Exception as _ce:
+        print(f"[publish-credit] 跳过扣费: {_ce}", flush=True)
+
     try:
         resp = _req.post(f"{VOICE_SERVER_URL}/publish/start", json=req, timeout=60)
         if resp.status_code != 200:

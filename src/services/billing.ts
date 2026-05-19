@@ -245,6 +245,13 @@ export async function fetchMyProfile(): Promise<UserProfile> {
   return get('/api/me')
 }
 
+/** 前端上报扣费 (Vercel edge function 调用走这条路, 跟后端 main.py 直接扣的区分开).
+ * 只允许后端白名单的 feature: ai_writing / footage_match / ai_writing_regen.
+ * 失败 (含余额不足 402) 抛 — 调用方决定是否阻断后续 UI. */
+export async function chargeCredit(feature: 'ai_writing' | 'footage_match' | 'ai_writing_regen', amount: number, ref_id?: string) {
+  return post('/api/billing/charge', { feature, amount, ref_id })
+}
+
 export async function updateProfile(data: { username?: string; avatar_oss_key?: string }) {
   return post('/api/me/update', data)
 }

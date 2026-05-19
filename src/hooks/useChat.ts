@@ -1,6 +1,7 @@
 import { useRef, useCallback } from 'react'
 import { useChatStore, makeUserMsg, makeAssistantMsg } from '../store/chatStore'
 import { callAI, callScriptAI, callFootageAI, callFootageAIBySegments, isScriptPrompt, parseBlocks } from '../services/ai'
+import { chargeCredit } from '../services/billing'
 import { searchPexels } from '../services/pexels'
 import { searchPixabay } from '../services/pixabay'
 import type { ChoiceOption, FootageSentenceItem, MessageBlock } from '../types'
@@ -443,6 +444,8 @@ export function useChat() {
         try {
           const inputs = segments.map(s => ({ text: s.text, duration: s.end - s.start }))
           const keywords = await callFootageAIBySegments(inputs, ctrl.signal)
+          // 素材匹配 AI 拆句完成 → 上报扣 5 积分 (Vercel edge function 调用)
+          chargeCredit('footage_match', 5).catch(e => console.warn('charge footage_match:', e))
           const items: FootageSentenceItem[] = segments.map((s, i) => ({
             text: s.text,
             scene: keywords[i]?.scene || '',
@@ -501,6 +504,8 @@ export function useChat() {
         store.updateLastAssistantBlocks(convId, [{ type: 'loading', label: 'AI 正在拆句 + 提取画面词...' }])
         try {
           const sentences = await callFootageAI(script, ctrl.signal)
+          // 素材匹配 AI 拆句完成 → 上报扣 5 积分
+          chargeCredit('footage_match', 5).catch(e => console.warn('charge footage_match:', e))
           const items: FootageSentenceItem[] = sentences.map(s => ({
             text: s.text,
             scene: s.scene,
@@ -553,6 +558,8 @@ export function useChat() {
           store.updateLastAssistantBlocks(convId, [{ type: 'loading', label: 'AI 正在改写...' }])
         }, ctrl.signal, 'dialect')
         store.updateLastAssistantBlocks(convId, [makeScriptCard(newScript)])
+        // 方言改写 → 上报扣 3 积分 (跟 regen 等同)
+        chargeCredit('ai_writing_regen', 3).catch(e => console.warn('charge dialect:', e))
         return
       }
 
@@ -718,6 +725,9 @@ export function useChat() {
           store.updateLastAssistantBlocks(convId, [{ type: 'loading', label: 'AI 正在生成文案...' }])
         }, ctrl.signal)
         store.updateLastAssistantBlocks(convId, [makeScriptCard(script)])
+        // 文案生成完成 → 上报扣 3 积分 (重新生成单独算)
+        chargeCredit(isRegenerateScript ? 'ai_writing_regen' : 'ai_writing', 3)
+          .catch(e => console.warn('charge ai_writing:', e))
         return
       }
 

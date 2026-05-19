@@ -116,7 +116,7 @@ PLANS = {
 FREE_PLAN = {
     'name': '免费',
     'price_yuan': 0,
-    'monthly_credits': 50,                            # 一次性, 注册时给
+    'monthly_credits': 150,                           # 一次性, 注册时给 (够跑 1-2 个完整流程)
     'credit_pack_rate': 10,                           # ¥1=10 标准
     'digital_human_quota': 3,
     'max_video_minutes': 5,
@@ -899,6 +899,30 @@ def my_orders(request: Request, limit: int = 50):
     """, (user_id, limit)).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+class ChargeRequest(BaseModel):
+    feature: str                      # 'ai_writing' / 'footage_match' / 其他 Vercel 端功能
+    amount: int                       # 扣多少积分
+    ref_id: Optional[str] = None
+
+
+# 仅允许这些 feature 走前端上报, 防恶意客户端绕过扣费
+_ALLOWED_CHARGE_FEATURES = {'ai_writing', 'footage_match', 'ai_writing_regen'}
+
+
+@router.post("/charge")
+def charge(req: ChargeRequest, request: Request):
+    """前端上报扣费 (用于 Vercel edge function 调用 — DeepSeek 文案 / 素材匹配 AI 拆句).
+    后端 main.py 直接调 consume_credits 的端点不走这条路. 限定 feature 白名单防滥用."""
+    user_id = get_current_user_id(request)
+    if req.feature not in _ALLOWED_CHARGE_FEATURES:
+        raise HTTPException(400, f"不允许扣费的 feature: {req.feature}")
+    if req.amount <= 0 or req.amount > 50:
+        raise HTTPException(400, "amount 必须在 1-50 之间")
+    consume_credits(user_id, req.feature, req.amount, ref_id=req.ref_id)
+    bal = get_balance(user_id)
+    return {'success': True, 'balance': bal}
 
 
 @router.post("/subscribe")
