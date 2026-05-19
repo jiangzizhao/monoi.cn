@@ -594,13 +594,13 @@ def register(req: RegisterRequest):
         conn.close()
         print(f"[register] user_id=1 自动设为 admin", flush=True)
 
-    # 商业化: 给新用户建推广员状态 (拿到推广码) + 绑定推广关系 + 50 体验积分
+    # 商业化: 给新用户建推广员状态 (拿到推广码) + 绑定推广关系 + 当天 daily grant
     try:
         billing.ensure_referrer_status(new_user_id)
         if req.referral_code:
             billing.bind_referrer(new_user_id, req.referral_code.strip().upper())
-        billing.add_credits(new_user_id, FREE_PLAN_INIT_CREDITS, 'subscription_grant',
-                             feature='free_signup', to_monthly=False)
+        # free 注册即第 1 天 grant 60 积分; 后续每天访问 /credits 触发 grant 共 7 天
+        billing.try_daily_grant(new_user_id)
     except Exception as e:
         print(f"[register] billing 初始化失败 user={new_user_id}: {e}", flush=True)
 

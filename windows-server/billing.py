@@ -280,6 +280,19 @@ def init_billing_tables():
     """)
     c.execute("CREATE INDEX IF NOT EXISTS idx_bgm_library_category ON bgm_library(category, created_at DESC)")
 
+    # free 用户每天领取记录 (注册起 7 天每天送 60 积分, 7 天后停)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS daily_credit_grant (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            grant_date TEXT NOT NULL,              -- 'YYYY-MM-DD' 本地日期
+            amount INTEGER NOT NULL,
+            granted_at REAL NOT NULL,
+            UNIQUE(user_id, grant_date)            -- 一天最多领一次
+        )
+    """)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_daily_grant_user ON daily_credit_grant(user_id, grant_date DESC)")
+
     # 字体库 (admin 上传的 ttf/otf, 跟内置 _FONT_CATALOG 合并给前端选)
     c.execute("""
         CREATE TABLE IF NOT EXISTS font_library (
@@ -416,6 +429,67 @@ def init_billing_tables():
 # ============================== 积分 helpers ==============================
 
 
+DAILY_FREE_GRANT_AMOUNT = 60       # free 用户每天送多少
+DAILY_FREE_GRANT_DAYS = 7          # 送几天 (注册起算)
+
+
+def try_daily_grant(user_id: int) -> Optional[dict]:
+    """free 用户每天送 60 积分, 注册起 7 天后停.
+
+    Returns {granted: bool, amount, day_index, days_remaining} 或 None (拿不到 user).
+    幂等 — 一天最多 grant 一次 (靠 UNIQUE(user_id, grant_date) 约束).
+    """
+    conn = get_db()
+    try:
+        user_row = conn.execute("SELECT created_at FROM users WHERE id = ?", (user_id,)).fetchone()
+        if not user_row:
+            return None
+        created_at = user_row['created_at']
+        # 注册的几天后了 (注册当天 = day 1)
+        days_since = (time.time() - created_at) / 86400
+        day_index = int(days_since) + 1     # 1..N
+        if day_index > DAILY_FREE_GRANT_DAYS:
+            return {'granted': False, 'amount': 0, 'day_index': day_index, 'days_remaining': 0}
+
+        # 只 free 用户走
+        sub_row = conn.execute(
+            "SELECT tier, current_period_end FROM user_subscription WHERE user_id = ?",
+            (user_id,)
+        ).fetchone()
+        is_free = (not sub_row) or (sub_row['current_period_end'] or 0) < time.time()
+        if not is_free:
+            return {'granted': False, 'amount': 0, 'day_index': day_index, 'days_remaining': DAILY_FREE_GRANT_DAYS - day_index}
+
+        today = time.strftime('%Y-%m-%d', time.localtime())
+        already = conn.execute(
+            "SELECT 1 FROM daily_credit_grant WHERE user_id = ? AND grant_date = ?",
+            (user_id, today)
+        ).fetchone()
+        if already:
+            return {'granted': False, 'amount': 0, 'day_index': day_index, 'days_remaining': DAILY_FREE_GRANT_DAYS - day_index, 'reason': 'already_today'}
+
+        # 插记录 — UNIQUE 约束防并发重复 grant
+        try:
+            conn.execute("""
+                INSERT INTO daily_credit_grant (user_id, grant_date, amount, granted_at)
+                VALUES (?, ?, ?, ?)
+            """, (user_id, today, DAILY_FREE_GRANT_AMOUNT, time.time()))
+            conn.commit()
+        except sqlite3.IntegrityError:
+            # 并发 race condition, 已经 grant 过了
+            return {'granted': False, 'amount': 0, 'day_index': day_index, 'days_remaining': DAILY_FREE_GRANT_DAYS - day_index, 'reason': 'race'}
+    finally:
+        conn.close()
+
+    # 加积分 (放 monthly_credits, 用完 reset)
+    add_credits(user_id, DAILY_FREE_GRANT_AMOUNT, 'daily_free_grant',
+                ref_id=today, to_monthly=True, feature='daily_free_grant')
+    return {
+        'granted': True, 'amount': DAILY_FREE_GRANT_AMOUNT,
+        'day_index': day_index, 'days_remaining': DAILY_FREE_GRANT_DAYS - day_index,
+    }
+
+
 def log_api_usage(
     provider: str,
     action: str = '',
@@ -451,32 +525,52 @@ def log_api_usage(
 
 
 def get_balance(user_id: int) -> dict:
-    """返回完整额度信息:
-    - monthly: 月度剩余
-    - purchased: 一次性买的剩余 (不过期)
-    - total: 总剩余
-    - monthly_quota: 本月套餐配额 (Pro 1500/月这种)
-    - monthly_used: 本月已用 (quota - monthly)
-    - monthly_used_pct: 用了多少 % (0-100)
-    - reset_at: 月度 reset 时间戳 (秒)
-    - tier: 当前套餐
-    """
+    """返回完整额度信息. free 用户走 daily grant (注册起 7 天, 每天 60 积分),
+    付费用户走 monthly_credits 套餐配额."""
     conn = get_db()
     row = conn.execute(
         "SELECT monthly_credits, monthly_credits_reset_at, purchased_credits FROM credit_balance WHERE user_id = ?",
         (user_id,)
     ).fetchone()
-    conn.close()
 
     monthly = (row['monthly_credits'] or 0) if row else 0
     purchased = (row['purchased_credits'] or 0) if row else 0
     reset_at = (row['monthly_credits_reset_at'] or 0) if row else 0
 
-    # 拿当前订阅 + 套餐 quota
+    # 拿当前订阅
     sub = get_user_subscription(user_id)
     tier = sub.get('tier', 'free')
-    quota = int(sub.get('monthly_credits', 0) or 0)
-    used = max(0, quota - monthly)
+
+    daily_grant_info = None
+    if tier == 'free':
+        # free 用户 quota = 7 × 60 = 420 (总送额), used = 累计已发 - 当前剩余
+        granted_total = conn.execute(
+            "SELECT COALESCE(SUM(amount), 0) FROM daily_credit_grant WHERE user_id = ?",
+            (user_id,)
+        ).fetchone()[0] or 0
+        quota = DAILY_FREE_GRANT_AMOUNT * DAILY_FREE_GRANT_DAYS
+        used = max(0, granted_total - monthly)
+        # 算今天能不能领 + 还能领几天
+        user_row = conn.execute("SELECT created_at FROM users WHERE id = ?", (user_id,)).fetchone()
+        if user_row:
+            day_index = int((time.time() - user_row['created_at']) / 86400) + 1
+            today = time.strftime('%Y-%m-%d', time.localtime())
+            granted_today = conn.execute(
+                "SELECT 1 FROM daily_credit_grant WHERE user_id = ? AND grant_date = ?",
+                (user_id, today)
+            ).fetchone() is not None
+            daily_grant_info = {
+                'day_index': day_index,
+                'days_remaining': max(0, DAILY_FREE_GRANT_DAYS - day_index + 1),
+                'granted_today': granted_today,
+                'daily_amount': DAILY_FREE_GRANT_AMOUNT,
+                'total_days': DAILY_FREE_GRANT_DAYS,
+            }
+    else:
+        quota = int(sub.get('monthly_credits', 0) or 0)
+        used = max(0, quota - monthly)
+
+    conn.close()
     used_pct = round(used / quota * 100, 1) if quota > 0 else 0
 
     return {
@@ -488,6 +582,7 @@ def get_balance(user_id: int) -> dict:
         'monthly_used_pct': used_pct,
         'reset_at': reset_at,
         'tier': tier,
+        'daily_grant': daily_grant_info,    # free 用户有这个, 付费用户 None
     }
 
 
@@ -865,6 +960,11 @@ def list_plans():
 @router.get("/credits")
 def my_credits(request: Request):
     user_id = get_current_user_id(request)
+    # free 用户每次访问尝试当天 grant (注册起 7 天每天送 60). 失败吞异常不阻塞.
+    try:
+        try_daily_grant(user_id)
+    except Exception as _e:
+        print(f"[daily-grant] 失败但忽略 user={user_id}: {_e}")
     return get_balance(user_id)
 
 

@@ -43,15 +43,24 @@ export interface PlansResponse {
   consume_rules: Record<string, { per_second?: number; fixed?: number }>
 }
 
+export interface DailyGrantInfo {
+  day_index: number              // 注册第几天 (1..N)
+  days_remaining: number         // 还能领几天 (含今天, 已领完今天就是次日开始)
+  granted_today: boolean         // 今天领过没
+  daily_amount: number           // 每天送多少
+  total_days: number             // 一共送几天 (默认 7)
+}
+
 export interface CreditBalance {
-  monthly: number                // 月度剩余 (随用随扣, 月底 reset)
+  monthly: number                // 月度剩余 (free 是 daily grant 累计 - 已用)
   purchased: number              // 一次性买的剩余 (不过期)
   total: number                  // monthly + purchased
-  monthly_quota: number          // 本月套餐配额 (Pro 1500 这种)
-  monthly_used: number           // 本月已用 (quota - monthly)
-  monthly_used_pct: number       // 用了百分多少 (0-100)
-  reset_at: number               // 月度 reset 时间戳 (秒)
+  monthly_quota: number          // free=420 (7×60), 付费=套餐月送
+  monthly_used: number
+  monthly_used_pct: number
+  reset_at: number               // 付费用户月度 reset 时间戳 (秒)
   tier: string                   // free / pro_monthly / max_monthly / flagship_yearly
+  daily_grant: DailyGrantInfo | null   // free 用户有, 付费用户 null
 }
 
 export interface UserSubscription {

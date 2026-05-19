@@ -512,7 +512,37 @@ function MembershipTab({ sub, plans, credits, onUpgrade }: {
             )}
           </>
         ) : (
-          <div className="text-xs text-[var(--text-3)]">免费体验中 · {curPlan?.monthly_credits || 50} 积分 · 视频带 monoi 水印</div>
+          <>
+            <div className="text-xs text-[var(--text-2)] mb-3">免费体验 · 视频带 monoi 水印</div>
+            {credits?.daily_grant && (
+              <div className="space-y-2.5">
+                <UsageBar
+                  label={`新人 7 天体验 (第 ${credits.daily_grant.day_index}/${credits.daily_grant.total_days} 天)`}
+                  used={credits.monthly_used}
+                  total={credits.monthly_quota}
+                  unit="积分"
+                  showAlert
+                />
+                <div className="flex items-center justify-between text-[11px] text-[var(--text-3)]">
+                  <span>
+                    {credits.daily_grant.days_remaining > 0 ? (
+                      credits.daily_grant.granted_today
+                        ? `今日已领 ${credits.daily_grant.daily_amount} 积分 · 还能领 ${credits.daily_grant.days_remaining - 1} 天`
+                        : `今日可领 ${credits.daily_grant.daily_amount} 积分 (打开页面自动到账)`
+                    ) : (
+                      <span className="text-amber-500">7 天体验已结束, 升级套餐继续享受月度积分</span>
+                    )}
+                  </span>
+                </div>
+                {credits.purchased > 0 && (
+                  <div className="flex items-center justify-between text-[11px] text-[var(--text-3)] pt-1">
+                    <span>额外积分包 (不过期)</span>
+                    <span className="text-[var(--text-2)] font-medium">+{credits.purchased}</span>
+                  </div>
+                )}
+              </div>
+            )}
+          </>
         )}
       </div>
 
