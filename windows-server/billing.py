@@ -476,17 +476,36 @@ def try_daily_grant(user_id: int) -> Optional[dict]:
             """, (user_id, today, DAILY_FREE_GRANT_AMOUNT, time.time()))
             conn.commit()
         except sqlite3.IntegrityError:
-            # 并发 race condition, 已经 grant 过了
             return {'granted': False, 'amount': 0, 'day_index': day_index, 'days_remaining': DAILY_FREE_GRANT_DAYS - day_index, 'reason': 'race'}
+
+        # ⚠️ free 每日清零策略: grant 新的之前, 昨天剩的 monthly_credits 清掉 (不影响 purchased).
+        # 用 UPDATE SET monthly_credits=0 + 记一条 expire 流水 (delta = -之前剩的).
+        old_row = conn.execute(
+            "SELECT monthly_credits FROM credit_balance WHERE user_id = ?",
+            (user_id,)
+        ).fetchone()
+        old_monthly = (old_row['monthly_credits'] or 0) if old_row else 0
+        if old_monthly > 0:
+            conn.execute(
+                "UPDATE credit_balance SET monthly_credits = 0, updated_at = ? WHERE user_id = ?",
+                (time.time(), user_id)
+            )
+            conn.execute(
+                """INSERT INTO credit_log (user_id, feature, delta, source, ref_id, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (user_id, 'daily_free_expire', -old_monthly, 'daily_expire', today, time.time())
+            )
+            conn.commit()
     finally:
         conn.close()
 
-    # 加积分 (放 monthly_credits, 用完 reset)
+    # 加今天的 grant (放 monthly_credits)
     add_credits(user_id, DAILY_FREE_GRANT_AMOUNT, 'daily_free_grant',
                 ref_id=today, to_monthly=True, feature='daily_free_grant')
     return {
         'granted': True, 'amount': DAILY_FREE_GRANT_AMOUNT,
         'day_index': day_index, 'days_remaining': DAILY_FREE_GRANT_DAYS - day_index,
+        'expired_yesterday': old_monthly,
     }
 
 
