@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Loader2, Upload, X } from 'lucide-react'
 import { NarrationVideoEditor, type KeptSegment } from '../NarrationVideoEditor'
+import { getToken } from '../../../lib/auth'
 
 interface Props {
   onSubmit: (message: string) => void
@@ -115,7 +116,7 @@ export function NarrationVideoForm({ onSubmit, onClose }: Props) {
       setPhase('transcribing')
       const cleanRes = await fetch(directBase + '/api/voice/clean-narration-video-oss', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken() || ''}` },
         body: JSON.stringify({ oss_key, filename: videoFile.name }),
       })
       const data = await cleanRes.json()

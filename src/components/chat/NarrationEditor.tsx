@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Play, Pause, Loader2, Check, X, Scissors, Undo2 } from 'lucide-react'
 import WaveSurfer from 'wavesurfer.js'
 import RegionsPlugin from 'wavesurfer.js/dist/plugins/regions.js'
+import { getToken } from '../../lib/auth'
 
 interface Word {
   start: number
@@ -294,7 +295,7 @@ export function NarrationEditor({ data, apiBase, onCancel, onDone }: Props) {
     try {
       const res = await fetch(apiBase + '/api/voice/finalize-narration', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken() || ''}` },
         body: JSON.stringify({
           source_file: data.source_file,
           keep_ranges: keepRanges,

@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Play, Loader2, Check, X, Scissors, Undo2 } from 'lucide-react'
+import { getToken } from '../../lib/auth'
 
 // 提取成独立 memo 组件: 长视频 (8 分钟+) 1500-3000 词时, currentTime 每秒
 // 变化 4-10 次, 不 memo 会让所有词 span 重渲染. memo 后只有 isDel/isCurrent
@@ -398,7 +399,7 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
         : { source_file: data.source_file, keep_ranges: keepRanges }
       const res = await fetch(apiBase + '/api/voice/finalize-narration-video', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken() || ''}` },
         body: JSON.stringify(body),
         signal: abort.signal,
       })

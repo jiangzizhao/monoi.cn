@@ -2248,10 +2248,18 @@ class CleanNarrationVideoOssRequest(BaseModel):
 
 
 @app.post("/api/voice/clean-narration-video-oss")
-def clean_narration_video_oss_proxy(req: CleanNarrationVideoOssRequest):
-    """OSS 模式 (推荐): 浏览器已直传到 OSS, 这里转发 oss_key 给 voice-server,
-    voice-server 从 OSS 拉源 → 处理 → 上传输出 → 返回 OSS 签名 GET URL."""
+def clean_narration_video_oss_proxy(req: CleanNarrationVideoOssRequest, request: Request):
+    """OSS 模式 (推荐): 浏览器已直传到 OSS, 这里转发 oss_key 给 voice-server.
+    扣 3 积分 (Whisper ASR)."""
     import requests as _req
+    try:
+        _uid = _user_id_from_request(request)
+        from billing import consume_credits
+        consume_credits(_uid, 'narration_video_clean', 3, ref_id=req.oss_key)
+    except HTTPException: raise
+    except Exception as _ce:
+        print(f"[clean-video-oss-credit] 跳过扣费: {_ce}", flush=True)
+
     try:
         resp = _req.post(
             f"{VOICE_SERVER_URL}/clean-narration-video-oss",

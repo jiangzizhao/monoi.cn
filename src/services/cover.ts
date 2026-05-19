@@ -1,6 +1,8 @@
 // 封面模板 — 用户端 API client
 // 用户能 a) 拉模板库 b) 上传人物图抠图 c) 按模板渲染封面
 
+import { getToken } from '../lib/auth'
+
 const directBase = (import.meta as any).env?.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'
 
 export interface UserCoverTextField {
@@ -78,6 +80,7 @@ export async function coverRemoveBg(file: File, opts?: {
   const res = await fetch(directBase + '/api/voice/cover-remove-bg', {
     method: 'POST',
     body: form,
+    headers: { Authorization: `Bearer ${getToken() || ''}` },
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok || !data.success) throw new Error(data.detail || data.error || `抠图失败 ${res.status}`)
@@ -119,7 +122,7 @@ export async function renderCoverFromTemplate(req: {
 }): Promise<RenderCoverResp> {
   const res = await fetch(directBase + '/api/voice/render-cover-from-template', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken() || ''}` },
     body: JSON.stringify(req),
   })
   const data = await res.json().catch(() => ({}))

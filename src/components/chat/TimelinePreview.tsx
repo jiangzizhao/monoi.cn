@@ -5,6 +5,7 @@ import type { FootageSentenceItem, VideoAsset } from '../../types'
 import { useChatStore, makeAssistantMsg } from '../../store/chatStore'
 import { VocalRemoverDialog } from '../VocalRemoverDialog'
 import { listBgmLibrary, type BgmTrack } from '../../services/audio'
+import { getToken } from '../../lib/auth'
 
 // BGM 库类目中文名映射
 const BGM_CATEGORY_LABEL: Record<string, string> = {
@@ -154,7 +155,7 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
       }
       const res = await fetch(directBase + '/api/voice/compose-footage', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken() || ''}` },
         body: JSON.stringify(body),
       })
       const data = await res.json()

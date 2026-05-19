@@ -1,5 +1,7 @@
 // 音频工具 API client — demucs 去人声等
 
+import { getToken } from '../lib/auth'
+
 const directBase = (import.meta as any).env?.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'
 
 export interface RemoveVocalsResp {
@@ -21,6 +23,7 @@ export async function removeVocals(file: File, signal?: AbortSignal): Promise<Re
     method: 'POST',
     body: form,
     signal,
+    headers: { Authorization: `Bearer ${getToken() || ''}` },
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok || !data.success) {

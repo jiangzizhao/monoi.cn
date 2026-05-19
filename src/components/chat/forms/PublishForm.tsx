@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { X, Send, Loader2, CheckCircle2, AlertCircle, ExternalLink } from 'lucide-react'
 import { useChatStore } from '../../../store/chatStore'
 import type { PlatformCopyResult } from '../../../types'
+import { getToken } from '../../../lib/auth'
 
 interface Props {
   onClose: () => void
@@ -99,7 +100,7 @@ export function PublishForm({ onClose }: Props) {
       const tags = form.tags.split(/[,，]/).map(t => t.trim().replace(/^#/, '')).filter(Boolean)
       const res = await fetch(directBase + '/api/publish/start', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken() || ''}` },
         body: JSON.stringify({
           platform: activeTab,
           video_oss_key: videoOssKey,

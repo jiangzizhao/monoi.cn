@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { Play, Pause, Loader2 } from 'lucide-react'
 import { NarrationEditor } from '../NarrationEditor'
+import { getToken } from '../../../lib/auth'
 
 type Mode = 'preset' | 'upload' | 'clone'
 
@@ -294,6 +295,7 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
       const res = await fetch(directBase + '/api/voice/clean-narration', {
         method: 'POST',
         body: fd,
+        headers: { Authorization: `Bearer ${getToken() || ''}` },
       })
       const text = await res.text()
       let data: any

@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { X, Loader2, Download as DownloadIcon, Upload, Image as ImageIcon, LayoutTemplate } from 'lucide-react'
 import { useChatStore, makeAssistantMsg } from '../../../store/chatStore'
 import { TemplateCoverPicker } from './TemplateCoverPicker'
+import { getToken } from '../../../lib/auth'
 
 interface Props {
   // 从对话最近的合成视频或口播视频拿
@@ -140,7 +141,7 @@ export function CoverGeneratorForm({ defaultVideoOssKey, defaultVideoUrl, onClos
       }
       const res = await fetch(directBase + '/api/voice/generate-cover', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken() || ''}` },
         body: JSON.stringify(body),
       })
       const data = await res.json()
