@@ -44,9 +44,14 @@ export interface PlansResponse {
 }
 
 export interface CreditBalance {
-  monthly: number
-  purchased: number
-  total: number
+  monthly: number                // 月度剩余 (随用随扣, 月底 reset)
+  purchased: number              // 一次性买的剩余 (不过期)
+  total: number                  // monthly + purchased
+  monthly_quota: number          // 本月套餐配额 (Pro 1500 这种)
+  monthly_used: number           // 本月已用 (quota - monthly)
+  monthly_used_pct: number       // 用了百分多少 (0-100)
+  reset_at: number               // 月度 reset 时间戳 (秒)
+  tier: string                   // free / pro_monthly / max_monthly / flagship_yearly
 }
 
 export interface UserSubscription {

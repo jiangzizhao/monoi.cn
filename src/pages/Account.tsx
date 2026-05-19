@@ -427,8 +427,13 @@ function ProfileTab({ me, sub, credits, refCode, plans, onReload }: {
             </div>
           }/>
           <Row label="积分余额" value={
-            <span><b>{credits?.total || 0}</b> <span className="text-xs text-[var(--text-3)]">(月送 {credits?.monthly || 0} + 加买 {credits?.purchased || 0})</span></span>
-          }/>
+            <span>
+              <b>{credits?.total || 0}</b>
+              <span className="text-xs text-[var(--text-3)] ml-1">
+                (月送 {credits?.monthly || 0} + 加买 {credits?.purchased || 0})
+              </span>
+            </span>
+          } note={credits && credits.monthly_quota > 0 ? `本月已用 ${credits.monthly_used_pct.toFixed(0)}%` : ''}/>
           <Row label="我的推广码" value={
             <span className="font-mono text-sm">{refCode?.referral_code || '-'}</span>
           } note="分享你的推广链接, 别人注册成功双方各得 30 积分"/>
@@ -478,9 +483,22 @@ function MembershipTab({ sub, plans, credits, onUpgrade }: {
           <>
             <div className="text-xs text-[var(--text-2)] mb-3">到期 {fmtDate(sub.current_period_end)} · 剩 {daysLeft(sub.current_period_end)} 天</div>
             {curPlan && (
-              <div className="space-y-1.5">
+              <div className="space-y-2.5">
                 <UsageBar label="数字人" used={0} total={curPlan.digital_human_quota} unit="条"/>
-                <UsageBar label="积分" used={credits?.monthly ? curPlan.monthly_credits - credits.monthly : 0} total={curPlan.monthly_credits} unit=""/>
+                <UsageBar
+                  label="本月积分"
+                  used={credits?.monthly_used ?? 0}
+                  total={credits?.monthly_quota || curPlan.monthly_credits}
+                  unit="积分"
+                  resetAt={credits?.reset_at}
+                  showAlert
+                />
+                {credits && credits.purchased > 0 && (
+                  <div className="flex items-center justify-between text-[11px] text-[var(--text-3)] pt-1">
+                    <span>额外积分包 (不过期)</span>
+                    <span className="text-[var(--text-2)] font-medium">+{credits.purchased}</span>
+                  </div>
+                )}
               </div>
             )}
           </>
@@ -602,16 +620,34 @@ function Badge({ color, children }: { color: string; children: React.ReactNode }
   return <div className={`absolute -top-2.5 left-1/2 -translate-x-1/2 px-2.5 py-0.5 rounded-full text-[10px] font-medium ${color}`}>{children}</div>
 }
 
-function UsageBar({ label, used, total, unit }: { label: string; used: number; total: number; unit: string }) {
+function UsageBar({ label, used, total, unit, resetAt, showAlert }: {
+  label: string; used: number; total: number; unit: string
+  resetAt?: number                      // 月度 reset 时间戳 (秒), 显示 reset 倒计时
+  showAlert?: boolean                   // 80%/95% 阈值变色 + 文字提示
+}) {
   const pct = total > 0 ? Math.min(100, Math.round((used / total) * 100)) : 0
+  // 颜色阈值: 0-79% 默认 (text), 80-94% 黄, 95-100% 红
+  const barColor = showAlert
+    ? (pct >= 95 ? 'bg-red-500' : pct >= 80 ? 'bg-amber-500' : 'bg-[var(--text)]')
+    : 'bg-[var(--text)]'
+  const alertText = showAlert && pct >= 95 ? '额度即将耗尽, 考虑升级或买积分包'
+    : showAlert && pct >= 80 ? '额度快用完, 考虑升级或买积分包' : ''
+  const alertColor = pct >= 95 ? 'text-red-500' : 'text-amber-500'
   return (
     <div>
       <div className="flex justify-between text-[11px] text-[var(--text-3)] mb-0.5">
-        <span>{label}</span><span>{used} / {total}{unit && ` ${unit}`}</span>
+        <span>{label}</span>
+        <span>
+          {used} / {total}{unit && ` ${unit}`}
+          {resetAt && resetAt > Date.now() / 1000 && (
+            <span className="ml-2">· {Math.max(0, Math.ceil((resetAt - Date.now()/1000) / 86400))} 天后 reset</span>
+          )}
+        </span>
       </div>
-      <div className="h-1 rounded-full bg-[var(--bg-input)] overflow-hidden">
-        <div className="h-full bg-[var(--text)] transition-all" style={{ width: `${pct}%` }}/>
+      <div className="h-1.5 rounded-full bg-[var(--bg-input)] overflow-hidden">
+        <div className={`h-full ${barColor} transition-all`} style={{ width: `${pct}%` }}/>
       </div>
+      {alertText && <div className={`text-[10px] ${alertColor} mt-1`}>⚠ {alertText}</div>}
     </div>
   )
 }
@@ -692,18 +728,15 @@ function CreditsTab({ credits, plans, sub, onBuyPack }: {
         )
       })()}
 
-      {/* 积分扣减规则 */}
+      {/* 积分用途 (笼统描述, 不显示每个功能精确扣多少 — 体验更顺, 后端 credit_log 仍记账给 admin) */}
       <div className="p-5 rounded-2xl border border-[var(--border)] bg-[var(--bg-card)]">
-        <div className="text-sm font-medium mb-3">积分能做什么</div>
-        <div className="text-xs text-[var(--text-2)] grid grid-cols-1 sm:grid-cols-2 gap-y-1.5 gap-x-4">
-          <div className="flex justify-between"><span>数字人合成</span><span className="text-[var(--text-3)]">2 积分/秒 (30s ≈ 60 分)</span></div>
-          <div className="flex justify-between"><span>配音 (预设)</span><span className="text-[var(--text-3)]">0.5 积分/秒 (30s ≈ 15 分)</span></div>
-          <div className="flex justify-between"><span>配音 (克隆)</span><span className="text-[var(--text-3)]">1.5 积分/秒 (30s ≈ 45 分)</span></div>
-          <div className="flex justify-between"><span>一键合成</span><span className="text-[var(--text-3)]">10 积分/次</span></div>
-          <div className="flex justify-between"><span>口播剪辑</span><span className="text-[var(--text-3)]">5 积分/次</span></div>
-          <div className="flex justify-between"><span>AI 文案 / 素材匹配</span><span className="text-green-500">免费 ✓</span></div>
-          <div className="flex justify-between"><span>封面生成</span><span className="text-green-500">免费 ✓</span></div>
-          <div className="flex justify-between"><span>自动发布</span><span className="text-green-500">免费 ✓</span></div>
+        <div className="text-sm font-medium mb-2">积分能做什么</div>
+        <div className="text-xs text-[var(--text-2)] leading-relaxed">
+          积分用于消耗类功能 (口播合成 / 一键合成 / 数字人 / 口播剪辑等). 月送积分每月 reset,
+          加买积分永不过期, 优先扣月送积分, 用完再扣加买积分.
+          <br/>
+          <span className="text-green-500">AI 文案 / 素材匹配 / 封面生成 / 自动发布</span> 免费,
+          不计积分.
         </div>
       </div>
     </>

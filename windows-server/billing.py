@@ -397,19 +397,43 @@ def init_billing_tables():
 
 
 def get_balance(user_id: int) -> dict:
-    """返回 { monthly, purchased, total }"""
+    """返回完整额度信息:
+    - monthly: 月度剩余
+    - purchased: 一次性买的剩余 (不过期)
+    - total: 总剩余
+    - monthly_quota: 本月套餐配额 (Pro 1500/月这种)
+    - monthly_used: 本月已用 (quota - monthly)
+    - monthly_used_pct: 用了多少 % (0-100)
+    - reset_at: 月度 reset 时间戳 (秒)
+    - tier: 当前套餐
+    """
     conn = get_db()
     row = conn.execute(
-        "SELECT monthly_credits, purchased_credits FROM credit_balance WHERE user_id = ?",
+        "SELECT monthly_credits, monthly_credits_reset_at, purchased_credits FROM credit_balance WHERE user_id = ?",
         (user_id,)
     ).fetchone()
     conn.close()
-    if not row:
-        return {'monthly': 0, 'purchased': 0, 'total': 0}
+
+    monthly = (row['monthly_credits'] or 0) if row else 0
+    purchased = (row['purchased_credits'] or 0) if row else 0
+    reset_at = (row['monthly_credits_reset_at'] or 0) if row else 0
+
+    # 拿当前订阅 + 套餐 quota
+    sub = get_user_subscription(user_id)
+    tier = sub.get('tier', 'free')
+    quota = int(sub.get('monthly_credits', 0) or 0)
+    used = max(0, quota - monthly)
+    used_pct = round(used / quota * 100, 1) if quota > 0 else 0
+
     return {
-        'monthly': row['monthly_credits'] or 0,
-        'purchased': row['purchased_credits'] or 0,
-        'total': (row['monthly_credits'] or 0) + (row['purchased_credits'] or 0),
+        'monthly': monthly,
+        'purchased': purchased,
+        'total': monthly + purchased,
+        'monthly_quota': quota,
+        'monthly_used': used,
+        'monthly_used_pct': used_pct,
+        'reset_at': reset_at,
+        'tier': tier,
     }
 
 
@@ -427,7 +451,8 @@ def consume_credits(user_id: int, feature: str, amount: int, ref_id: Optional[st
         purchased = row['purchased_credits'] if row else 0
         total = (monthly or 0) + (purchased or 0)
         if total < amount:
-            raise HTTPException(402, f"积分不足: 需要 {amount}, 当前余额 {total}. 升级套餐或加买积分.")
+            # 不暴露 "需要 X 积分" 具体值, 体验更顺 (后端 credit_log 仍记账给 admin)
+            raise HTTPException(402, f"积分余额不足. 当前剩 {total} 积分, 升级套餐获更多月送积分, 或购买积分包补充.")
         from_monthly = min(monthly or 0, amount)
         from_purchased = amount - from_monthly
         now = time.time()
