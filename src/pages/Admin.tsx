@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, Users, ShoppingBag, DollarSign, BarChart3, Search, X, AlertTriangle,
   Music, Trash2, Plus, Loader2, Play, Pause, Type, Image as ImageIcon, MousePointer2,
+  Activity,
 } from 'lucide-react'
 import {
   adminListUsers, adminUserDetail, adminGrantSubscription, adminGrantCredits,
@@ -11,8 +12,10 @@ import {
   adminListBgm, adminAddBgm, adminDeleteBgm,
   adminListFonts, adminUploadFont, adminDeleteFont,
   adminListCoverTemplates, adminAddCoverTemplate, adminDeleteCoverTemplate,
+  adminApiUsage,
   type AdminUserRow, type AdminOrderRow, type AdminWithdrawalRow, type AdminStats,
   type AdminBgmRow, type AdminFontRow, type AdminCoverTemplate, type CoverTextField, type CoverPersonSlot,
+  type ApiUsageResp,
 } from '../services/admin'
 import { fetchMyProfile } from '../services/billing'
 import { isLoggedIn } from '../lib/auth'
@@ -20,7 +23,7 @@ import { loadFont, fontFamily, parseSegments } from '../utils/coverFonts'
 import { TemplatePreview } from '../components/chat/forms/TemplateCoverPicker'
 
 
-type TabKey = 'dashboard' | 'users' | 'orders' | 'withdrawals' | 'bgm' | 'fonts' | 'covers'
+type TabKey = 'dashboard' | 'users' | 'orders' | 'withdrawals' | 'bgm' | 'fonts' | 'covers' | 'apiusage'
 
 const TABS: { key: TabKey; label: string; Icon: any }[] = [
   { key: 'dashboard', label: '数据看板', Icon: BarChart3 },
@@ -30,6 +33,7 @@ const TABS: { key: TabKey; label: string; Icon: any }[] = [
   { key: 'bgm', label: 'BGM 库', Icon: Music },
   { key: 'fonts', label: '字体库', Icon: Type },
   { key: 'covers', label: '封面模板', Icon: ImageIcon },
+  { key: 'apiusage', label: 'API 用量', Icon: Activity },
 ]
 
 const COVER_CATEGORIES = [
@@ -144,6 +148,7 @@ export default function Admin() {
           {activeTab === 'bgm' && <BgmLibraryTab/>}
           {activeTab === 'fonts' && <FontLibraryTab/>}
           {activeTab === 'covers' && <CoverTemplateTab/>}
+          {activeTab === 'apiusage' && <ApiUsageTab/>}
         </div>
       </div>
     </div>
@@ -2028,3 +2033,145 @@ function PersonSlotEditor({ slot, onChange, onRemove }: {
 
 
 // (TemplateOverlayBoxes 已被 TemplatePreview 取代, 删了)
+
+
+// ========== API 用量 (各家 API 调用消耗) ==========
+
+const PROVIDER_LABEL: Record<string, string> = {
+  sms_aliyun: '阿里云短信',
+  captcha_aliyun: '阿里云人机验证',
+  cosyvoice: 'CosyVoice TTS (语音合成)',
+  whisper: 'Whisper ASR (口播识别)',
+  demucs: 'Demucs (去人声)',
+  rembg: 'rembg (AI 抠图)',
+  oss: '阿里云 OSS',
+  deepseek: 'DeepSeek (LLM)',
+  openai: 'OpenAI',
+  pexels: 'Pexels 素材',
+  pixabay: 'Pixabay 素材',
+  wxpay: '微信支付',
+}
+
+function ApiUsageTab() {
+  const [data, setData] = useState<ApiUsageResp | null>(null)
+  const [err, setErr] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [days, setDays] = useState(7)
+
+  useEffect(() => {
+    setLoading(true); setErr('')
+    adminApiUsage(days).then(setData).catch(e => setErr(e.message)).finally(() => setLoading(false))
+  }, [days])
+
+  if (loading) return <div className="text-sm text-[var(--text-3)] py-8 flex items-center gap-2"><Loader2 size={14} className="animate-spin"/> 加载中...</div>
+  if (err) return <div className="text-sm text-red-400">{err}</div>
+  if (!data) return null
+
+  const fmtDur = (ms: number) => {
+    if (ms < 1000) return `${ms}ms`
+    if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`
+    return `${(ms / 60_000).toFixed(1)}m`
+  }
+  const fmtBytes = (b: number) => {
+    if (b < 1024) return `${b}B`
+    if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)}KB`
+    return `${(b / 1024 / 1024).toFixed(1)}MB`
+  }
+
+  return (
+    <>
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-base font-semibold">API 用量</div>
+          <div className="text-xs text-[var(--text-3)] mt-0.5">第三方 API 调用次数 + 估算成本 + GPU 时长 (近 {days} 天)</div>
+        </div>
+        <div className="flex gap-1 text-xs">
+          {[7, 30, 90].map(d => (
+            <button key={d} onClick={() => setDays(d)}
+              className={`px-2.5 py-1 rounded-lg cursor-pointer ${days === d ? 'bg-[var(--text)] text-[var(--bg)]' : 'text-[var(--text-3)] hover:bg-[var(--bg-hover)]'}`}>
+              {d} 天
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* 顶部汇总 */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <StatCard label="总调用" value={data.total.calls?.toLocaleString() || '0'} sub={`近 ${days} 天`}/>
+        <StatCard label="估算成本" value={`¥${(data.total.cost || 0).toFixed(2)}`} sub="三方 API 费用合计"/>
+        <StatCard label="GPU 调用" value={(data.total.gpu_calls || 0).toLocaleString()} sub={`占 ${data.total.calls > 0 ? Math.round((data.total.gpu_calls / data.total.calls) * 100) : 0}%`}/>
+        <StatCard label="总处理耗时" value={fmtDur(data.total.duration_ms || 0)} sub="所有任务累计"/>
+      </div>
+
+      {/* 按 provider 聚合表 */}
+      <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] overflow-hidden">
+        <div className="px-5 py-3 border-b border-[var(--border)] text-sm font-medium">按服务商分组</div>
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-[var(--text-3)] border-b border-[var(--border)]">
+              <th className="px-4 py-2 text-left">服务</th>
+              <th className="px-4 py-2 text-right">调用次数</th>
+              <th className="px-4 py-2 text-right">Tokens</th>
+              <th className="px-4 py-2 text-right">流量</th>
+              <th className="px-4 py-2 text-right">耗时</th>
+              <th className="px-4 py-2 text-right">GPU 次数</th>
+              <th className="px-4 py-2 text-right">估算 ¥</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.by_provider.length === 0 && (
+              <tr><td colSpan={7} className="px-4 py-6 text-center text-[var(--text-3)]">还没有埋点数据 (近 {days} 天内没有 API 调用)</td></tr>
+            )}
+            {data.by_provider.map(r => (
+              <tr key={r.provider} className="border-b border-[var(--border)] hover:bg-[var(--bg-hover)]">
+                <td className="px-4 py-2 text-[var(--text)]">{PROVIDER_LABEL[r.provider] || r.provider}</td>
+                <td className="px-4 py-2 text-right">{(r.total_count || r.calls).toLocaleString()}</td>
+                <td className="px-4 py-2 text-right text-[var(--text-3)]">{r.total_tokens ? r.total_tokens.toLocaleString() : '-'}</td>
+                <td className="px-4 py-2 text-right text-[var(--text-3)]">{r.total_bytes ? fmtBytes(r.total_bytes) : '-'}</td>
+                <td className="px-4 py-2 text-right text-[var(--text-3)]">{r.total_duration_ms ? fmtDur(r.total_duration_ms) : '-'}</td>
+                <td className="px-4 py-2 text-right text-[var(--text-3)]">{r.gpu_calls || '-'}</td>
+                <td className="px-4 py-2 text-right text-[var(--text)] font-medium">¥{(r.total_cost || 0).toFixed(2)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* 最近 50 条原始日志 (排错用) */}
+      <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] overflow-hidden">
+        <div className="px-5 py-3 border-b border-[var(--border)] text-sm font-medium">最近 50 条调用</div>
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-[var(--text-3)] border-b border-[var(--border)]">
+              <th className="px-4 py-2 text-left">时间</th>
+              <th className="px-4 py-2 text-left">服务</th>
+              <th className="px-4 py-2 text-left">动作</th>
+              <th className="px-4 py-2 text-right">用户</th>
+              <th className="px-4 py-2 text-right">耗时</th>
+              <th className="px-4 py-2 text-right">GPU</th>
+              <th className="px-4 py-2 text-right">¥</th>
+              <th className="px-4 py-2 text-left">备注</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.recent.length === 0 && (
+              <tr><td colSpan={8} className="px-4 py-6 text-center text-[var(--text-3)]">无</td></tr>
+            )}
+            {data.recent.map(r => (
+              <tr key={r.id} className="border-b border-[var(--border)] hover:bg-[var(--bg-hover)]">
+                <td className="px-4 py-2 text-[var(--text-3)] text-[10px]">{fmtTime(r.created_at)}</td>
+                <td className="px-4 py-2 text-[var(--text-2)]">{r.provider}</td>
+                <td className="px-4 py-2 text-[var(--text-3)]">{r.action || '-'}</td>
+                <td className="px-4 py-2 text-right text-[var(--text-3)]">{r.user_id ?? '-'}</td>
+                <td className="px-4 py-2 text-right text-[var(--text-3)]">{r.duration_ms ? fmtDur(r.duration_ms) : '-'}</td>
+                <td className="px-4 py-2 text-right">{r.gpu_used ? '✓' : '-'}</td>
+                <td className="px-4 py-2 text-right">{r.cost_yuan > 0 ? r.cost_yuan.toFixed(3) : '-'}</td>
+                <td className="px-4 py-2 text-[var(--text-3)] text-[10px] truncate max-w-[200px]">{r.note || ''}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  )
+}

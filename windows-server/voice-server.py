@@ -100,27 +100,36 @@ def synthesize(req: SynthesizeRequest):
     if not text:
         raise HTTPException(400, "text 不能为空")
 
+    t0 = time.time()
     prompt_wav, prompt_text = resolve_prompt(req)
 
     chunks = []
     if req.mode == "cross_lingual":
-        # 跨语言克隆: 中文 prompt 念其他语言. 不需要 prompt_text.
-        # 这版 CosyVoice2 的 frontend_cross_lingual → frontend_zero_shot → _extract_speech_feat
-        # 内部还是会调 load_wav, 所以传路径就行 (跟 zero_shot 一样)
         for piece in MODEL.inference_cross_lingual(text, prompt_wav, stream=False, speed=req.speed):
             chunks.append(piece["tts_speech"])
     else:
-        # 同语种 zero_shot 克隆 (默认, 中文 → 中文)
         for piece in MODEL.inference_zero_shot(text, prompt_text, prompt_wav, stream=False, speed=req.speed):
             chunks.append(piece["tts_speech"])
     audio = torch.concat(chunks, dim=1)
 
     out_name = f"{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}.wav"
     out_path = os.path.join(OUTPUT_DIR, out_name)
-    # 用 soundfile 保存（避免 torchaudio.save 走 torchcodec）
     sf.write(out_path, audio.squeeze(0).cpu().numpy(), MODEL.sample_rate)
 
-    return {"success": True, "file": out_name, "path": out_path, "duration_seconds": audio.shape[1] / MODEL.sample_rate}
+    duration_s = audio.shape[1] / MODEL.sample_rate
+    elapsed_ms = int((time.time() - t0) * 1000)
+
+    # 埋点: CosyVoice TTS, 主要 GPU 消耗. 估算成本: 现在 CPU 模式 0, 未来 GPU 服务器按 GPU·s 算
+    try:
+        _log_api(
+            'cosyvoice', 'synthesize',
+            duration_ms=elapsed_ms,
+            gpu_used=torch.cuda.is_available(),
+            note=f'text_chars={len(text)} speech_s={duration_s:.1f} mode={req.mode}'
+        )
+    except Exception: pass
+
+    return {"success": True, "file": out_name, "path": out_path, "duration_seconds": duration_s}
 
 
 # ============== 录音清洗（去气口 + 去重复） ==============
@@ -292,6 +301,7 @@ async def clean_narration(file: UploadFile = File(...), reference_text: str = Fo
     import subprocess
     import tempfile
 
+    t0 = time.time()
     job_id = f"narr_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}"
     raw_path = os.path.join(tempfile.gettempdir(), f"{job_id}_raw")
     norm_path = os.path.join(NARRATION_OUTPUT_DIR, f"{job_id}_input.wav")
@@ -327,6 +337,12 @@ async def clean_narration(file: UploadFile = File(...), reference_text: str = Fo
         segments.append({"start": s.start, "end": s.end, "text": _to_simplified(s.text), "words": words})
 
     full_text = "".join(s["text"] for s in segments).strip()
+
+    # 埋点: Whisper ASR (GPU)
+    try:
+        _log_api('whisper', 'transcribe', duration_ms=int((time.time() - t0) * 1000),
+                 gpu_used=True, note=f'audio_s={orig_dur:.1f} text_chars={len(full_text)}')
+    except Exception: pass
 
     # 5. 找静音 + 词间隔 + 重复 + 填充词 (作为"建议删除"提示给用户)
     silences = _ffmpeg_silence_detect(norm_path, noise_db=-30, min_silence=0.3)
@@ -1187,6 +1203,7 @@ async def remove_vocals(file: UploadFile = File(...)):
 
         # 2. 跑 demucs → wav → mp3
         bgm_mp3 = os.path.join(work_dir, 'bgm.mp3')
+        t_demucs = time.time()
         try:
             meta = audio_separation.remove_vocals_to_bgm(input_path, bgm_mp3)
         except RuntimeError as e:
@@ -1195,6 +1212,15 @@ async def remove_vocals(file: UploadFile = File(...)):
         except Exception as e:
             print(f"[remove-vocals] 未知异常: {e}\n{traceback.format_exc()}", flush=True)
             raise HTTPException(500, f'去人声异常: {e}')
+
+        # 埋点: Demucs (CPU 慢, 未来上 GPU 看时长变化)
+        try:
+            _log_api('demucs', 'remove_vocals',
+                     duration_ms=int((time.time() - t_demucs) * 1000),
+                     bytes=in_size_kb * 1024,
+                     gpu_used=False,
+                     note=f'in_kb={in_size_kb} model=htdemucs')
+        except Exception: pass
 
         # 3. 上传 OSS (加 3 次重试, 防 SSL 握手抖动)
         oss_key = f"outputs/{job_id}.mp3"
@@ -1261,6 +1287,27 @@ def _find_monoi_db():
             continue
     # 都没匹配到 (理论上 main.py 重启过就一定有), 返第一个候选让 sqlite 报错
     return os.path.abspath(cands[1] if len(cands) > 1 else 'monoi.db')
+
+
+def _log_api(provider: str, action: str = '', user_id=None, count: int = 1,
+             tokens: int = 0, bytes: int = 0, duration_ms: int = 0,
+             cost_yuan: float = 0, gpu_used: bool = False, note: str = ''):
+    """voice-server 用的 API 用量埋点 — 直接写 monoi.db (跟 main.py 共用).
+    跟 billing.log_api_usage 同 schema. 失败吞异常不影响主流程."""
+    try:
+        import sqlite3 as _sq
+        db_path = _find_monoi_db()
+        conn = _sq.connect(db_path, timeout=2)
+        conn.execute("""
+            INSERT INTO api_usage_log
+                (provider, action, user_id, count, tokens, bytes, duration_ms, cost_yuan, gpu_used, note, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (provider, action, user_id, count, tokens, bytes, duration_ms, cost_yuan,
+              1 if gpu_used else 0, note, time.time()))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"[_log_api] 失败但忽略: {provider}/{action} - {e}", flush=True)
 
 
 @app.get("/bgm-library")
@@ -2015,6 +2062,7 @@ async def cover_remove_bg(
         raise HTTPException(400, '文件太小, 可能空文件')
 
     # 抠图 + 描边
+    t_rembg = time.time()
     try:
         from cover_compositor import remove_bg_with_stroke
         out_png = remove_bg_with_stroke(
@@ -2042,6 +2090,15 @@ async def cover_remove_bg(
     finally:
         try: os.remove(tmp_path)
         except: pass
+
+    # 埋点: rembg 抠图 (现在 CPU, 未来 GPU)
+    try:
+        _log_api('rembg', 'remove_bg',
+                 duration_ms=int((time.time() - t_rembg) * 1000),
+                 bytes=len(raw),
+                 gpu_used=False,
+                 note=f'in_kb={len(raw)//1024} stroke={stroke_enabled}')
+    except Exception: pass
 
     return {
         'success': True,

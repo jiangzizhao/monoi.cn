@@ -498,6 +498,11 @@ def send_sms_code(req: SendSmsRequest, request: Request):
             conn.close()
             raise HTTPException(400, "请先完成滑块验证")
         ok, err = _captcha_aliyun.verify(req.captcha_verify_param)
+        # 埋点: 不管成功失败都计费 (阿里云 captcha ~¥0.001/次)
+        try:
+            from billing import log_api_usage
+            log_api_usage('captcha_aliyun', 'verify', count=1, cost_yuan=0.001, note='ok' if ok else f'fail:{err}')
+        except Exception: pass
         if not ok:
             conn.close()
             raise HTTPException(403, f"人机验证未通过: {err}")
@@ -522,6 +527,11 @@ def send_sms_code(req: SendSmsRequest, request: Request):
         print(f"[sms-real] 发送失败 {req.phone}: {err} | code={code} (本地仍能验, 但用户收不到)", flush=True)
         raise HTTPException(500, f"短信发送失败: {err}")
     print(f"[sms-real] 已发送给 {req.phone} (用途: {req.purpose})", flush=True)
+    # 埋点: 阿里云短信约 ¥0.045/条
+    try:
+        from billing import log_api_usage
+        log_api_usage('sms_aliyun', 'send_verify', count=1, cost_yuan=0.045, note=f'purpose={req.purpose}')
+    except Exception: pass
     return {"success": True, "message": "验证码已发送, 5 分钟内有效"}
 
 

@@ -293,6 +293,26 @@ def init_billing_tables():
         )
     """)
 
+    # API 用量日志 (admin 看 OpenAI/DeepSeek/OSS/SMS/Captcha/Pexels 等各家累计消耗)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS api_usage_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            provider TEXT NOT NULL,                -- openai / deepseek / oss / sms / captcha / pexels / pixabay / wxpay / cosyvoice / demucs / rembg
+            action TEXT,                           -- chat_completion / sign_get / send / verify / search_video / synthesize / remove_bg ...
+            user_id INTEGER,                       -- 哪个用户触发 (None = 系统调用)
+            count INTEGER DEFAULT 1,               -- 调用次数 (单次=1, 批量可>1)
+            tokens INTEGER DEFAULT 0,              -- LLM tokens (input + output, 仅 LLM API)
+            bytes INTEGER DEFAULT 0,               -- 流量 (OSS / 视频下载 etc)
+            duration_ms INTEGER DEFAULT 0,         -- 调用耗时 (毫秒, 给 GPU 任务用)
+            cost_yuan REAL DEFAULT 0,              -- 估算 ¥成本 (按各家费率算)
+            gpu_used INTEGER DEFAULT 0,            -- 是否用 GPU (0/1, 给未来 GPU 服务器埋点)
+            note TEXT,                             -- 例: model='gpt-4o-mini' / pack='99张验证码'
+            created_at REAL NOT NULL
+        )
+    """)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_api_usage_provider ON api_usage_log(provider, created_at DESC)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_api_usage_user ON api_usage_log(user_id, created_at DESC)")
+
     # 封面模板库 (admin 上传 PNG 底图 + 文字字段配置, 用户填字 Pillow 渲染)
     c.execute("""
         CREATE TABLE IF NOT EXISTS cover_template (
@@ -394,6 +414,40 @@ def init_billing_tables():
 
 
 # ============================== 积分 helpers ==============================
+
+
+def log_api_usage(
+    provider: str,
+    action: str = '',
+    user_id: Optional[int] = None,
+    count: int = 1,
+    tokens: int = 0,
+    bytes: int = 0,
+    duration_ms: int = 0,
+    cost_yuan: float = 0,
+    gpu_used: bool = False,
+    note: str = '',
+) -> None:
+    """记一条 API 用量日志. 各 service 在调用第三方 API 后调一下, 给 admin 后台看消耗.
+
+    用法:
+        log_api_usage('deepseek', 'chat_completion', user_id=42, tokens=1500, cost_yuan=0.003)
+        log_api_usage('oss', 'sign_get', count=1, cost_yuan=0)
+        log_api_usage('sms', 'send_verify', user_id=42, count=1, cost_yuan=0.045)
+        log_api_usage('cosyvoice', 'synthesize', user_id=42, duration_ms=8000, gpu_used=False)
+    """
+    try:
+        conn = get_db()
+        conn.execute("""
+            INSERT INTO api_usage_log
+                (provider, action, user_id, count, tokens, bytes, duration_ms, cost_yuan, gpu_used, note, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (provider, action, user_id, count, tokens, bytes, duration_ms, cost_yuan, 1 if gpu_used else 0, note, time.time()))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        # 埋点失败不影响主流程, 只打日志
+        print(f"[log_api_usage] 失败但忽略: {provider}/{action} - {e}")
 
 
 def get_balance(user_id: int) -> dict:

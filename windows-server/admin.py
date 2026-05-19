@@ -846,3 +846,75 @@ def admin_delete_cover_template(template_id: int, request: Request):
     conn.close()
     # 注意: 不主动删 OSS 文件 (lifecycle 自动清, 已渲染的封面不受影响)
     return {'success': True}
+
+
+# ============== API 用量 ==============
+
+
+@router.get("/api-usage")
+def admin_api_usage(request: Request, days: int = 7):
+    """API 用量汇总. 默认看最近 7 天.
+
+    返:
+    - by_provider: 按 provider 聚合 (count/cost_yuan/duration_ms 累计)
+    - daily: 最近 N 天每天的累计 (画趋势图)
+    - recent: 最近 50 条原始日志
+    """
+    require_admin(request)
+    conn = get_db()
+    since = time.time() - days * 86400
+
+    # 按 provider 聚合
+    by_provider = conn.execute("""
+        SELECT provider,
+               COUNT(*) as calls,
+               SUM(count) as total_count,
+               SUM(tokens) as total_tokens,
+               SUM(bytes) as total_bytes,
+               SUM(duration_ms) as total_duration_ms,
+               SUM(cost_yuan) as total_cost,
+               SUM(gpu_used) as gpu_calls
+        FROM api_usage_log
+        WHERE created_at >= ?
+        GROUP BY provider
+        ORDER BY total_cost DESC, calls DESC
+    """, (since,)).fetchall()
+
+    # 每天聚合
+    daily = conn.execute("""
+        SELECT date(created_at, 'unixepoch', 'localtime') as day,
+               provider,
+               SUM(count) as count,
+               SUM(cost_yuan) as cost,
+               SUM(duration_ms) as duration_ms
+        FROM api_usage_log
+        WHERE created_at >= ?
+        GROUP BY day, provider
+        ORDER BY day DESC
+    """, (since,)).fetchall()
+
+    # 最近 50 条 (排错用)
+    recent = conn.execute("""
+        SELECT id, provider, action, user_id, count, tokens, bytes,
+               duration_ms, cost_yuan, gpu_used, note, created_at
+        FROM api_usage_log
+        ORDER BY created_at DESC LIMIT 50
+    """).fetchall()
+
+    # 总成本 + 总调用数 (顶部汇总)
+    total = conn.execute("""
+        SELECT COUNT(*) as calls,
+               COALESCE(SUM(cost_yuan), 0) as cost,
+               COALESCE(SUM(duration_ms), 0) as duration_ms,
+               COALESCE(SUM(gpu_used), 0) as gpu_calls
+        FROM api_usage_log WHERE created_at >= ?
+    """, (since,)).fetchone()
+
+    conn.close()
+    return {
+        'days': days,
+        'total': dict(total) if total else {},
+        'by_provider': [dict(r) for r in by_provider],
+        'daily': [dict(r) for r in daily],
+        'recent': [dict(r) for r in recent],
+    }

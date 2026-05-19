@@ -302,3 +302,52 @@ export async function adminDeleteCoverTemplate(template_id: number): Promise<{ s
   if (!res.ok) throw new Error(data.detail || data.error || `delete failed ${res.status}`)
   return data
 }
+
+
+// ================= API 用量 =================
+
+export interface ApiUsageProviderRow {
+  provider: string
+  calls: number
+  total_count: number
+  total_tokens: number
+  total_bytes: number
+  total_duration_ms: number
+  total_cost: number
+  gpu_calls: number
+}
+
+export interface ApiUsageDailyRow {
+  day: string
+  provider: string
+  count: number
+  cost: number
+  duration_ms: number
+}
+
+export interface ApiUsageRecentRow {
+  id: number
+  provider: string
+  action: string
+  user_id: number | null
+  count: number
+  tokens: number
+  bytes: number
+  duration_ms: number
+  cost_yuan: number
+  gpu_used: number
+  note: string
+  created_at: number
+}
+
+export interface ApiUsageResp {
+  days: number
+  total: { calls: number; cost: number; duration_ms: number; gpu_calls: number }
+  by_provider: ApiUsageProviderRow[]
+  daily: ApiUsageDailyRow[]
+  recent: ApiUsageRecentRow[]
+}
+
+export async function adminApiUsage(days = 7): Promise<ApiUsageResp> {
+  return get(`/api/admin/api-usage?days=${days}`)
+}
