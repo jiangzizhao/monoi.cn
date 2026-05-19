@@ -38,8 +38,8 @@ export function CreditIndicator() {
 
   return (
     <button
-      onClick={() => nav('/account#membership')}
-      title={`${tier} · 本月已用 ${pct}% · 总剩 ${credits.total} 积分${credits.purchased > 0 ? ` (含加买 ${credits.purchased})` : ''}`}
+      onClick={() => nav('/account#transactions')}
+      title={`${tier} · 本月已用 ${pct}% · 总剩 ${credits.total} 积分${credits.purchased > 0 ? ` (含加买 ${credits.purchased})` : ''} · 点击查看消费记录`}
       className="ml-auto flex items-center justify-center p-1.5 rounded-lg hover:bg-[var(--bg-hover)] cursor-pointer transition-colors"
     >
       {/* 只显示圆环 — 用量按 % 转, 颜色 80% 黄 / 95% 红预警, 数字藏在 tooltip 里 */}
