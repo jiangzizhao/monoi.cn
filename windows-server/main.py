@@ -1586,13 +1586,31 @@ def _run_tts_task(task_id: str, server_url: str, payload: dict, audio_url_path_p
                 error_message=f"{server_label} 没返回 file 字段: {str(data)[:200]}",
             )
             return
+        duration_s = float(data.get("duration_seconds") or 0)
         _update_tts_task(
             task_id,
             status="ready",
             audio_url=f"{audio_url_path_prefix}/{data['file']}",
-            duration_seconds=data.get("duration_seconds") or 0,
+            duration_seconds=duration_s,
             progress=100,
         )
+        # 任务成功 → 扣积分 (按实际合成时长, 0.5 积分/秒 预设音色)
+        # 注意: voice-server 已经合成完, 不够积分也不退合成成本 — 后续可以改成"预估扣 + 对账"
+        try:
+            _conn = get_db()
+            _conn.row_factory = sqlite3.Row
+            _row = _conn.execute("SELECT user_id, engine, preset_key FROM tts_tasks WHERE task_id = ?", (task_id,)).fetchone()
+            _conn.close()
+            if _row and _row['user_id'] and duration_s > 0:
+                from billing import consume_credits
+                # 费率: 预设 0.5/s, 克隆音色 1.5/s (preset_key 以 'clone_' 开头当克隆)
+                rate = 1.5 if (_row['preset_key'] and _row['preset_key'].startswith('clone_')) else 0.5
+                amount = max(1, round(duration_s * rate))
+                consume_credits(_row['user_id'], 'tts', amount, ref_id=task_id)
+                print(f"[tts-credit] 扣 {amount} 积分 (user={_row['user_id']} duration={duration_s:.1f}s rate={rate})", flush=True)
+        except Exception as _ce:
+            # 扣费失败不影响合成结果 (用户已经能用了), 记日志后续 admin 手动对账
+            print(f"[tts-credit] 扣积分失败但合成已成功 task={task_id}: {_ce}", flush=True)
     except _req.exceptions.ConnectionError:
         _update_tts_task(task_id, status="failed", error_message=f"{server_label} 未启动")
     except _req.exceptions.Timeout:
@@ -1758,13 +1776,19 @@ def _run_minimax_t2a_task(task_id: str, text: str, voice_id: str, speed: float) 
 
 
 @app.post("/api/voice/synthesize")
-def synthesize_voice(req: VoiceSynthesizeRequest):
+def synthesize_voice(req: VoiceSynthesizeRequest, request: Request):
     import requests as _req
 
     if not req.text.strip():
         raise HTTPException(400, "text 不能为空")
     if not req.preset_key and not req.clone_id:
         raise HTTPException(400, "preset_key 和 clone_id 至少要传一个")
+
+    # 拿 user_id (后续给 _create_tts_task 用, 任务完成时按 user_id 扣积分)
+    try:
+        _uid = _user_id_from_request(request)
+    except Exception:
+        _uid = None
 
     # 拒绝: 克隆音色 + 粤语. 引导用户改用粤语预设音色.
     if req.preset_key:
@@ -1807,7 +1831,7 @@ def synthesize_voice(req: VoiceSynthesizeRequest):
     # ─── IndexTTS-2（用户克隆，异步任务） ───
     if engine == "indextts":
         import threading as _th
-        task_id = _create_tts_task("indextts", req.text.strip(), req.preset_key, req.speed or "1.0x")
+        task_id = _create_tts_task("indextts", req.text.strip(), req.preset_key, req.speed or "1.0x", user_id=_uid)
         _th.Thread(
             target=_run_tts_task,
             args=(
@@ -1837,7 +1861,7 @@ def synthesize_voice(req: VoiceSynthesizeRequest):
         # 其他 → cross_lingual (跨语言克隆, 中文样本能念日韩英)
         lang = _detect_text_language(text)
         mode = "cross_lingual" if lang != "zh" else "zero_shot"
-        task_id = _create_tts_task("cosyvoice", text, req.preset_key, req.speed or "1.0x")
+        task_id = _create_tts_task("cosyvoice", text, req.preset_key, req.speed or "1.0x", user_id=_uid)
         _th.Thread(
             target=_run_tts_task,
             args=(
@@ -1879,7 +1903,7 @@ def synthesize_voice(req: VoiceSynthesizeRequest):
         except Exception as e:
             raise HTTPException(500, f"MiniMax 音色获取失败: {e}")
 
-        task_id = _create_tts_task("minimax", text, req.preset_key, req.speed or "1.0x")
+        task_id = _create_tts_task("minimax", text, req.preset_key, req.speed or "1.0x", user_id=_uid)
         _th.Thread(
             target=_run_minimax_t2a_task,
             args=(task_id, text, minimax_voice_id, parse_speed(req.speed)),
