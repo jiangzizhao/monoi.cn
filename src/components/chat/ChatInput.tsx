@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { ArrowUp, FileText, Mic, Video, Music } from 'lucide-react'
 import { VocalRemoverDialog } from '../VocalRemoverDialog'
+import { CreditIndicator } from '../CreditIndicator'
 import type { LucideIcon } from 'lucide-react'
 import { useChatStore } from '../../store/chatStore'
 import { useChat } from '../../hooks/useChat'
@@ -335,6 +336,9 @@ export function ChatInput({ moduleMenu, onModuleClick, onModuleMenuClose }: Prop
           >
             <Music size={15} strokeWidth={1.8}/>
           </button>
+
+          {/* 右下角积分用量指示器 — ml-auto 推到右侧 */}
+          <CreditIndicator/>
         </div>
       </div>
 
