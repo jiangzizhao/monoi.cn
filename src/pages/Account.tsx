@@ -484,7 +484,6 @@ function MembershipTab({ sub, plans, credits, onUpgrade }: {
             <div className="text-xs text-[var(--text-2)] mb-3">到期 {fmtDate(sub.current_period_end)} · 剩 {daysLeft(sub.current_period_end)} 天</div>
             {curPlan && (
               <div className="space-y-2.5">
-                <UsageBar label="数字人" used={0} total={curPlan.digital_human_quota} unit="条"/>
                 <UsageBar
                   label="本月积分"
                   used={credits?.monthly_used ?? 0}
