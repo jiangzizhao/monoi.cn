@@ -2164,9 +2164,19 @@ class FinalizeNarrationRequest(BaseModel):
 
 
 @app.post("/api/voice/finalize-narration")
-def finalize_narration_proxy(req: FinalizeNarrationRequest):
-    """转发到 voice-server"""
+def finalize_narration_proxy(req: FinalizeNarrationRequest, request: Request):
+    """转发到 voice-server. 扣 5 积分 (口播音频剪辑收尾)."""
     import requests as _req
+    # 先扣费 — 不够会 raise 402 阻止合成
+    try:
+        _uid = _user_id_from_request(request)
+        from billing import consume_credits
+        consume_credits(_uid, 'narration_edit', 5, ref_id=req.source_file)
+    except HTTPException:
+        raise
+    except Exception as _ce:
+        print(f"[narration-credit] 跳过扣费 (拿不到 user): {_ce}", flush=True)
+
     try:
         resp = _req.post(
             f"{VOICE_SERVER_URL}/finalize-narration",
@@ -2274,9 +2284,20 @@ class FinalizeNarrationVideoRequest(BaseModel):
 
 
 @app.post("/api/voice/finalize-narration-video")
-def finalize_narration_video_proxy(req: FinalizeNarrationVideoRequest):
-    """转发到 voice-server: 接 keep_ranges → 剪视频. OSS 模式下输出也存 OSS, 直接返签名 URL."""
+def finalize_narration_video_proxy(req: FinalizeNarrationVideoRequest, request: Request):
+    """转发到 voice-server: 接 keep_ranges → 剪视频. OSS 模式下输出也存 OSS, 直接返签名 URL.
+    扣 5 积分 (口播视频剪辑)."""
     import requests as _req
+    # 先扣费 — 不够会 raise 402 阻止合成
+    try:
+        _uid = _user_id_from_request(request)
+        from billing import consume_credits
+        consume_credits(_uid, 'narration_video_edit', 5, ref_id=req.source_oss_key or req.source_file or '')
+    except HTTPException:
+        raise
+    except Exception as _ce:
+        print(f"[narration-video-credit] 跳过扣费 (拿不到 user): {_ce}", flush=True)
+
     try:
         # OSS 模式
         if req.source_oss_key:
@@ -2348,9 +2369,19 @@ def generate_cover_proxy(req: dict):
 
 
 @app.post("/api/voice/compose-footage")
-def compose_footage_proxy(req: dict):
-    """转发到 voice-server: 合成 口播 + b-roll + PIP overlay → 成品 mp4"""
+def compose_footage_proxy(req: dict, request: Request):
+    """转发到 voice-server: 合成 口播 + b-roll + PIP overlay → 成品 mp4. 扣 10 积分 (一键合成)."""
     import requests as _req
+    # 先扣费 — 不够会 raise 402 阻止合成
+    try:
+        _uid = _user_id_from_request(request)
+        from billing import consume_credits
+        consume_credits(_uid, 'compose_footage', 10, ref_id=req.get('narration_oss_key') or '')
+    except HTTPException:
+        raise
+    except Exception as _ce:
+        print(f"[compose-credit] 跳过扣费 (拿不到 user): {_ce}", flush=True)
+
     try:
         resp = _req.post(
             f"{VOICE_SERVER_URL}/compose-footage",
@@ -2744,10 +2775,12 @@ def serve_avatar_file(avatar_key: str):
 
 @app.post("/api/digital-human/submit")
 def submit_digital_human(
+    request: Request,
     audio: UploadFile = File(...),
     avatar_key: str = Form(...),
 ):
-    """用已保存的形象 + 上传的音频提交数字人对口型. 返回 code, 前端轮询 /task/{code}"""
+    """用已保存的形象 + 上传的音频提交数字人对口型. 返回 code, 前端轮询 /task/{code}.
+    扣 2 积分/秒 (按音频实际时长)."""
     import requests as _req
     import shutil
     import uuid as _uuid
@@ -2775,6 +2808,25 @@ def submit_digital_human(
     except Exception as e:
         _duix_cleanup(audio_path, video_path)
         raise HTTPException(500, f"准备文件失败: {e}")
+
+    # 先扣费 — 按音频时长 × 2 积分/秒. 拿不到时长 fallback 20 积分.
+    try:
+        _uid = _user_id_from_request(request)
+        # 读音频时长 (wav 标准库, 不依赖 ffprobe)
+        try:
+            import wave as _wave
+            with _wave.open(audio_path, 'rb') as _wf:
+                _dur = _wf.getnframes() / _wf.getframerate()
+        except Exception:
+            _dur = 0
+        _amount = max(1, round(_dur * 2)) if _dur > 0 else 20
+        from billing import consume_credits
+        consume_credits(_uid, 'digital_human', _amount, ref_id=code)
+    except HTTPException as _he:
+        _duix_cleanup(audio_path, video_path)
+        raise _he
+    except Exception as _ce:
+        print(f"[dh-credit] 跳过扣费 (拿不到 user): {_ce}", flush=True)
 
     payload = {
         "audio_url": audio_name,
