@@ -2387,16 +2387,15 @@ async def _run_publish_job(job_id: str, req: PublishStartRequest, video_local: s
     try:
         from social_publisher import publish_xhs, publish_douyin
     except ImportError as e:
-        # 分辨具体缺什么 — 让管理员知道该装哪个
-        msg = str(e)
-        if "social_publisher" in msg:
-            hint = "发布模块文件缺失: social_publisher.py 没在后端目录 (检查部署)"
-        elif "playwright" in msg.lower():
-            hint = ("Playwright 没装. 后端机器跑: "
-                    "pip install playwright && python -m playwright install msedge")
-        else:
-            hint = f"发布模块依赖缺失: {msg}. 后端机器装: pip install playwright + playwright install msedge"
-        _publish_job_update(job_id, status="failed", detail=hint)
+        # 技术细节只 print 到服务器 log, 给 admin 排查;
+        # 用户看到的是友好的客服联系提示, 不暴露技术词.
+        print(f"[publish] 发布模块加载失败 (admin 关注): {type(e).__name__}: {e}", flush=True)
+        user_msg = (
+            "发布功能正在升级中, 暂时不可用. "
+            "加客服微信 XXXXX 申请优先使用 (备注 monoi 发布), "
+            "或稍后再试. 给你带来不便, 抱歉."
+        )
+        _publish_job_update(job_id, status="failed", detail=user_msg)
         return
 
     try:
@@ -2490,17 +2489,20 @@ async def publish_check_login(platform: str):
         result = await check_login(platform)
         return result
     except ImportError as e:
-        msg = str(e)
-        if "social_publisher" in msg:
-            hint = "发布模块文件缺失: social_publisher.py 没在后端目录"
-        elif "playwright" in msg.lower():
-            hint = "Playwright 没装. 后端跑: pip install playwright && python -m playwright install msedge"
-        else:
-            hint = f"发布模块依赖缺失: {msg}"
-        return {"logged_in": False, "platform": platform, "detail": hint}
+        # 技术细节只 log, 给前端返回用户友好消息
+        print(f"[publish/check-login] 发布模块加载失败 (admin 关注): {type(e).__name__}: {e}", flush=True)
+        return {
+            "logged_in": False,
+            "platform": platform,
+            "detail": "发布功能正在升级中, 暂时不可用. 加客服微信 XXXXX 申请优先使用.",
+        }
     except Exception as e:
-        return {"logged_in": False, "platform": platform,
-                "detail": f"探测失败: {type(e).__name__}: {e}"}
+        print(f"[publish/check-login] 探测异常 (admin 关注): {type(e).__name__}: {e}", flush=True)
+        return {
+            "logged_in": False,
+            "platform": platform,
+            "detail": "发布功能正在升级中, 暂时不可用. 加客服微信 XXXXX 申请优先使用.",
+        }
 
 
 if __name__ == "__main__":
