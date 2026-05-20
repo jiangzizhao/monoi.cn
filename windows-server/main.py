@@ -2220,16 +2220,27 @@ def proxy_narration_audio(name: str):
 class OssSignUploadRequest(BaseModel):
     filename: str = "video.mp4"
     content_type: str = "video/mp4"
+    prefix: Optional[str] = "uploads"     # 不同 prefix 走不同 lifecycle:
+                                           # uploads/         — 24h 自动清 (用户临时图: 人物抠图源 / 视频源)
+                                           # cover_templates/ — 永久 (admin 上传的封面底图, 一传永用)
+                                           # bgm_library/     — 永久 (admin 上传的 BGM)
+
+
+# 白名单, 防恶意客户端传随便 prefix 把文件传到非预期路径
+_ALLOWED_UPLOAD_PREFIXES = {'uploads', 'cover_templates', 'bgm_library', 'avatars'}
 
 
 @app.post("/api/oss/sign-upload")
 def oss_sign_upload(req: OssSignUploadRequest):
-    """生成 OSS PUT 签名 URL. 前端用这个 URL 直接 PUT 文件到 OSS,
-    不再走 NATAPP. 拿到 oss_key 后再调 clean-narration-video."""
+    """生成 OSS PUT 签名 URL. 前端用这个 URL 直接 PUT 文件到 OSS, 不再走 NATAPP.
+    prefix 区分 lifecycle: uploads/24h 清, cover_templates/bgm_library 永久保留."""
     from oss_helper import oss_make_upload_key, oss_sign_put, oss_is_configured
     if not oss_is_configured():
         raise HTTPException(503, "OSS 未配置, 请在 .env 设 OSS_ENDPOINT/OSS_BUCKET/OSS_ACCESS_KEY_ID/OSS_ACCESS_KEY_SECRET")
-    oss_key = oss_make_upload_key(req.filename, prefix="uploads")
+    prefix = (req.prefix or 'uploads').strip().strip('/')
+    if prefix not in _ALLOWED_UPLOAD_PREFIXES:
+        raise HTTPException(400, f"prefix 必须是 {_ALLOWED_UPLOAD_PREFIXES} 之一")
+    oss_key = oss_make_upload_key(req.filename, prefix=prefix)
     put_url = oss_sign_put(oss_key, content_type=req.content_type, expires=3600)
     return {
         "oss_key": oss_key,

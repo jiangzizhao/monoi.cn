@@ -750,12 +750,12 @@ function BgmLibraryTab() {
     if (!name.trim()) { setFormErr('请填写曲名'); return }
     setUploading(true); setFormErr(''); setUploadProgress(0)
     try {
-      // 1. 拿签名
+      // 1. 拿签名 (BGM 库 → bgm_library prefix, OSS lifecycle 不清这个前缀)
       const token = localStorage.getItem('monoi_token') || ''
       const signRes = await fetch(directBase + '/api/oss/sign-upload', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ filename: file.name, content_type: file.type || 'audio/mpeg' }),
+        body: JSON.stringify({ filename: file.name, content_type: file.type || 'audio/mpeg', prefix: 'bgm_library' }),
       })
       if (!signRes.ok) throw new Error('OSS 签名失败')
       const { put_url, oss_key, content_type } = await signRes.json()
@@ -1421,11 +1421,12 @@ function CoverTemplateEditor({ onClose, onSaved }: { onClose: () => void; onSave
     // 直传 OSS
     setBgUploading(true); setBgUploadProgress(0)
     try {
+      // 模板底图 → cover_templates prefix, OSS lifecycle 不清这个前缀 (admin 资源永久保留)
       const token = localStorage.getItem('monoi_token') || ''
       const signRes = await fetch(directBase + '/api/oss/sign-upload', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ filename: f.name, content_type: f.type || 'image/png' }),
+        body: JSON.stringify({ filename: f.name, content_type: f.type || 'image/png', prefix: 'cover_templates' }),
       })
       if (!signRes.ok) throw new Error('OSS 签名失败')
       const { put_url, oss_key, content_type } = await signRes.json()
