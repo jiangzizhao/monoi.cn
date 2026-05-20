@@ -1959,8 +1959,21 @@ def list_cover_fonts():
 
 @app.get("/cover-font-file/{filename}")
 def get_cover_font_file(filename: str):
-    """提供字体文件给浏览器加载 (前端 FontFace API 用, 显示真字体样式)"""
+    """提供字体文件给浏览器加载 (前端 FontFace API 用, 显示真字体样式).
+
+    优先返 WOFF2 (如果 admin 上传时转出来了) — 浏览器通用格式, 兼容性比原 TTF 好.
+    没有 WOFF2 就退回原 TTF/OTF (浏览器能解析就用, 不能解析就 fallback 到 sans-serif).
+    """
     safe = os.path.basename(filename)
+    stem, ext = os.path.splitext(safe)
+
+    # 1. 优先 WOFF2 (同 stem)
+    woff2_path = os.path.join(_FONT_DIR_PROJECT, stem + '.woff2')
+    if os.path.exists(woff2_path):
+        return FileResponse(woff2_path, media_type='font/woff2',
+                            headers={'Cache-Control': 'public, max-age=2592000'})
+
+    # 2. 退回原文件
     path = os.path.join(_FONT_DIR_PROJECT, safe)
     if not os.path.exists(path):
         raise HTTPException(404, f'字体不存在: {safe}')
@@ -2374,7 +2387,16 @@ async def _run_publish_job(job_id: str, req: PublishStartRequest, video_local: s
     try:
         from social_publisher import publish_xhs, publish_douyin
     except ImportError as e:
-        _publish_job_update(job_id, status="failed", detail=f"social_publisher 模块没装: {e}")
+        # 分辨具体缺什么 — 让管理员知道该装哪个
+        msg = str(e)
+        if "social_publisher" in msg:
+            hint = "发布模块文件缺失: social_publisher.py 没在后端目录 (检查部署)"
+        elif "playwright" in msg.lower():
+            hint = ("Playwright 没装. 后端机器跑: "
+                    "pip install playwright && python -m playwright install msedge")
+        else:
+            hint = f"发布模块依赖缺失: {msg}. 后端机器装: pip install playwright + playwright install msedge"
+        _publish_job_update(job_id, status="failed", detail=hint)
         return
 
     try:
@@ -2467,6 +2489,15 @@ async def publish_check_login(platform: str):
         from social_publisher import check_login
         result = await check_login(platform)
         return result
+    except ImportError as e:
+        msg = str(e)
+        if "social_publisher" in msg:
+            hint = "发布模块文件缺失: social_publisher.py 没在后端目录"
+        elif "playwright" in msg.lower():
+            hint = "Playwright 没装. 后端跑: pip install playwright && python -m playwright install msedge"
+        else:
+            hint = f"发布模块依赖缺失: {msg}"
+        return {"logged_in": False, "platform": platform, "detail": hint}
     except Exception as e:
         return {"logged_in": False, "platform": platform,
                 "detail": f"探测失败: {type(e).__name__}: {e}"}

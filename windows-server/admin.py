@@ -650,6 +650,23 @@ async def admin_upload_font(
     with open(target, 'wb') as f:
         f.write(content)
 
+    # 转 WOFF2 — 浏览器通用格式, 比 raw TTF/OTF 兼容性好得多
+    # (某些 TTF 有 OS/2 sxHeight, vhea version 等 metadata 问题, Chrome/Firefox 拒绝加载)
+    # PIL 后端继续用原 TTF (PIL 比浏览器宽松, 能解析).
+    # 失败不阻塞上传 — 没装 fonttools / brotli 就跳过, 前端会自动 fallback 原文件
+    try:
+        from fontTools.ttLib import TTFont
+        ttx = TTFont(target)
+        ttx.flavor = 'woff2'
+        woff2_path = os.path.splitext(target)[0] + '.woff2'
+        ttx.save(woff2_path)
+        print(f"[font-upload] WOFF2 转出成功: {woff2_path}", flush=True)
+    except ImportError:
+        print("[font-upload] fonttools 没装, 跳过 WOFF2 转换 (pip install fonttools brotli)", flush=True)
+    except Exception as e:
+        # 字体文件坏的情况下 fonttools 也会失败, 这时只能用原文件凑合
+        print(f"[font-upload] WOFF2 转换失败 (不影响上传): {e}", flush=True)
+
     # 入库
     conn = get_db()
     try:
