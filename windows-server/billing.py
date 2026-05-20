@@ -444,7 +444,24 @@ def try_daily_grant(user_id: int) -> Optional[dict]:
         user_row = conn.execute("SELECT created_at FROM users WHERE id = ?", (user_id,)).fetchone()
         if not user_row:
             return None
-        created_at = user_row['created_at']
+        # created_at 兼容: 老用户可能存的是 ISO 字符串, 新用户是 Unix 时间戳 float.
+        # 拿不到合法时间戳直接跳 grant, 不抠这个 (admin 自己看哪些用户存错了再补).
+        raw_created = user_row['created_at']
+        try:
+            if isinstance(raw_created, (int, float)):
+                created_at = float(raw_created)
+            elif isinstance(raw_created, str):
+                # 尝试 1: 字符串里就是数字
+                try:
+                    created_at = float(raw_created)
+                except ValueError:
+                    # 尝试 2: ISO 8601 格式 "2024-05-19T10:00:00" 之类
+                    import datetime as _dt
+                    created_at = _dt.datetime.fromisoformat(raw_created.replace('Z', '+00:00')).timestamp()
+            else:
+                return None
+        except Exception:
+            return None
         # 注册的几天后了 (注册当天 = day 1)
         days_since = (time.time() - created_at) / 86400
         day_index = int(days_since) + 1     # 1..N
