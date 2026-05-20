@@ -258,6 +258,7 @@ export interface CoverPersonSlot {
   stroke_color: string                 // 描边色 例 #FFFFFF
   stroke_width: number                 // 描边宽 (像素)
   fit_mode: 'cover' | 'contain'        // 人物图怎么填满坑
+  rotation?: number                    // 旋转角度 (°), 后端字段, 跟 CoverTextField 一致
 }
 
 export interface AdminCoverTemplate {
