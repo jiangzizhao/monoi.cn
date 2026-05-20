@@ -692,7 +692,12 @@ export function TemplatePreview({ template, userTexts, textOverrides, extraField
 
   return (
     <div ref={containerRef} className="relative rounded-lg overflow-hidden border border-[var(--border)] bg-[var(--bg)]"
-         style={{ aspectRatio: template.ratio.replace(':', ' / ') }}>
+         style={{
+           aspectRatio: template.ratio.replace(':', ' / '),
+           // containerType: inline-size 挂在外层, 让字段内 cqw 单位按整图宽算
+           // (之前挂字段 wrapper, cqw=wrapper宽, 字号偏小 ~25%)
+           containerType: 'inline-size',
+         }}>
       {/* 1. 底图 */}
       {template.bg_url && (
         <img ref={imgRef} src={template.bg_url} alt=""
@@ -820,6 +825,8 @@ export function TemplatePreview({ template, userTexts, textOverrides, extraField
         const rotation = (isAdmin ? (ovr.rotation ?? f.rotation) : f.rotation) || 0
         const hasRotation = Math.abs(rotation) > 0.01
         // wrapper 整体旋转 — 字 + handles 一起转 (跟 Canva 一致)
+        // 注意: wrapper 不再设 containerType — 让内部 cqw 单位向上找到外层 TemplatePreview 容器,
+        // 按整图宽算字号 (而不是按字段框自己的宽). 这样字号比例跟最终图一致.
         const wrapperStyle: React.CSSProperties = {
           left: `${posX / tplW * 100}%`,
           top: `${posY / tplH * 100}%`,
@@ -827,7 +834,6 @@ export function TemplatePreview({ template, userTexts, textOverrides, extraField
           height: `${posH / tplH * 100}%`,
           justifyContent: hasRotation ? 'center' : justify,
           alignItems: 'center',
-          containerType: 'inline-size',
           transform: hasRotation ? `rotate(${rotation}deg)` : undefined,
           transformOrigin: 'center',
           overflow: 'visible',
