@@ -156,6 +156,16 @@ export function TemplateCoverPicker() {
     const msg = makeAssistantMsg([
       { type: 'text', content: `✓ 已用模板 "${selected.name}" 生成封面` },
       { type: 'cover_result', data: { covers: [{ ratio: selected.ratio, url: result.download_url }] } },
+      // 加 "下一步" choices, 让用户能继续去发布 / 保留 (跟老 CoverGeneratorForm 一致)
+      {
+        type: 'choices',
+        question: '下一步',
+        options: [
+          { id: '__form_publish__', label: '去发布', description: '上传到小红书 / 抖音' },
+          { id: '帮我生成各平台的发布文案', label: '先生成发布文案', description: 'AI 给每平台写标题/描述/标签' },
+          { id: '保留封面, 暂不做下一步', label: '保留封面', description: '稍后再决定' },
+        ],
+      } as any,
     ])
     chatStore.addMessage(convId, msg)
   }
