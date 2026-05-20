@@ -11,7 +11,7 @@ import {
   adminProcessWithdrawal, adminStats,
   adminListBgm, adminAddBgm, adminDeleteBgm,
   adminListFonts, adminUploadFont, adminDeleteFont,
-  adminListCoverTemplates, adminAddCoverTemplate, adminDeleteCoverTemplate,
+  adminListCoverTemplates, adminAddCoverTemplate, adminUpdateCoverTemplate, adminDeleteCoverTemplate,
   adminApiUsage,
   type AdminUserRow, type AdminOrderRow, type AdminWithdrawalRow, type AdminStats,
   type AdminBgmRow, type AdminFontRow, type AdminCoverTemplate, type CoverTextField, type CoverPersonSlot,
@@ -1198,7 +1198,8 @@ function CoverTemplateTab() {
   const [list, setList] = useState<AdminCoverTemplate[]>([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
-  const [showEditor, setShowEditor] = useState(false)
+  // null = 关闭; {} = 新建; AdminCoverTemplate = 编辑该模板
+  const [editorState, setEditorState] = useState<null | { mode: 'create' } | { mode: 'edit'; template: AdminCoverTemplate }>(null)
 
   const reload = () => {
     setLoading(true); setErr('')
@@ -1234,7 +1235,7 @@ function CoverTemplateTab() {
           </div>
         </div>
         <button
-          onClick={() => setShowEditor(true)}
+          onClick={() => setEditorState({ mode: 'create' })}
           className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[var(--text)] text-[var(--bg)] text-sm cursor-pointer"
         >
           <Plus size={14}/> 新建模板
@@ -1277,12 +1278,23 @@ function CoverTemplateTab() {
                         <span className="flex-1 truncate">{t.name}</span>
                         <span className="text-[10px] text-[var(--text-3)]">{t.ratio}·{t.text_fields.length}字</span>
                       </div>
-                      <button
-                        onClick={() => handleDelete(t.id, t.name)}
-                        className="absolute top-1 right-1 p-1 rounded bg-red-500/80 text-white opacity-0 group-hover:opacity-100 cursor-pointer z-10"
-                      >
-                        <Trash2 size={12}/>
-                      </button>
+                      {/* 编辑 + 删除 — hover 显示 */}
+                      <div className="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 z-10">
+                        <button
+                          onClick={() => setEditorState({ mode: 'edit', template: t })}
+                          className="px-2 py-1 rounded bg-[var(--text)]/85 text-[var(--bg)] text-[10px] cursor-pointer hover:opacity-90"
+                          title="编辑模板"
+                        >
+                          编辑
+                        </button>
+                        <button
+                          onClick={() => handleDelete(t.id, t.name)}
+                          className="p-1 rounded bg-red-500/80 text-white cursor-pointer"
+                          title="删除"
+                        >
+                          <Trash2 size={12}/>
+                        </button>
+                      </div>
                     </div>
                   )
                 })}
@@ -1292,10 +1304,11 @@ function CoverTemplateTab() {
         </div>
       )}
 
-      {showEditor && (
+      {editorState && (
         <CoverTemplateEditor
-          onClose={() => setShowEditor(false)}
-          onSaved={() => { setShowEditor(false); reload() }}
+          initial={editorState.mode === 'edit' ? editorState.template : undefined}
+          onClose={() => setEditorState(null)}
+          onSaved={() => { setEditorState(null); reload() }}
         />
       )}
     </>
@@ -1303,22 +1316,35 @@ function CoverTemplateTab() {
 }
 
 /** 上传 + 拖框编辑器 — 弹窗形式 */
-function CoverTemplateEditor({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
-  const [name, setName] = useState('')
-  const [category, setCategory] = useState('zhichang')
-  const [ratio, setRatio] = useState<'9:16' | '3:4' | '16:9' | '1:1'>('3:4')
+function CoverTemplateEditor({ initial, onClose, onSaved }: {
+  initial?: AdminCoverTemplate           // 有就是 "编辑模式", 没有就是 "新建"
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const isEdit = !!initial
+  const [name, setName] = useState(initial?.name || '')
+  const [category, setCategory] = useState(initial?.category || 'zhichang')
+  const [ratio, setRatio] = useState<'9:16' | '3:4' | '16:9' | '1:1'>(
+    (initial?.ratio as any) || '3:4'
+  )
 
-  const [, setBgFile] = useState<File | null>(null)    // 保留 setter (handleBgFile 设, 但当前没读), 拿掉 getter 避 TS6133
-  const [bgOssKey, setBgOssKey] = useState('')
-  const [bgPreviewUrl, setBgPreviewUrl] = useState('')              // 本地 ObjectURL, 用于拖框预览
+  const [, setBgFile] = useState<File | null>(null)
+  // edit 模式: bgOssKey 是旧的 (不换底图就保留), 用户传新图才会变
+  const [bgOssKey, setBgOssKey] = useState(initial?.bg_oss_key || '')
+  // edit 模式: bgPreviewUrl 用 initial.bg_url (后端签的) 显示旧底图
+  const [bgPreviewUrl, setBgPreviewUrl] = useState(initial?.bg_url || '')
   const [bgUploading, setBgUploading] = useState(false)
   const [bgUploadProgress, setBgUploadProgress] = useState(0)
   const [bgNaturalSize, setBgNaturalSize] = useState({ w: 0, h: 0 })
 
-  const [fields, setFields] = useState<UiTextField[]>([])
+  // edit 模式: 字段先初始化成 initial.text_fields, 加上前端用的 _id
+  const [fields, setFields] = useState<UiTextField[]>(
+    (initial?.text_fields || []).map(f => ({
+      ...f, _id: `f_${Math.random().toString(36).slice(2, 8)}`,
+    }))
+  )
   const [activeFieldId, setActiveFieldId] = useState<string | null>(null)
-  // 人物坑 (最多 1 个), null = 这个模板没人物
-  const [personSlot, setPersonSlot] = useState<CoverPersonSlot | null>(null)
+  const [personSlot, setPersonSlot] = useState<CoverPersonSlot | null>(initial?.person_slot || null)
   // 'text' 拖框 → 加文字字段; 'person' 拖框 → 设/换人物坑; 'person_edit' → 选中人物坑编辑属性
   const [drawMode, setDrawMode] = useState<'text' | 'person'>('text')
   const [personSelected, setPersonSelected] = useState(false)   // 右侧编辑面板显示人物坑属性
@@ -1346,6 +1372,14 @@ function CoverTemplateEditor({ onClose, onSaved }: { onClose: () => void; onSave
       .then(d => setFonts(d.fonts || []))
       .catch(() => setFonts([]))
   }, [])
+
+  // edit 模式: 加载 initial.bg_url 拿真实 naturalSize (拖框坐标算用)
+  useEffect(() => {
+    if (!initial?.bg_url) return
+    const img = new Image()
+    img.onload = () => setBgNaturalSize({ w: img.naturalWidth, h: img.naturalHeight })
+    img.src = initial.bg_url
+  }, [initial?.bg_url])
 
   // 字段加/改字体时预加载, 让画布里的预览能用真字体
   useEffect(() => {
@@ -1520,16 +1554,26 @@ function CoverTemplateEditor({ onClose, onSaved }: { onClose: () => void; onSave
   const handleSave = async () => {
     if (!name.trim()) { setEditorErr('请填模板名'); return }
     if (!bgOssKey) { setEditorErr('请先上传底图'); return }
-    // 字段为空也允许 (纯底图模板, 用户自己加文字)
     setSaving(true); setEditorErr('')
     try {
       const cleanFields: CoverTextField[] = fields.map(({ _id, ...f }) => f)
-      await adminAddCoverTemplate({
-        name: name.trim(), category, ratio,
-        bg_oss_key: bgOssKey,
-        text_fields: cleanFields,
-        person_slot: personSlot,    // 没人物坑就传 null
-      })
+      if (isEdit && initial) {
+        await adminUpdateCoverTemplate(initial.id, {
+          name: name.trim(), category, ratio,
+          // edit 模式: 如果用户没换底图 (bgOssKey 跟 initial 一样), 后端会保留旧值;
+          // 用户换了 (重新上传) 就传新的
+          bg_oss_key: bgOssKey === initial.bg_oss_key ? null : bgOssKey,
+          text_fields: cleanFields,
+          person_slot: personSlot,
+        })
+      } else {
+        await adminAddCoverTemplate({
+          name: name.trim(), category, ratio,
+          bg_oss_key: bgOssKey,
+          text_fields: cleanFields,
+          person_slot: personSlot,
+        })
+      }
       onSaved()
     } catch (e: any) {
       setEditorErr(e.message || '保存失败')
@@ -1545,7 +1589,7 @@ function CoverTemplateEditor({ onClose, onSaved }: { onClose: () => void; onSave
       <div onClick={e => e.stopPropagation()}
         className="relative bg-[var(--bg-card)] border border-[var(--border)] rounded-2xl shadow-ios-lg w-full max-w-6xl max-h-[92vh] flex flex-col">
         <div className="flex items-center justify-between p-4 border-b border-[var(--border)]">
-          <div className="text-base font-semibold">新建封面模板</div>
+          <div className="text-base font-semibold">{isEdit ? `编辑模板: ${initial?.name || ''}` : '新建封面模板'}</div>
           <button onClick={onClose} className="p-1 rounded hover:bg-[var(--bg-hover)] cursor-pointer"><X size={16}/></button>
         </div>
 

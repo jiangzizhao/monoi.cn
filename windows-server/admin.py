@@ -837,6 +837,49 @@ def admin_get_cover_template(template_id: int, request: Request):
     return _parse_template_row(row)
 
 
+class UpdateCoverTemplateRequest(BaseModel):
+    """编辑模板. bg_oss_key 可不传 (不换底图就保留旧值), 传了就换新的"""
+    name: str
+    category: str = 'other'
+    ratio: str = '3:4'
+    bg_oss_key: Optional[str] = None       # None = 不换底图
+    text_fields: list[CoverTextField]
+    person_slot: Optional[CoverPersonSlot] = None
+
+
+@router.put("/cover-templates/{template_id}")
+def admin_update_cover_template(template_id: int, req: UpdateCoverTemplateRequest, request: Request):
+    require_admin(request)
+    if req.ratio not in {'9:16', '3:4', '16:9', '1:1'}:
+        raise HTTPException(400, f'ratio 必须是 9:16/3:4/16:9/1:1')
+    valid_cats = {'kepu', 'zhenjing', 'gushi', 'jiaocheng', 'jianji', 'zhichang', 'xuexi', 'licai', 'other'}
+    if req.category not in valid_cats:
+        raise HTTPException(400, f'category 必须是 {valid_cats}')
+    if req.text_fields and len(req.text_fields) > 10:
+        raise HTTPException(400, '最多 10 个文字字段')
+
+    import json as _json
+    conn = get_db()
+    existing = conn.execute("SELECT bg_oss_key FROM cover_template WHERE id = ?", (template_id,)).fetchone()
+    if not existing:
+        conn.close()
+        raise HTTPException(404, '模板不存在')
+
+    # bg_oss_key: None 保留旧值
+    new_bg = req.bg_oss_key or existing['bg_oss_key']
+    text_fields_json = _json.dumps([f.model_dump() for f in req.text_fields], ensure_ascii=False)
+    person_slot_json = _json.dumps(req.person_slot.model_dump(), ensure_ascii=False) if req.person_slot else None
+
+    conn.execute("""
+        UPDATE cover_template
+        SET name = ?, category = ?, ratio = ?, bg_oss_key = ?, text_fields_json = ?, person_slot_json = ?
+        WHERE id = ?
+    """, (req.name, req.category, req.ratio, new_bg, text_fields_json, person_slot_json, template_id))
+    conn.commit()
+    conn.close()
+    return {'success': True}
+
+
 @router.delete("/cover-templates/{template_id}")
 def admin_delete_cover_template(template_id: int, request: Request):
     require_admin(request)

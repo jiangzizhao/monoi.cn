@@ -293,6 +293,24 @@ export async function adminAddCoverTemplate(req: {
   return post('/api/admin/cover-templates', req)
 }
 
+export async function adminUpdateCoverTemplate(template_id: number, req: {
+  name: string
+  category: string
+  ratio: string
+  bg_oss_key?: string | null       // 不换底图传 null, 后端保留旧值
+  text_fields: CoverTextField[]
+  person_slot?: CoverPersonSlot | null
+}): Promise<{ success: boolean }> {
+  const res = await fetch(directBase + `/api/admin/cover-templates/${template_id}`, {
+    method: 'PUT',
+    headers: headers(),
+    body: JSON.stringify(req),
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.detail || data.error || `update failed ${res.status}`)
+  return data
+}
+
 export async function adminDeleteCoverTemplate(template_id: number): Promise<{ success: boolean }> {
   const res = await fetch(directBase + `/api/admin/cover-templates/${template_id}`, {
     method: 'DELETE',
