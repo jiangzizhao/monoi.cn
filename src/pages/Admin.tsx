@@ -1417,7 +1417,10 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
           else if (it.corner === 'sw') { x += dx; w -= dx; h += dy }
           else { w += dx; h += dy }
           w = Math.max(20, w); h = Math.max(20, h)
-          return { ...f, x, y, w, h }
+          // 字号跟 box 高度同比例缩放 (Canva 一致): 新字号 = 旧字号 × (新 h / 旧 h)
+          const hRatio = h / Math.max(1, f.h)
+          const newFontSize = Math.max(12, Math.round(f.font_size * hRatio))
+          return { ...f, x, y, w, h, font_size: newFontSize }
         }))
         interactionRef.current = { ...it, startMouseX: e.clientX, startMouseY: e.clientY }
       } else if (it.type === 'rotate' && it.centerX !== undefined && it.centerY !== undefined) {

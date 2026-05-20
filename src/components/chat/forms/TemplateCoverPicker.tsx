@@ -284,12 +284,23 @@ export function TemplateCoverPicker() {
                     x: cur.x ?? adminField.x, y: cur.y ?? adminField.y,
                     w: cur.w ?? adminField.w, h: cur.h ?? adminField.h,
                   }
-                  return { ...prev, [label]: { ...cur, ...apply(baseline) } }
+                  const after = apply(baseline)
+                  // 字号跟 box 高度同比例缩放 (Canva 一致): font_scale 累加, 基准是 admin.h
+                  const oldH = baseline.h
+                  const newH = after.h
+                  const prevScale = cur.font_scale ?? 1
+                  const newScale = Math.max(0.2, Math.min(5, prevScale * (newH / Math.max(1, oldH))))
+                  return { ...prev, [label]: { ...cur, ...after, font_scale: newScale } }
                 })
               } else {
-                setExtraFields(prev => prev.map(f =>
-                  f.label === label ? { ...f, ...apply({ x: f.x, y: f.y, w: f.w, h: f.h }) } : f
-                ))
+                setExtraFields(prev => prev.map(f => {
+                  if (f.label !== label) return f
+                  const after = apply({ x: f.x, y: f.y, w: f.w, h: f.h })
+                  // extra 字段直接改 font_size (没 font_scale)
+                  const hRatio = after.h / Math.max(1, f.h)
+                  const newFontSize = Math.max(12, Math.round(f.font_size * hRatio))
+                  return { ...f, ...after, font_size: newFontSize }
+                }))
               }
             }}
             onRotateField={(label, deltaRotation) => {
