@@ -940,6 +940,34 @@ def admin_update_cover_template(template_id: int, req: UpdateCoverTemplateReques
     return {'success': True}
 
 
+class SetSamplePersonRequest(BaseModel):
+    """专门设置/清空示例人物图的请求 — 跟主模板 update 解耦, 上传完直接调."""
+    sample_person_oss_key: Optional[str] = None   # None 或 "" 清空; 有值就设
+
+
+@router.post("/cover-templates/{template_id}/sample-person")
+def admin_set_sample_person(template_id: int, req: SetSamplePersonRequest, request: Request):
+    """单字段更新: 只动 sample_person_oss_key, 不碰其他字段.
+    用于 admin 上传完示例人物 → 抠图完 → 直接调这个, 不依赖完整 PUT update."""
+    require_admin(request)
+    conn = get_db()
+    _ensure_sample_person_column(conn)
+    existing = conn.execute("SELECT id FROM cover_template WHERE id = ?", (template_id,)).fetchone()
+    if not existing:
+        conn.close()
+        raise HTTPException(404, '模板不存在')
+    new_val = (req.sample_person_oss_key or '').strip() or None
+    print(f"[admin] sample-person set: template_id={template_id} new_value={new_val!r}", flush=True)
+    conn.execute(
+        "UPDATE cover_template SET sample_person_oss_key = ? WHERE id = ?",
+        (new_val, template_id)
+    )
+    conn.commit()
+    conn.close()
+    print(f"[admin] sample-person 保存成功 template_id={template_id}", flush=True)
+    return {'success': True, 'sample_person_oss_key': new_val}
+
+
 @router.delete("/cover-templates/{template_id}")
 def admin_delete_cover_template(template_id: int, request: Request):
     require_admin(request)

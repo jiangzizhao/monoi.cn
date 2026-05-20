@@ -319,6 +319,15 @@ export async function adminUpdateCoverTemplate(template_id: number, req: {
   return data
 }
 
+/** 单独保存模板的示例人物图 (跟完整 update 解耦). 上传完抠图直接调这个. */
+export async function adminSetSamplePerson(
+  template_id: number,
+  sample_person_oss_key: string | null,
+): Promise<{ success: boolean; sample_person_oss_key: string | null }> {
+  return post(`/api/admin/cover-templates/${template_id}/sample-person`,
+    { sample_person_oss_key: sample_person_oss_key || null })
+}
+
 export async function adminDeleteCoverTemplate(template_id: number): Promise<{ success: boolean }> {
   const res = await fetch(directBase + `/api/admin/cover-templates/${template_id}`, {
     method: 'DELETE',

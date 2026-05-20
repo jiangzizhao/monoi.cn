@@ -12,6 +12,7 @@ import {
   adminListBgm, adminAddBgm, adminDeleteBgm,
   adminListFonts, adminUploadFont, adminDeleteFont,
   adminListCoverTemplates, adminAddCoverTemplate, adminUpdateCoverTemplate, adminDeleteCoverTemplate,
+  adminSetSamplePerson,
   adminApiUsage,
   type AdminUserRow, type AdminOrderRow, type AdminWithdrawalRow, type AdminStats,
   type AdminBgmRow, type AdminFontRow, type AdminCoverTemplate, type CoverTextField, type CoverPersonSlot,
@@ -1614,6 +1615,17 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
       setSamplePersonOssKey(data.oss_key)
       setSamplePersonUrl(data.preview_url)
       setSamplePersonChanged(true)
+
+      // 编辑模式: 抠图完直接调专用接口写库, 不依赖"保存模板"按钮.
+      // 新建模式: 先存内存, 创建模板时一起带上.
+      if (isEdit && initial) {
+        try {
+          await adminSetSamplePerson(initial.id, data.oss_key)
+          console.log('[sample-person] 已写库 template_id=', initial.id, 'key=', data.oss_key)
+        } catch (saveErr: any) {
+          setSampleErr('抠图完了但存到模板失败: ' + (saveErr.message || saveErr))
+        }
+      }
     } catch (e: any) {
       setSampleErr(e.message || '抠图失败')
     } finally {
@@ -1621,11 +1633,20 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
     }
   }
 
-  const clearSamplePerson = () => {
+  const clearSamplePerson = async () => {
     setSamplePersonOssKey('')
     setSamplePersonUrl('')
     setSamplePersonChanged(true)
     setSampleErr('')
+    // 编辑模式: 立刻调专用接口写库清掉
+    if (isEdit && initial) {
+      try {
+        await adminSetSamplePerson(initial.id, null)
+        console.log('[sample-person] 已清库 template_id=', initial.id)
+      } catch (saveErr: any) {
+        setSampleErr('清空失败: ' + (saveErr.message || saveErr))
+      }
+    }
   }
 
   const handleSave = async () => {
