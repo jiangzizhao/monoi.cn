@@ -47,6 +47,9 @@ export interface CoverTemplate {
   preview_url?: string
   text_fields: UserCoverTextField[]
   person_slot?: UserCoverPersonSlot | null
+  // admin 上传的示例人物图 (已抠图透明 PNG 的签名 URL, 1h 有效).
+  // 用途: 模板缩略图 + 用户没传自己的人物前的默认预览. 用户上传自己的会替换.
+  sample_person_url?: string
   created_at: number
 }
 

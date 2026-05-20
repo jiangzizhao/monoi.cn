@@ -270,6 +270,8 @@ export interface AdminCoverTemplate {
   preview_oss_key?: string | null
   text_fields: CoverTextField[]
   person_slot: CoverPersonSlot | null  // 没人物的模板是 null
+  sample_person_oss_key?: string | null   // admin 上传的示例人物 (已抠图透明 PNG) OSS key
+  sample_person_url?: string              // 后端签的 1h URL, admin 编辑 + 用户预览用
   uploaded_by: number
   created_at: number
 }
@@ -289,6 +291,7 @@ export async function adminAddCoverTemplate(req: {
   bg_oss_key: string
   text_fields: CoverTextField[]
   person_slot?: CoverPersonSlot | null
+  sample_person_oss_key?: string | null
 }): Promise<{ success: boolean; id: number }> {
   return post('/api/admin/cover-templates', req)
 }
@@ -300,6 +303,10 @@ export async function adminUpdateCoverTemplate(template_id: number, req: {
   bg_oss_key?: string | null       // 不换底图传 null, 后端保留旧值
   text_fields: CoverTextField[]
   person_slot?: CoverPersonSlot | null
+  // sample_person: 默认 keep_sample_person=true 保留旧值;
+  // 想改要先 keep_sample_person=false, 然后 sample_person_oss_key 填新值 (或空清掉)
+  sample_person_oss_key?: string | null
+  keep_sample_person?: boolean
 }): Promise<{ success: boolean }> {
   const res = await fetch(directBase + `/api/admin/cover-templates/${template_id}`, {
     method: 'PUT',

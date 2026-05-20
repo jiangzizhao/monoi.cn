@@ -1995,9 +1995,13 @@ def list_cover_templates():
         conn = _sq.connect(db_path, timeout=2)
         conn.row_factory = _sq.Row
         try:
-            rows = conn.execute("""
+            # 兼容老库没 sample_person_oss_key 字段 — 用 PRAGMA 探一下决定 SELECT 列
+            cols = [c[1] for c in conn.execute("PRAGMA table_info(cover_template)").fetchall()]
+            has_sample = 'sample_person_oss_key' in cols
+            sample_col = ', sample_person_oss_key' if has_sample else ''
+            rows = conn.execute(f"""
                 SELECT id, name, category, ratio, bg_oss_key, text_fields_json,
-                       person_slot_json, preview_oss_key, created_at
+                       person_slot_json, preview_oss_key, created_at{sample_col}
                 FROM cover_template ORDER BY category, created_at DESC
             """).fetchall()
         finally:
@@ -2037,6 +2041,18 @@ def list_cover_templates():
                 person_slot = _json.loads(raw_ps)
         except Exception:
             person_slot = None
+        # 签 sample_person URL (admin 上传的示例人物, 已抠图透明 PNG)
+        sample_person_url = ''
+        sample_key = None
+        try:
+            sample_key = r['sample_person_oss_key'] if has_sample else None
+        except (IndexError, KeyError):
+            sample_key = None
+        if sample_key:
+            try:
+                sample_person_url = oss_sign_get(sample_key, expires=3600)
+            except Exception as e:
+                print(f"[cover-templates] sample_person 签名失败 id={r['id']}: {e}", flush=True)
         templates.append({
             'id': r['id'],
             'name': r['name'],
@@ -2046,6 +2062,7 @@ def list_cover_templates():
             'preview_url': preview_url,
             'text_fields': text_fields,
             'person_slot': person_slot,
+            'sample_person_url': sample_person_url,
             'created_at': r['created_at'],
         })
     return {'templates': templates}

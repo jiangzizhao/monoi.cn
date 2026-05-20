@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, Users, ShoppingBag, DollarSign, BarChart3, Search, X, AlertTriangle,
   Music, Trash2, Plus, Loader2, Play, Pause, Type, Image as ImageIcon, MousePointer2,
-  Activity,
+  Activity, Upload,
 } from 'lucide-react'
 import {
   adminListUsers, adminUserDetail, adminGrantSubscription, adminGrantCredits,
@@ -1348,6 +1348,14 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
   // 'text' 拖框 → 加文字字段; 'person' 拖框 → 设/换人物坑; 'person_edit' → 选中人物坑编辑属性
   const [drawMode, setDrawMode] = useState<'text' | 'person'>('text')
   const [personSelected, setPersonSelected] = useState(false)   // 右侧编辑面板显示人物坑属性
+  // 示例人物图: admin 编辑时上传 → 走 cover-remove-bg 抠图 → 拿到 OSS key + 签名 URL.
+  // 用途 1: 画布粉色人物坑里渲染示例人物, 让 admin 能看到效果;
+  // 用途 2: 存进模板, 用户端缩略图 + 默认预览能看到示例.
+  const [samplePersonOssKey, setSamplePersonOssKey] = useState<string>(initial?.sample_person_oss_key || '')
+  const [samplePersonUrl, setSamplePersonUrl] = useState<string>(initial?.sample_person_url || '')
+  const [sampleUploading, setSampleUploading] = useState(false)
+  const [sampleErr, setSampleErr] = useState('')
+  const [samplePersonChanged, setSamplePersonChanged] = useState(false)  // 编辑模式: 改了才发, 没改保留旧值
   const [fonts, setFonts] = useState<FontOption[]>([])
   const [saving, setSaving] = useState(false)
   const [editorErr, setEditorErr] = useState('')
@@ -1452,7 +1460,22 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
     const localUrl = URL.createObjectURL(f)
     setBgPreviewUrl(localUrl)
     const img = new Image()
-    img.onload = () => setBgNaturalSize({ w: img.naturalWidth, h: img.naturalHeight })
+    img.onload = () => {
+      setBgNaturalSize({ w: img.naturalWidth, h: img.naturalHeight })
+      // 按底图实际宽高比自动匹配最近的 ratio, 避免横版图被强行套 3:4 竖版
+      const r = img.naturalWidth / Math.max(1, img.naturalHeight)
+      const cands: { v: '9:16' | '3:4' | '16:9' | '1:1'; r: number }[] = [
+        { v: '9:16', r: 9 / 16 },
+        { v: '3:4', r: 3 / 4 },
+        { v: '1:1', r: 1 },
+        { v: '16:9', r: 16 / 9 },
+      ]
+      let best = cands[0]
+      for (const c of cands) {
+        if (Math.abs(Math.log(c.r) - Math.log(r)) < Math.abs(Math.log(best.r) - Math.log(r))) best = c
+      }
+      setRatio(best.v)
+    }
     img.src = localUrl
 
     setBgUploading(true); setBgUploadProgress(0)
@@ -1566,6 +1589,45 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
     if (activeFieldId === id) setActiveFieldId(null)
   }
 
+  /** admin 上传示例人物: 走用户端那个 cover-remove-bg, 拿到抠图后的透明 PNG OSS key.
+   * 这里复用用户端的 stroke 配置 — 如果 person_slot 有 stroke 就用它, 没就给个 0px 中性配置. */
+  const handleSamplePersonFile = async (f: File) => {
+    if (!f.type.startsWith('image/')) { setSampleErr('请选图片文件'); return }
+    if (f.size > 20 * 1024 * 1024) { setSampleErr('图片太大 (>20MB)'); return }
+    setSampleUploading(true); setSampleErr('')
+    try {
+      const token = localStorage.getItem('monoi_token') || ''
+      const form = new FormData()
+      form.append('file', f)
+      form.append('stroke_enabled', String(personSlot?.stroke_enabled ?? false))
+      form.append('stroke_color', personSlot?.stroke_color || '#FFFFFF')
+      form.append('stroke_width', String(personSlot?.stroke_width ?? 0))
+      const res = await fetch(directBase + '/api/voice/cover-remove-bg', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: form,
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data.success) {
+        throw new Error(data.detail || data.error || `抠图失败 ${res.status}`)
+      }
+      setSamplePersonOssKey(data.oss_key)
+      setSamplePersonUrl(data.preview_url)
+      setSamplePersonChanged(true)
+    } catch (e: any) {
+      setSampleErr(e.message || '抠图失败')
+    } finally {
+      setSampleUploading(false)
+    }
+  }
+
+  const clearSamplePerson = () => {
+    setSamplePersonOssKey('')
+    setSamplePersonUrl('')
+    setSamplePersonChanged(true)
+    setSampleErr('')
+  }
+
   const handleSave = async () => {
     if (!name.trim()) { setEditorErr('请填模板名'); return }
     if (bgUploading) { setEditorErr('底图还在上传中, 等进度条到 100% 再保存'); return }
@@ -1585,6 +1647,10 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
           bg_oss_key: bgOssKey === initial.bg_oss_key ? null : bgOssKey,
           text_fields: cleanFields,
           person_slot: personSlot,
+          // 示例人物: 没改 (samplePersonChanged=false) → keep_sample_person=true 保留旧值
+          // 改了 → keep_sample_person=false, sample_person_oss_key 用新值 (可能是空清掉)
+          keep_sample_person: !samplePersonChanged,
+          sample_person_oss_key: samplePersonChanged ? (samplePersonOssKey || null) : undefined,
         })
       } else {
         await adminAddCoverTemplate({
@@ -1592,6 +1658,7 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
           bg_oss_key: bgOssKey,
           text_fields: cleanFields,
           person_slot: personSlot,
+          sample_person_oss_key: samplePersonOssKey || null,
         })
       }
       onSaved()
@@ -1844,7 +1911,7 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
                   )
                 })}
 
-                {/* 人物坑框 (粉色, 跟文字框颜色区分) */}
+                {/* 人物坑框 (粉色, 跟文字框颜色区分) — 有示例人物图就把图渲在框里 */}
                 {bgNaturalSize.w > 0 && personSlot && (() => {
                   const imgEl = canvasRef.current?.querySelector('img')
                   const rect = imgEl?.getBoundingClientRect()
@@ -1854,13 +1921,26 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
                   return (
                     <div data-field-box
                       onClick={(e) => { e.stopPropagation(); setPersonSelected(true); setActiveFieldId(null) }}
-                      className={`absolute border-2 cursor-pointer ${
+                      className={`absolute border-2 cursor-pointer overflow-hidden ${
                         personSelected ? 'border-pink-500 bg-pink-500/15' : 'border-pink-400 border-dashed bg-pink-400/5'
                       }`}
-                      style={{ left: personSlot.x * sx, top: personSlot.y * sy, width: personSlot.w * sx, height: personSlot.h * sy }}
+                      style={{
+                        left: personSlot.x * sx,
+                        top: personSlot.y * sy,
+                        width: personSlot.w * sx,
+                        height: personSlot.h * sy,
+                        transform: personSlot.rotation ? `rotate(${personSlot.rotation}deg)` : undefined,
+                        transformOrigin: 'center',
+                      }}
                     >
+                      {samplePersonUrl && (
+                        <img src={samplePersonUrl} alt="示例人物"
+                          className="absolute inset-0 w-full h-full pointer-events-none"
+                          style={{ objectFit: personSlot.fit_mode === 'contain' ? 'contain' : 'cover' }}
+                          draggable={false}/>
+                      )}
                       <div className="absolute -top-5 left-0 text-[10px] bg-pink-500 text-white px-1 rounded whitespace-nowrap">
-                        人物坑
+                        人物坑{samplePersonUrl ? ' · 示例' : ''}
                       </div>
                     </div>
                   )
@@ -1890,6 +1970,11 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
                 slot={personSlot}
                 onChange={patch => setPersonSlot(prev => prev ? { ...prev, ...patch } : prev)}
                 onRemove={() => { setPersonSlot(null); setPersonSelected(false) }}
+                samplePersonUrl={samplePersonUrl}
+                sampleUploading={sampleUploading}
+                sampleErr={sampleErr}
+                onSampleUpload={handleSamplePersonFile}
+                onSampleClear={clearSamplePerson}
               />
             ) : activeField ? (
               <FieldEditor
@@ -2034,11 +2119,20 @@ function FieldEditor({ field, fonts, bgWidth, onChange, onRemove }: {
 
 
 /** 人物坑属性编辑面板 — 跟 FieldEditor 类似的右侧栏 */
-function PersonSlotEditor({ slot, onChange, onRemove }: {
+function PersonSlotEditor({
+  slot, onChange, onRemove,
+  samplePersonUrl, sampleUploading, sampleErr, onSampleUpload, onSampleClear,
+}: {
   slot: CoverPersonSlot
   onChange: (patch: Partial<CoverPersonSlot>) => void
   onRemove: () => void
+  samplePersonUrl: string
+  sampleUploading: boolean
+  sampleErr: string
+  onSampleUpload: (f: File) => void
+  onSampleClear: () => void
 }) {
+  const sampleFileRef = useRef<HTMLInputElement>(null)
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between">
@@ -2051,6 +2145,37 @@ function PersonSlotEditor({ slot, onChange, onRemove }: {
       <div className="text-xs text-[var(--text-3)] bg-[var(--bg-hover)] rounded p-2 leading-relaxed">
         💡 用户上传一张人物照片, 后端 rembg 自动抠图, 按 fit_mode 塞进这个坑.
         可选给抠完的人物加描边, 让人物从背景分离更清楚.
+      </div>
+
+      {/* 示例人物上传 — admin 设计时用, 也作为模板里的示例图给用户看 */}
+      <div className="border border-dashed border-pink-400/40 rounded p-2 flex flex-col gap-2">
+        <div className="text-xs text-pink-400 font-medium">示例人物图</div>
+        {samplePersonUrl ? (
+          <div className="flex items-center gap-2">
+            <img src={samplePersonUrl} alt="示例" className="w-12 h-12 rounded object-contain bg-[var(--bg)] border border-[var(--border)]"/>
+            <div className="flex-1 text-[11px] text-[var(--text-2)]">已设置, 画布人物坑里能看到效果</div>
+            <button onClick={() => sampleFileRef.current?.click()}
+              className="text-[10px] text-[var(--text-3)] hover:text-[var(--text)] cursor-pointer">换</button>
+            <button onClick={onSampleClear}
+              className="text-[10px] text-red-400 hover:text-red-300 cursor-pointer">清</button>
+          </div>
+        ) : (
+          <button onClick={() => sampleFileRef.current?.click()}
+            disabled={sampleUploading}
+            className={`flex items-center justify-center gap-1.5 py-2 rounded border border-dashed text-xs ${
+              sampleUploading ? 'border-[var(--border)] text-[var(--text-3)] cursor-wait'
+                : 'border-pink-400/50 text-pink-400 hover:bg-pink-500/10 cursor-pointer'
+            }`}>
+            {sampleUploading ? <><Loader2 size={12} className="animate-spin"/> AI 抠图中 5-15s</>
+              : <><Upload size={12}/> 上传示例人物 (jpg/png ≤20MB)</>}
+          </button>
+        )}
+        {sampleErr && <div className="text-[10px] text-red-400">{sampleErr}</div>}
+        <div className="text-[10px] text-[var(--text-3)] leading-relaxed">
+          上传后会调 rembg 抠图, 透明 PNG 存进模板. 用户预览模板时看到的就是这个示例, 用户传自己的人物会替换它.
+        </div>
+        <input ref={sampleFileRef} type="file" accept="image/*" className="hidden"
+          onChange={e => { const f = e.target.files?.[0]; if (f) onSampleUpload(f); if (sampleFileRef.current) sampleFileRef.current.value = '' }}/>
       </div>
 
       <div className="grid grid-cols-2 gap-2 text-xs text-[var(--text-3)]">

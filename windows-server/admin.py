@@ -765,6 +765,10 @@ class AddCoverTemplateRequest(BaseModel):
     bg_oss_key: str                       # admin 已经把底图 PNG 传到 OSS, 给 key
     text_fields: list[CoverTextField]     # 至少 1 个
     person_slot: Optional[CoverPersonSlot] = None   # 没人物的模板留 None
+    # 示例人物图 (已抠图的透明 PNG, OSS key 在 cover_persons/ 持久前缀里).
+    # 用途: admin 编辑时看效果 + 用户在 TemplateCoverPicker 看缩略图能预览成品.
+    # 用户上传自己的人物图后会替换它.
+    sample_person_oss_key: Optional[str] = None
 
 
 @router.post("/cover-templates")
@@ -784,14 +788,29 @@ def admin_add_cover_template(req: AddCoverTemplateRequest, request: Request):
     person_slot_json = _json.dumps(req.person_slot.model_dump(), ensure_ascii=False) if req.person_slot else None
 
     conn = get_db()
+    # sample_person_oss_key 字段不存在时先 ALTER 加 (老库一次性兼容)
+    _ensure_sample_person_column(conn)
     cursor = conn.execute("""
-        INSERT INTO cover_template (name, category, ratio, bg_oss_key, text_fields_json, person_slot_json, uploaded_by, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    """, (req.name, req.category, req.ratio, req.bg_oss_key, text_fields_json, person_slot_json, admin_id, time.time()))
+        INSERT INTO cover_template (name, category, ratio, bg_oss_key, text_fields_json, person_slot_json, sample_person_oss_key, uploaded_by, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (req.name, req.category, req.ratio, req.bg_oss_key, text_fields_json, person_slot_json, req.sample_person_oss_key, admin_id, time.time()))
     new_id = cursor.lastrowid
     conn.commit()
     conn.close()
     return {'success': True, 'id': new_id}
+
+
+def _ensure_sample_person_column(conn):
+    """老库迁移: cover_template 没 sample_person_oss_key 列就 ALTER 加上.
+    幂等 — 已经有列就什么都不做."""
+    try:
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(cover_template)").fetchall()]
+        if 'sample_person_oss_key' not in cols:
+            conn.execute("ALTER TABLE cover_template ADD COLUMN sample_person_oss_key TEXT")
+            conn.commit()
+            print("[admin] cover_template 加 sample_person_oss_key 列成功", flush=True)
+    except Exception as e:
+        print(f"[admin] _ensure_sample_person_column 失败 (忽略): {e}", flush=True)
 
 
 def _parse_template_row(r):
@@ -813,17 +832,27 @@ def _parse_template_row(r):
         d['person_slot'] = None
     # 签底图 URL (admin 后台缩略图用)
     bg_key = d.get('bg_oss_key')
-    if bg_key:
+    sample_person_key = d.get('sample_person_oss_key')
+    if bg_key or sample_person_key:
         try:
             import sys, os as _os
             sys.path.insert(0, _os.path.dirname(__file__))
             from oss_helper import oss_sign_get
-            d['bg_url'] = oss_sign_get(bg_key, expires=3600)
+            if bg_key:
+                d['bg_url'] = oss_sign_get(bg_key, expires=3600)
+            else:
+                d['bg_url'] = ''
+            if sample_person_key:
+                d['sample_person_url'] = oss_sign_get(sample_person_key, expires=3600)
+            else:
+                d['sample_person_url'] = ''
         except Exception as e:
-            print(f"[admin] bg 签名失败 id={d.get('id')}: {e}", flush=True)
-            d['bg_url'] = ''
+            print(f"[admin] OSS 签名失败 id={d.get('id')}: {e}", flush=True)
+            d.setdefault('bg_url', '')
+            d.setdefault('sample_person_url', '')
     else:
         d['bg_url'] = ''
+        d['sample_person_url'] = ''
     return d
 
 
@@ -832,8 +861,9 @@ def admin_list_cover_templates(request: Request):
     """admin 后台列表: 带 OSS key 不签 URL (admin 端要 OSS 控制台看就自己看)"""
     require_admin(request)
     conn = get_db()
+    _ensure_sample_person_column(conn)
     rows = conn.execute("""
-        SELECT id, name, category, ratio, bg_oss_key, text_fields_json, person_slot_json, preview_oss_key, uploaded_by, created_at
+        SELECT id, name, category, ratio, bg_oss_key, text_fields_json, person_slot_json, sample_person_oss_key, preview_oss_key, uploaded_by, created_at
         FROM cover_template ORDER BY created_at DESC
     """).fetchall()
     conn.close()
@@ -844,8 +874,9 @@ def admin_list_cover_templates(request: Request):
 def admin_get_cover_template(template_id: int, request: Request):
     require_admin(request)
     conn = get_db()
+    _ensure_sample_person_column(conn)
     row = conn.execute("""
-        SELECT id, name, category, ratio, bg_oss_key, text_fields_json, person_slot_json, preview_oss_key, uploaded_by, created_at
+        SELECT id, name, category, ratio, bg_oss_key, text_fields_json, person_slot_json, sample_person_oss_key, preview_oss_key, uploaded_by, created_at
         FROM cover_template WHERE id = ?
     """, (template_id,)).fetchone()
     conn.close()
@@ -862,6 +893,9 @@ class UpdateCoverTemplateRequest(BaseModel):
     bg_oss_key: Optional[str] = None       # None = 不换底图
     text_fields: list[CoverTextField]
     person_slot: Optional[CoverPersonSlot] = None
+    # sample_person_oss_key 三态: 不传字段 (None) = 保留旧值; "" = 清掉; "kkk" = 换新值
+    sample_person_oss_key: Optional[str] = None
+    keep_sample_person: bool = True        # 默认保留旧 sample_person; 改成 False 才走 sample_person_oss_key
 
 
 @router.put("/cover-templates/{template_id}")
@@ -877,21 +911,30 @@ def admin_update_cover_template(template_id: int, req: UpdateCoverTemplateReques
 
     import json as _json
     conn = get_db()
-    existing = conn.execute("SELECT bg_oss_key FROM cover_template WHERE id = ?", (template_id,)).fetchone()
+    _ensure_sample_person_column(conn)
+    existing = conn.execute(
+        "SELECT bg_oss_key, sample_person_oss_key FROM cover_template WHERE id = ?",
+        (template_id,)
+    ).fetchone()
     if not existing:
         conn.close()
         raise HTTPException(404, '模板不存在')
 
     # bg_oss_key: None 保留旧值
     new_bg = req.bg_oss_key or existing['bg_oss_key']
+    # sample_person_oss_key: keep_sample_person=True 保留旧值; False 用请求体里的 (可空)
+    if req.keep_sample_person:
+        new_sample = existing['sample_person_oss_key']
+    else:
+        new_sample = req.sample_person_oss_key or None
     text_fields_json = _json.dumps([f.model_dump() for f in req.text_fields], ensure_ascii=False)
     person_slot_json = _json.dumps(req.person_slot.model_dump(), ensure_ascii=False) if req.person_slot else None
 
     conn.execute("""
         UPDATE cover_template
-        SET name = ?, category = ?, ratio = ?, bg_oss_key = ?, text_fields_json = ?, person_slot_json = ?
+        SET name = ?, category = ?, ratio = ?, bg_oss_key = ?, text_fields_json = ?, person_slot_json = ?, sample_person_oss_key = ?
         WHERE id = ?
-    """, (req.name, req.category, req.ratio, new_bg, text_fields_json, person_slot_json, template_id))
+    """, (req.name, req.category, req.ratio, new_bg, text_fields_json, person_slot_json, new_sample, template_id))
     conn.commit()
     conn.close()
     return {'success': True}

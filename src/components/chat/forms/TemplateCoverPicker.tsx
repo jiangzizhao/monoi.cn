@@ -16,7 +16,7 @@ const CAT_LABEL: Record<string, string> = {
   jianji: '极简', zhichang: '职场', xuexi: '学习', licai: '理财', other: '其他',
 }
 
-export function TemplateCoverPicker() {
+export function TemplateCoverPicker({ onClose }: { onClose?: () => void } = {}) {
   const chatStore = useChatStore()
   const [templates, setTemplates] = useState<CoverTemplate[] | null>(null)
   const [loadErr, setLoadErr] = useState('')
@@ -162,12 +162,14 @@ export function TemplateCoverPicker() {
         question: '下一步',
         options: [
           { id: '__form_publish__', label: '去发布', description: '上传到小红书 / 抖音' },
-          { id: '帮我生成各平台的发布文案', label: '先生成发布文案', description: 'AI 给每平台写标题/描述/标签' },
+          { id: '帮我生成各平台的发布文案', label: '生成发布文案', description: 'AI 给每平台写标题/描述/标签' },
           { id: '保留封面, 暂不做下一步', label: '保留封面', description: '稍后再决定' },
         ],
       } as any,
     ])
     chatStore.addMessage(convId, msg)
+    // 发到对话后关掉模板编辑器, 跟老 CoverGeneratorForm 行为一致
+    onClose?.()
   }
 
   // ============ 模板列表 ============
@@ -205,7 +207,8 @@ export function TemplateCoverPicker() {
                       template={t}
                       userTexts={cardTexts}
                       textOverrides={{}}
-                      personPreviewUrl=""
+                      // 缩略图: 没用户人物图时, fallback 到 admin 上传的示例人物 (让用户看到成品长啥样)
+                      personPreviewUrl={t.sample_person_url || ''}
                     />
                     <div className="px-2 py-1.5 bg-[var(--bg-card)] text-xs text-[var(--text)] truncate">{t.name}</div>
                   </button>
@@ -239,7 +242,8 @@ export function TemplateCoverPicker() {
             textOverrides={textOverrides}
             extraFields={extraFields}
             hiddenLabels={hiddenLabels}
-            personPreviewUrl={personPreviewUrl}
+            // 用户没传自己的人物时, fallback 到模板自带的示例人物图 (admin 上传的)
+            personPreviewUrl={personPreviewUrl || selected.sample_person_url || ''}
             personSlotOverride={personSlotOverride}
             onMoveField={(label, dx, dy) => {
               if (label === '__person__') {
@@ -885,12 +889,18 @@ export function TemplatePreview({ template, userTexts, textOverrides, extraField
             }}
               ref={el => {
                 if (!el || !el.parentElement) return
-                // 字超长时按比例缩小 (wrapper 自己旋转, 这里只管 scale)
+                // 跟 cover_compositor.py 的 _draw_text_field 保持一致:
+                // 不用 CSS scale (scale 跟 align/center 互动会让视觉位置/大小偏离后端实际渲染),
+                // 而是真正缩字号 8% 直到塞下 box. 这样预览跟最终图视觉一致.
+                el.style.transform = ''
                 const parentW = el.parentElement.clientWidth
-                el.style.transform = 'scale(1)'
-                const naturalW = el.scrollWidth
-                if (naturalW > parentW && parentW > 0) {
-                  el.style.transform = `scale(${parentW / naturalW})`
+                if (parentW <= 0) return
+                let cur = fontSize
+                el.style.fontSize = `${cur / tplW * 100}cqw`
+                let safety = 30
+                while (el.scrollWidth > parentW && cur > 12 && safety-- > 0) {
+                  cur = Math.floor(cur * 0.92)
+                  el.style.fontSize = `${cur / tplW * 100}cqw`
                 }
               }}
             >
