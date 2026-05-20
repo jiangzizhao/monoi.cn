@@ -38,7 +38,7 @@ export function CreditIndicator() {
 
   return (
     <button
-      onClick={() => nav('/account#membership')}
+      onClick={() => nav('/app/account#membership')}
       title={`${tier} · 本月已用 ${pct}% · 总剩 ${credits.total} 积分${credits.purchased > 0 ? ` (含加买 ${credits.purchased})` : ''} · 点击查看额度`}
       className="ml-auto flex items-center justify-center p-1.5 rounded-lg hover:bg-[var(--bg-hover)] cursor-pointer transition-colors"
     >
