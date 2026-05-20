@@ -1445,26 +1445,34 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
   // 处理底图选择 + OSS 直传
   const handleBgFile = async (f: File) => {
     setBgFile(f); setEditorErr('')
+    setBgOssKey('')   // 重新选了图, 旧的 oss_key 作废. 上传成功后会再 set.
     const localUrl = URL.createObjectURL(f)
     setBgPreviewUrl(localUrl)
-    // 探测原始尺寸
     const img = new Image()
     img.onload = () => setBgNaturalSize({ w: img.naturalWidth, h: img.naturalHeight })
     img.src = localUrl
 
-    // 直传 OSS
     setBgUploading(true); setBgUploadProgress(0)
     try {
-      // 模板底图 → cover_templates prefix, OSS lifecycle 不清这个前缀 (admin 资源永久保留)
       const token = localStorage.getItem('monoi_token') || ''
-      const signRes = await fetch(directBase + '/api/oss/sign-upload', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ filename: f.name, content_type: f.type || 'image/png', prefix: 'cover_templates' }),
-      })
-      if (!signRes.ok) throw new Error('OSS 签名失败')
+      // sign-upload 步骤
+      let signRes: Response
+      try {
+        signRes = await fetch(directBase + '/api/oss/sign-upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ filename: f.name, content_type: f.type || 'image/png', prefix: 'cover_templates' }),
+        })
+      } catch (netErr: any) {
+        throw new Error('签名请求网络挂了 (NATAPP/main.py): ' + netErr.message)
+      }
+      if (!signRes.ok) {
+        const t = await signRes.text().catch(() => '')
+        throw new Error(`OSS 签名 ${signRes.status}: ${t.slice(0, 200)}`)
+      }
       const { put_url, oss_key, content_type } = await signRes.json()
 
+      // OSS PUT 步骤
       await new Promise<void>((resolve, reject) => {
         const xhr = new XMLHttpRequest()
         xhr.open('PUT', put_url)
@@ -1472,12 +1480,16 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
         xhr.upload.onprogress = e => {
           if (e.lengthComputable) setBgUploadProgress(Math.round(e.loaded / e.total * 100))
         }
-        xhr.onload = () => xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(`OSS PUT ${xhr.status}`))
-        xhr.onerror = () => reject(new Error('OSS PUT 网络错误'))
+        xhr.onload = () => xhr.status >= 200 && xhr.status < 300
+          ? resolve()
+          : reject(new Error(`OSS PUT 失败 ${xhr.status}: ${xhr.responseText?.slice(0, 200) || '无响应体'}`))
+        xhr.onerror = () => reject(new Error('OSS PUT 网络错误 (检查 CORS / 网络)'))
         xhr.send(f)
       })
       setBgOssKey(oss_key)
+      console.log('[bg-upload] 成功, oss_key =', oss_key)
     } catch (e: any) {
+      console.error('[bg-upload] 失败:', e)
       setEditorErr('底图上传失败: ' + e.message)
     } finally {
       setBgUploading(false)
@@ -1553,7 +1565,12 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
 
   const handleSave = async () => {
     if (!name.trim()) { setEditorErr('请填模板名'); return }
-    if (!bgOssKey) { setEditorErr('请先上传底图'); return }
+    if (bgUploading) { setEditorErr('底图还在上传中, 等进度条到 100% 再保存'); return }
+    if (!bgOssKey) {
+      // 区分: 用户没选过文件 vs 选了但上传失败 (editorErr 已经存了真错误)
+      if (!editorErr) setEditorErr('请先上传底图 (选文件后看进度条, 上传完成才能保存)')
+      return
+    }
     setSaving(true); setEditorErr('')
     try {
       const cleanFields: CoverTextField[] = fields.map(({ _id, ...f }) => f)
