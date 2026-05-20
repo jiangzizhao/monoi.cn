@@ -1272,7 +1272,7 @@ function CoverTemplateTab() {
                         template={t as any}
                         userTexts={cardTexts}
                         textOverrides={{}}
-                        personPreviewUrl=""
+                        personPreviewUrl={t.sample_person_url || ''}
                       />
                       <div className="px-2 py-1.5 bg-[var(--bg-card)] text-xs text-[var(--text)] truncate flex items-center gap-1">
                         <span className="flex-1 truncate">{t.name}</span>
