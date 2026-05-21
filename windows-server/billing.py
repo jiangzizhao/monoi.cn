@@ -153,6 +153,7 @@ CONSUME_RULES = {
     'narration_clean':  {'fixed': 5},               # 口播剪辑导出
     'compose_no_dh':    {'fixed': 10},              # 一键合成 (无数字人)
     'digital_human':    {'per_second': 2.0},        # 数字人合成
+    'cover_remove_bg':  {'fixed': 2},               # 抠图 (缓存命中不扣)
     # 0 积分功能 (基础福利)
     'script':            {'fixed': 0},              # 文案生成
     'footage_match':     {'fixed': 0},              # 素材匹配
@@ -421,9 +422,22 @@ def init_billing_tables():
         )
     """)
 
+    # 10. rembg 抠图缓存 — 同一张图 + 同一组 stroke 参数命中就复用, 不重跑 rembg 不再次扣积分
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS rembg_cache (
+            cache_key TEXT PRIMARY KEY,        -- sha256(file_bytes) + ":" + stroke 三参数
+            oss_key TEXT NOT NULL,             -- 抠图结果 OSS key (cover_person/ 前缀)
+            created_at REAL NOT NULL,
+            hit_count INTEGER DEFAULT 0,       -- 命中次数 (运营观察)
+            file_size INTEGER,                 -- 原图大小, 统计用
+            user_id INTEGER                    -- 首次上传的用户 (统计用, 不用来权限)
+        )
+    """)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_rembg_cache_created ON rembg_cache(created_at DESC)")
+
     conn.commit()
     conn.close()
-    print("[billing] 9 张商业化表已初始化 (CREATE IF NOT EXISTS)", flush=True)
+    print("[billing] 10 张商业化表已初始化 (CREATE IF NOT EXISTS)", flush=True)
 
 
 # ============================== 积分 helpers ==============================

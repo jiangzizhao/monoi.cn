@@ -2079,8 +2079,13 @@ async def cover_remove_bg(
     stroke_width: int = Form(12),
 ):
     """用户上传人物照片 → rembg 抠图 → (可选) 描边 → 透明 PNG → OSS.
-    返签名 URL + oss_key, 前端预览 + 给 /render-cover-from-template 用."""
+
+    带缓存: 同一张图 + 同一组 stroke 参数命中缓存就直接返复用的 oss_key, 不再跑 rembg.
+    响应里 cached=true/false, main.py 据此决定扣不扣 2 积分.
+    """
     import uuid as _uuid
+    import hashlib as _hash
+    import sqlite3 as _sq
     from oss_helper import oss_upload, oss_sign_get
 
     if not file.filename:
@@ -2091,7 +2096,51 @@ async def cover_remove_bg(
     if len(raw) < 100:
         raise HTTPException(400, '文件太小, 可能空文件')
 
-    # 抠图 + 描边
+    # 1. 查缓存 — 同图同 stroke 直接复用
+    file_hash = _hash.sha256(raw).hexdigest()
+    cache_key = f"{file_hash}:{int(stroke_enabled)}:{stroke_color}:{stroke_width}"
+    db_path = _find_monoi_db()
+    cached_oss_key = None
+    try:
+        conn = _sq.connect(db_path, timeout=2)
+        conn.row_factory = _sq.Row
+        row = conn.execute(
+            "SELECT oss_key FROM rembg_cache WHERE cache_key = ?",
+            (cache_key,)
+        ).fetchone()
+        if row:
+            cached_oss_key = row['oss_key']
+            # 命中: 计数 +1
+            conn.execute(
+                "UPDATE rembg_cache SET hit_count = hit_count + 1 WHERE cache_key = ?",
+                (cache_key,)
+            )
+            conn.commit()
+        conn.close()
+    except _sq.OperationalError as e:
+        # rembg_cache 表还没建 (老库 / main.py 没跑 init_billing_tables) — 跳过缓存继续跑
+        print(f"[cover-remove-bg] cache 表查询失败 (跳过缓存): {e}", flush=True)
+    except Exception as e:
+        print(f"[cover-remove-bg] cache 查询异常 (跳过缓存): {e}", flush=True)
+
+    if cached_oss_key:
+        try:
+            signed = oss_sign_get(cached_oss_key, expires=24 * 3600)
+            print(f"[cover-remove-bg] cache HIT key={cache_key[:20]}... oss_key={cached_oss_key}", flush=True)
+            return {
+                'success': True,
+                'oss_key': cached_oss_key,
+                'preview_url': signed,
+                'size_kb': 0,                      # 缓存命中没原始 png 体积可报
+                'has_stroke': bool(stroke_enabled),
+                'cached': True,
+            }
+        except Exception as e:
+            # 签名失败 (例如 OSS 文件被清了) — 回退到重跑 rembg
+            print(f"[cover-remove-bg] 命中缓存但签 URL 失败, 回退重跑: {e}", flush=True)
+            cached_oss_key = None
+
+    # 2. 缓存未命中: 跑 rembg + 描边
     t_rembg = time.time()
     try:
         from cover_compositor import remove_bg_with_stroke
@@ -2106,7 +2155,7 @@ async def cover_remove_bg(
     except Exception as e:
         raise HTTPException(500, f'抠图失败: {e}')
 
-    # 上传 OSS (oss_upload 要文件路径不能传 bytes, 写临时文件)
+    # 3. 上传 OSS (oss_upload 要文件路径不能传 bytes, 写临时文件)
     import tempfile as _tf
     out_key = f"cover_person/{int(time.time())}_{_uuid.uuid4().hex[:8]}.png"
     tmp_path = os.path.join(_tf.gettempdir(), f"cover_person_{int(time.time())}_{_uuid.uuid4().hex[:8]}.png")
@@ -2121,7 +2170,20 @@ async def cover_remove_bg(
         try: os.remove(tmp_path)
         except: pass
 
-    # 埋点: rembg 抠图 (现在 CPU, 未来 GPU)
+    # 4. 写缓存 — 失败也不阻塞, 下次还得跑 rembg 而已
+    try:
+        conn = _sq.connect(db_path, timeout=2)
+        conn.execute("""
+            INSERT OR REPLACE INTO rembg_cache (cache_key, oss_key, created_at, file_size, hit_count, user_id)
+            VALUES (?, ?, ?, ?, 0, NULL)
+        """, (cache_key, out_key, time.time(), len(raw)))
+        conn.commit()
+        conn.close()
+        print(f"[cover-remove-bg] cache MISS, 已写库 key={cache_key[:20]}... oss_key={out_key}", flush=True)
+    except Exception as e:
+        print(f"[cover-remove-bg] cache 写库失败 (忽略): {e}", flush=True)
+
+    # 5. 埋点: rembg 抠图 (现在 CPU, 未来 GPU)
     try:
         _log_api('rembg', 'remove_bg',
                  duration_ms=int((time.time() - t_rembg) * 1000),
@@ -2136,6 +2198,7 @@ async def cover_remove_bg(
         'preview_url': signed,
         'size_kb': round(len(out_png) / 1024, 1),
         'has_stroke': stroke_enabled,
+        'cached': False,
     }
 
 

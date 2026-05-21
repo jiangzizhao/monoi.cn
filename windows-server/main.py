@@ -2518,8 +2518,19 @@ def cover_templates_proxy():
 
 @app.post("/api/voice/cover-remove-bg")
 async def cover_remove_bg_proxy(request: Request):
-    """转发到 voice-server: 人物图 → rembg 抠图 → 描边 → OSS. multipart 透传."""
+    """转发到 voice-server: 人物图 → rembg 抠图 → 描边 → OSS. multipart 透传.
+
+    扣费: 缓存命中 (cached=true) 不扣; 缓存未命中 (真跑了 rembg) 扣 2 积分.
+    没登录就不扣 (公开接口测试时用)."""
     import requests as _req
+    # 试 auth — 拿不到不报错, 没登录也允许调 (但不会被扣费, 缓存照命中)
+    try:
+        _uid = _user_id_from_request(request)
+    except HTTPException:
+        _uid = None
+    except Exception:
+        _uid = None
+
     try:
         body = await request.body()
         headers = {'Content-Type': request.headers.get('content-type', '')}
@@ -2529,7 +2540,17 @@ async def cover_remove_bg_proxy(request: Request):
         )
         if resp.status_code != 200:
             raise HTTPException(resp.status_code, f"voice-server 错误: {resp.text[:300]}")
-        return resp.json()
+        data = resp.json()
+
+        # 只有真跑了 rembg (cached!=True) + 有登录用户 才扣 2 积分
+        if data.get('success') and not data.get('cached') and _uid:
+            try:
+                from billing import consume_credits
+                consume_credits(_uid, 'cover_remove_bg', 2, ref_id=data.get('oss_key', ''))
+            except Exception as _ce:
+                print(f"[cover-remove-bg-credit] 跳过扣费: {_ce}", flush=True)
+
+        return data
     except _req.exceptions.ConnectionError:
         raise HTTPException(503, "voice-server (9001) 未启动")
 
