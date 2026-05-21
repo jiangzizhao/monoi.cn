@@ -212,33 +212,38 @@ export async function callAI(
   onChunk: (text: string) => void,
   signal?: AbortSignal
 ): Promise<string> {
+  // 改成 json_mode 非流式: 系统提示要求 AI 严格输出 {"blocks":[...]} 结构.
+  // 流式 + 大段 JSON 容易丢引号 / 截断, 用户看到乱码 (参见 2026-05-21 故障).
+  // 非流式没有打字机效果, 但 AI 输出保证是合法 JSON, parseBlocks 一次过.
+  // 模拟流式: 拿到完整文本后, 按 30ms / 字符喂给 onChunk, 让用户感觉有打字效果.
   const res = await fetchWithRetry('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ system: SYSTEM_PROMPT, messages: toAPIMessages(messages), stream: true }),
+    body: JSON.stringify({
+      system: SYSTEM_PROMPT,
+      messages: toAPIMessages(messages),
+      stream: false,
+      json_mode: true,
+    }),
     signal,
   })
 
   if (!res.ok) throw new Error(`API ${res.status}`)
+  const data = await res.json()
+  // 兼容两种返回形式: OpenAI 风格 choices[0].message.content / 自定义 text 字段
+  const full: string = data.choices?.[0]?.message?.content || data.text || data.content || ''
+  if (!full) throw new Error('AI 没返回内容')
 
-  const reader = res.body!.getReader()
-  const decoder = new TextDecoder()
-  let full = ''
-
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    const chunk = decoder.decode(value, { stream: true })
-    for (const line of chunk.split('\n')) {
-      if (!line.startsWith('data: ')) continue
-      const data = line.slice(6).trim()
-      if (data === '[DONE]') continue
-      try {
-        const parsed = JSON.parse(data)
-        const text = parsed.delta?.text || parsed.choices?.[0]?.delta?.content || ''
-        if (text) { full += text; onChunk(text) }
-      } catch {}
-    }
+  // 模拟流式: 等量分块喂给 onChunk, 给前端打字机感
+  const CHUNK = 4   // 一次喂几个字符
+  const INTERVAL_MS = 15
+  let i = 0
+  while (i < full.length) {
+    if (signal?.aborted) break
+    const piece = full.slice(i, i + CHUNK)
+    onChunk(piece)
+    i += CHUNK
+    if (i < full.length) await new Promise(r => setTimeout(r, INTERVAL_MS))
   }
   return full
 }
