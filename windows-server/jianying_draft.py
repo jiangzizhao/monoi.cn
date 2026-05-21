@@ -145,7 +145,21 @@ def build_draft_zip(
     script.add_track(pjd.TrackType.text, T_TRACK)
 
     # 4a. 音频轨: 整段 narration
-    audio_seg = pjd.AudioSegment(narration_audio, pjd.trange('0s', f'{total_dur_s}s'))
+    # pyJianYingDraft 0.2.x 严格校验 trange 不超过素材时长, 而前端传的 total_dur_s 是按句段时间戳累加的,
+    # 可能比实际音频文件长 0.1-0.5s. 用 ffprobe 探一下真实时长, 取小的那个.
+    try:
+        import subprocess as _sp
+        _r = _sp.run(
+            ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+             '-of', 'default=noprint_wrappers=1:nokey=1', narration_audio],
+            capture_output=True, text=True, timeout=10,
+        )
+        _actual_dur = float(_r.stdout.strip()) if _r.stdout.strip() else total_dur_s
+        # 给个小余量 (-0.01s) 防浮点边界
+        _audio_dur = max(0.1, min(total_dur_s, _actual_dur - 0.01))
+    except Exception:
+        _audio_dur = max(0.1, total_dur_s - 0.1)   # 探不到就保守减 0.1s
+    audio_seg = pjd.AudioSegment(narration_audio, pjd.trange('0s', f'{_audio_dur}s'))
     script.add_segment(audio_seg, A_TRACK)
 
     # 4b. 视频轨 + 字幕轨: 每镜一段
