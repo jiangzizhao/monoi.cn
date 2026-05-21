@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { Loader2, Upload, Sparkles, CheckCircle2, Download, ArrowLeft, ImageIcon } from 'lucide-react'
+import { Loader2, Sparkles, CheckCircle2, Download, ArrowLeft, ImageIcon } from 'lucide-react'
 import {
-  listCoverTemplates, coverRemoveBg, renderCoverFromTemplate,
+  listCoverTemplates, renderCoverFromTemplate,
   type CoverTemplate, type TextFieldOverride, type UserCoverTextField, type PersonSlotOverride,
 } from '../../../services/cover'
 import { useChatStore, makeAssistantMsg } from '../../../store/chatStore'
 import { loadFont, fontFamily, parseSegments } from '../../../utils/coverFonts'
+import { PersonLibrary } from './PersonLibrary'
 
 const directBase = (import.meta as any).env?.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'
 
@@ -32,8 +33,7 @@ export function TemplateCoverPicker({ onClose }: { onClose?: () => void } = {}) 
   // 用户调整后的人物坑 (空对象 = 没改, 走 admin 默认)
   const [personSlotOverride, setPersonSlotOverride] = useState<PersonSlotOverride>({})
   const [fontsList, setFontsList] = useState<FontOpt[]>([])
-  const [personFile, setPersonFile] = useState<File | null>(null)
-  const [personLocalUrl, setPersonLocalUrl] = useState('')      // 本地 ObjectURL 临时预览
+  // personFile / personLocalUrl / personFileRef / handlePersonFile 已经移到 PersonLibrary 组件里, 这里不再维护
   const [personOssKey, setPersonOssKey] = useState('')          // 抠完后的 OSS key
   const [personPreviewUrl, setPersonPreviewUrl] = useState('')  // 抠完后服务器返的签名 URL
   const [personProcessing, setPersonProcessing] = useState(false)
@@ -42,8 +42,6 @@ export function TemplateCoverPicker({ onClose }: { onClose?: () => void } = {}) 
   const [generating, setGenerating] = useState(false)
   const [genErr, setGenErr] = useState('')
   const [result, setResult] = useState<{ download_url: string; width: number; height: number } | null>(null)
-
-  const personFileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     listCoverTemplates()
@@ -66,7 +64,7 @@ export function TemplateCoverPicker({ onClose }: { onClose?: () => void } = {}) 
     setExtraFields([])
     setHiddenLabels(new Set())
     setPersonSlotOverride({})
-    setPersonFile(null); setPersonLocalUrl(''); setPersonOssKey(''); setPersonPreviewUrl(''); setPersonErr('')
+    setPersonOssKey(''); setPersonPreviewUrl(''); setPersonErr('')
     setResult(null); setGenErr('')
     // 预加载模板里所有字段的字体, 让左侧预览能用真字体显示
     for (const f of selected.text_fields) {
@@ -89,27 +87,6 @@ export function TemplateCoverPicker({ onClose }: { onClose?: () => void } = {}) 
       ...prev,
       [label]: { ...(prev[label] || {}), ...patch },
     }))
-  }
-
-  const handlePersonFile = async (f: File) => {
-    if (!selected?.person_slot) return
-    if (f.size > 20 * 1024 * 1024) { setPersonErr('人物图太大 (>20MB)'); return }
-    setPersonFile(f); setPersonLocalUrl(URL.createObjectURL(f)); setPersonErr('')
-    setPersonOssKey(''); setPersonPreviewUrl('')
-    setPersonProcessing(true)
-    try {
-      const r = await coverRemoveBg(f, {
-        stroke_enabled: selected.person_slot.stroke_enabled,
-        stroke_color: selected.person_slot.stroke_color,
-        stroke_width: selected.person_slot.stroke_width,
-      })
-      setPersonOssKey(r.oss_key)
-      setPersonPreviewUrl(r.preview_url)
-    } catch (e: any) {
-      setPersonErr(e.message || '抠图失败')
-    } finally {
-      setPersonProcessing(false)
-    }
   }
 
   const handleGenerate = async () => {
@@ -224,7 +201,7 @@ export function TemplateCoverPicker({ onClose }: { onClose?: () => void } = {}) 
   // ============ 选了模板, 填字 + 上传人物 + 生成 ============
   const personSlot = selected.person_slot
   const personReady = !personSlot || !!personOssKey   // 没人物坑直接 OK; 有人物坑必须抠完
-  const canGenerate = personReady && !generating && Object.values(userTexts).some(v => v.trim())
+  const canGenerate = personReady && !generating && !personProcessing && Object.values(userTexts).some(v => v.trim())
 
   return (
     <div className="flex flex-col gap-4">
@@ -546,34 +523,22 @@ export function TemplateCoverPicker({ onClose }: { onClose?: () => void } = {}) 
                 <Sparkles size={12} className="text-amber-500"/>
                 人物图 (AI 自动抠图{personSlot.stroke_enabled ? ', 含描边' : ''})
               </div>
-              {!personFile && (
-                <button onClick={() => personFileRef.current?.click()}
-                  className="flex items-center justify-center gap-2 px-4 py-6 rounded-lg border border-dashed border-[var(--border)] text-xs text-[var(--text-2)] hover:bg-[var(--bg-hover)] cursor-pointer">
-                  <Upload size={14}/> 选张人物照片 (jpg/png, ≤20MB)
-                </button>
-              )}
-              {personFile && (
-                <div className="flex items-center gap-3">
-                  <img src={personPreviewUrl || personLocalUrl}
-                    alt="" className="w-16 h-16 rounded object-cover border border-[var(--border)] bg-[var(--bg)]"/>
-                  <div className="flex-1 min-w-0 text-xs">
-                    {personProcessing ? (
-                      <span className="text-amber-500 flex items-center gap-1.5"><Loader2 size={12} className="animate-spin"/> AI 抠图中 5-15s</span>
-                    ) : personOssKey ? (
-                      <span className="text-green-500 flex items-center gap-1.5"><CheckCircle2 size={12}/> 抠图完成</span>
-                    ) : personErr ? (
-                      <span className="text-red-400">{personErr}</span>
-                    ) : null}
-                    <div className="text-[10px] text-[var(--text-3)] truncate mt-0.5">{personFile.name}</div>
-                  </div>
-                  <button onClick={() => personFileRef.current?.click()}
-                    className="text-[10px] text-[var(--text-3)] hover:text-[var(--text)] cursor-pointer">
-                    换一张
-                  </button>
-                </div>
-              )}
-              <input ref={personFileRef} type="file" accept="image/*" className="hidden"
-                onChange={e => { const f = e.target.files?.[0]; if (f) handlePersonFile(f); if (personFileRef.current) personFileRef.current.value = '' }}/>
+              <PersonLibrary
+                selectedOssKey={personOssKey}
+                onSelect={(ossKey, previewUrl) => {
+                  setPersonOssKey(ossKey)
+                  setPersonPreviewUrl(previewUrl)
+                  setPersonErr('')
+                }}
+                stroke={{
+                  enabled: personSlot.stroke_enabled,
+                  color: personSlot.stroke_color,
+                  width: personSlot.stroke_width,
+                }}
+                onUploadingChange={setPersonProcessing}
+                onError={setPersonErr}
+              />
+              {personErr && <div className="text-[10px] text-red-400">{personErr}</div>}
             </div>
           )}
 

@@ -90,6 +90,51 @@ export async function coverRemoveBg(file: File, opts?: {
   return data
 }
 
+
+// ============== 我的人物库 ==============
+
+export interface MyPersonCutout {
+  id: number
+  oss_key: string
+  preview_url: string                   // 1h 签名 URL
+  filename: string                      // 原文件名 (可能为空)
+  created_at: number
+  last_used_at: number
+  use_count: number
+}
+
+/** 拉当前登录用户抠过的所有人物图 */
+export async function listMyPersonCutouts(): Promise<{ items: MyPersonCutout[] }> {
+  const res = await fetch(directBase + '/api/voice/my-person-cutouts', {
+    headers: { Authorization: `Bearer ${getToken() || ''}` },
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.detail || data.error || `加载人物库失败 ${res.status}`)
+  return data
+}
+
+/** 删一个 — 只能删自己的. OSS 文件不主动删 (别的用户可能也在用 cache). */
+export async function deleteMyPersonCutout(id: number): Promise<{ success: boolean }> {
+  const res = await fetch(directBase + `/api/voice/my-person-cutouts/${id}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${getToken() || ''}` },
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.detail || data.error || `删除失败 ${res.status}`)
+  return data
+}
+
+/** 从历史选了一张直接复用 — 调这个更新 last_used_at + use_count. 不扣积分. */
+export async function touchMyPersonCutout(id: number): Promise<{ success: boolean }> {
+  const res = await fetch(directBase + `/api/voice/my-person-cutouts/${id}/touch`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${getToken() || ''}` },
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.detail || data.error || `刷新失败 ${res.status}`)
+  return data
+}
+
 export interface RenderCoverResp {
   success: boolean
   oss_key: string

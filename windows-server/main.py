@@ -2516,6 +2516,101 @@ def cover_templates_proxy():
         raise HTTPException(503, "voice-server (9001) 未启动")
 
 
+def _extract_original_filename(request) -> Optional[str]:
+    """从 multipart 请求 header (Content-Disposition) 抓原文件名.
+    用 cgi 拿费劲, 这里偷懒: 从 request.headers / body 都不强求, 拿到就拿到, 拿不到返 None.
+    主要给 user_person_cutout.original_filename 用 (展示), 失败不影响功能."""
+    try:
+        # Content-Disposition 一般在 multipart body 里, request.headers 里没.
+        # 简化做法: 不读 body 第二遍, 直接返 None — 文件名可以从前端 metadata 字段送过来 (TODO)
+        return None
+    except Exception:
+        return None
+
+
+# ============== 用户人物库 ("我的人物") ==============
+
+@app.get("/api/voice/my-person-cutouts")
+def list_my_person_cutouts(request: Request):
+    """返当前登录用户抠过的所有人物图, 按 last_used_at 倒序. 给前端 'PersonLibrary' 组件用."""
+    user_id = _user_id_from_request(request)
+    try:
+        from billing import get_db as _get_db
+        conn = _get_db()
+        rows = conn.execute("""
+            SELECT id, oss_key, original_filename, created_at, last_used_at, use_count
+            FROM user_person_cutout
+            WHERE user_id = ?
+            ORDER BY last_used_at DESC
+            LIMIT 100
+        """, (user_id,)).fetchall()
+        conn.close()
+    except Exception as e:
+        raise HTTPException(500, f"查询人物库失败: {e}")
+
+    # 给每条签 1h URL
+    from oss_helper import oss_sign_get
+    items = []
+    for r in rows:
+        try:
+            url = oss_sign_get(r['oss_key'], expires=3600)
+        except Exception:
+            url = ''
+        items.append({
+            'id': r['id'],
+            'oss_key': r['oss_key'],
+            'preview_url': url,
+            'filename': r['original_filename'] or '',
+            'created_at': r['created_at'],
+            'last_used_at': r['last_used_at'],
+            'use_count': r['use_count'],
+        })
+    return {'items': items}
+
+
+@app.delete("/api/voice/my-person-cutouts/{cutout_id}")
+def delete_my_person_cutout(cutout_id: int, request: Request):
+    """删一个 — 只能删自己的 (WHERE user_id = ?). OSS 上的 PNG 不主动删 (可能别人也在 cache 里用)."""
+    user_id = _user_id_from_request(request)
+    try:
+        from billing import get_db as _get_db
+        conn = _get_db()
+        result = conn.execute(
+            "DELETE FROM user_person_cutout WHERE id = ? AND user_id = ?",
+            (cutout_id, user_id)
+        )
+        conn.commit()
+        deleted = result.rowcount
+        conn.close()
+    except Exception as e:
+        raise HTTPException(500, f"删除失败: {e}")
+    if deleted == 0:
+        raise HTTPException(404, "记录不存在或不属于你")
+    return {'success': True}
+
+
+@app.post("/api/voice/my-person-cutouts/{cutout_id}/touch")
+def touch_my_person_cutout(cutout_id: int, request: Request):
+    """从'我的人物'里选了一张直接复用 → 调这个更新 last_used_at + use_count.
+    前端用户从列表选了一个不上传新图, 走这条把使用记录刷新."""
+    user_id = _user_id_from_request(request)
+    try:
+        from billing import get_db as _get_db
+        conn = _get_db()
+        result = conn.execute(
+            "UPDATE user_person_cutout SET last_used_at = ?, use_count = use_count + 1 WHERE id = ? AND user_id = ?",
+            (time.time(), cutout_id, user_id)
+        )
+        conn.commit()
+        updated = result.rowcount
+        conn.close()
+    except Exception as e:
+        raise HTTPException(500, f"刷新失败: {e}")
+    if updated == 0:
+        raise HTTPException(404, "记录不存在或不属于你")
+    return {'success': True}
+
+
 @app.post("/api/voice/cover-remove-bg")
 async def cover_remove_bg_proxy(request: Request):
     """转发到 voice-server: 人物图 → rembg 抠图 → 描边 → OSS. multipart 透传.
@@ -2549,6 +2644,37 @@ async def cover_remove_bg_proxy(request: Request):
                 consume_credits(_uid, 'cover_remove_bg', 2, ref_id=data.get('oss_key', ''))
             except Exception as _ce:
                 print(f"[cover-remove-bg-credit] 跳过扣费: {_ce}", flush=True)
+
+        # 抠图成功 + 有登录用户 → 写入"我的人物" 库 (供前端列表选取)
+        # 同 user_id + 同 oss_key 已存在: 更新 last_used_at + use_count +1
+        # 不存在: 新插一条 (original_filename / stroke 参数留 NULL, 列表展示不依赖它们)
+        if data.get('success') and _uid and data.get('oss_key'):
+            try:
+                import time as _t
+                from billing import get_db as _get_db
+                _oss_key = data['oss_key']
+                _conn = _get_db()
+                _row = _conn.execute(
+                    "SELECT id FROM user_person_cutout WHERE user_id = ? AND oss_key = ?",
+                    (_uid, _oss_key)
+                ).fetchone()
+                _now = _t.time()
+                if _row:
+                    _conn.execute(
+                        "UPDATE user_person_cutout SET last_used_at = ?, use_count = use_count + 1 WHERE id = ?",
+                        (_now, _row['id'])
+                    )
+                else:
+                    _conn.execute("""
+                        INSERT INTO user_person_cutout (
+                            user_id, oss_key, original_filename, stroke_enabled, stroke_color, stroke_width,
+                            created_at, last_used_at, use_count
+                        ) VALUES (?, ?, NULL, 0, NULL, 0, ?, ?, 1)
+                    """, (_uid, _oss_key, _now, _now))
+                _conn.commit()
+                _conn.close()
+            except Exception as _le:
+                print(f"[cover-remove-bg-library] 写'我的人物'库失败 (忽略): {_le}", flush=True)
 
         return data
     except _req.exceptions.ConnectionError:

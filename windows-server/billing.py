@@ -435,9 +435,28 @@ def init_billing_tables():
     """)
     c.execute("CREATE INDEX IF NOT EXISTS idx_rembg_cache_created ON rembg_cache(created_at DESC)")
 
+    # 11. 用户人物库 — 用户抠过的所有人物图, "我的人物" 列表用
+    # 跟 rembg_cache 互补: rembg_cache 是字节级去重 (内部缓存), user_person_cutout 是用户视角的资产列表.
+    # 同一个 user 多次抠出来的图都进这里 (即使源图字节一样, 也至少留一条 — 用户可能想多版本对比).
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS user_person_cutout (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            oss_key TEXT NOT NULL,             -- 抠图结果 OSS key (cover_person/ 前缀)
+            original_filename TEXT,            -- 原文件名 (例 "我.jpg"), 列表展示用
+            stroke_enabled INTEGER DEFAULT 0,
+            stroke_color TEXT,
+            stroke_width INTEGER DEFAULT 0,
+            created_at REAL NOT NULL,
+            last_used_at REAL NOT NULL,
+            use_count INTEGER DEFAULT 1
+        )
+    """)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_user_person_cutout_user ON user_person_cutout(user_id, last_used_at DESC)")
+
     conn.commit()
     conn.close()
-    print("[billing] 10 张商业化表已初始化 (CREATE IF NOT EXISTS)", flush=True)
+    print("[billing] 11 张商业化表已初始化 (CREATE IF NOT EXISTS)", flush=True)
 
 
 # ============================== 积分 helpers ==============================
