@@ -135,7 +135,8 @@ def build_draft_zip(
             shot_local_paths.append(None)
 
     # 4. 构造 ScriptFile + 3 条轨道
-    script = pjd.ScriptFile(W, H)
+    # pyJianYingDraft 0.2.x 起 ScriptFile 多两个必填: fps 默认 30, maintrack_adsorb 主轨吸附 (True 跟剪映默认行为一致)
+    script = pjd.ScriptFile(W, H, fps=30, maintrack_adsorb=True)
     V_TRACK = 'video_main'
     A_TRACK = 'audio_narration'
     T_TRACK = 'subtitle'
