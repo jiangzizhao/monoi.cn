@@ -646,7 +646,18 @@ export function parseBlocks(raw: string): MessageBlock[] {
     }
   } catch {}
 
-  // 第二道: jsonrepair 修常见 LLM 错误 (缺引号 / 缺逗号 / 缺右括号 / 拼成多个对象)
+  // 第二道: AI 漏了 blocks 包装且返回多个 {...} 拼一起 (`{...},{...}` 或 `{...}{...}`)
+  // 必须先于"jsonrepair 当单 block 处理"——否则只能拿到第一个 block
+  try {
+    const repaired = jsonrepair(`[${match[0]}]`)
+    const parsed = JSON.parse(repaired)
+    if (Array.isArray(parsed) && parsed.length > 1 && parsed.every((b: any) => b && typeof b === 'object' && b.type)) {
+      console.warn('[parseBlocks] AI 漏了 blocks 包装且返回多 block, 当数组处理')
+      return parsed as MessageBlock[]
+    }
+  } catch {}
+
+  // 第三道: jsonrepair 修常见 LLM 错误 (缺引号 / 缺逗号 / 缺右括号)
   try {
     const repaired = jsonrepair(match[0])
     const parsed = JSON.parse(repaired)
@@ -662,6 +673,19 @@ export function parseBlocks(raw: string): MessageBlock[] {
   } catch (e) {
     console.warn('[parseBlocks] jsonrepair 也修不了:', e)
   }
+
+  // 第四道: 强行塞回 {"blocks": [...]} 让 jsonrepair 修 — 多 block + 没 wrapper + 边界畸形 也能救
+  try {
+    const repaired = jsonrepair(`{"blocks":[${match[0]}]}`)
+    const parsed = JSON.parse(repaired)
+    if (Array.isArray(parsed.blocks) && parsed.blocks.length > 0) {
+      console.warn('[parseBlocks] 第四道兜底成功 (强塞 blocks 包装)')
+      return parsed.blocks as MessageBlock[]
+    }
+  } catch {}
+
+  // 全部失败 — 打到 console 让生产环境能看到真实 AI 输出, 方便 debug
+  console.error('[parseBlocks] 所有解析都失败, raw 内容 (前 500 字):', raw.slice(0, 500))
 
   // 兜底：把内容当纯文本显示，去掉 JSON 语法字符
   const textOnly = cleaned
