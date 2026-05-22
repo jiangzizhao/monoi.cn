@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { ArrowUp, FileText, Mic, Video, Music } from 'lucide-react'
+import { ArrowUp, FileText, Mic, Video, Music, Sticker } from 'lucide-react'
 import { VocalRemoverDialog } from '../VocalRemoverDialog'
 import { CreditIndicator } from '../CreditIndicator'
 import type { LucideIcon } from 'lucide-react'
@@ -12,6 +12,7 @@ import { NarrationVideoForm } from './forms/NarrationVideoForm'
 import { FootageMatchForm } from './forms/FootageMatchForm'
 import { CoverGeneratorForm } from './forms/CoverGeneratorForm'
 import { PublishForm } from './forms/PublishForm'
+import { CutoutForm } from './forms/CutoutForm'
 
 // 底部入口: 只放真正"从零开始"的功能. 流程中段的 (素材/剪辑/封面/发布/导出) 通过
 // 上一步完成后的 chat 选项按钮自然进入, 不在工具栏重复.
@@ -19,6 +20,7 @@ const MODULES: { label: string; Icon: LucideIcon }[] = [
   { label: '文案',  Icon: FileText  },
   { label: '配音',  Icon: Mic       },
   { label: '口播',  Icon: Video     },
+  { label: '抠图',  Icon: Sticker   },
 ]
 
 const MODULE_OPTIONS: Record<string, { id: string; label: string; desc: string }[]> = {
@@ -37,6 +39,9 @@ const MODULE_OPTIONS: Record<string, { id: string; label: string; desc: string }
     { id: '__digital_human__', label: '数字人', desc: '上传形象视频+音频自动对口型' },
     // AI 生成 暂时下线
     // { id: '我想用AI生成口播视频', label: 'AI生成', desc: '根据文案自动生成' },
+  ],
+  '抠图': [
+    { id: '__form_cutout__', label: '人物抠图', desc: '上传照片, AI 自动抠去背景, 透明 PNG 可下载' },
   ],
   '素材': [
     { id: '__form_footage__', label: '智能匹配素材', desc: '粘贴文案, AI 拆句生成画面词搜素材' },
@@ -71,6 +76,7 @@ export function ChatInput({ moduleMenu, onModuleClick, onModuleMenuClose }: Prop
   const [footageForm, setFootageForm] = useState(false)
   const [coverForm, setCoverForm] = useState(false)
   const [publishForm, setPublishForm] = useState(false)
+  const [cutoutForm, setCutoutForm] = useState(false)
   const [vocalRemoverOpen, setVocalRemoverOpen] = useState(false)
   const textRef = useRef<HTMLTextAreaElement>(null)
   const { isGenerating, conversations, activeId } = useChatStore()
@@ -140,6 +146,8 @@ export function ChatInput({ moduleMenu, onModuleClick, onModuleMenuClose }: Prop
       setCoverForm(true)
     } else if (optId === '__form_publish__') {
       setPublishForm(true)
+    } else if (optId === '__form_cutout__') {
+      setCutoutForm(true)
     } else {
       send(optId)
     }
@@ -256,6 +264,9 @@ export function ChatInput({ moduleMenu, onModuleClick, onModuleMenuClose }: Prop
         })()}
         {publishForm && (
           <PublishForm onClose={() => setPublishForm(false)}/>
+        )}
+        {cutoutForm && (
+          <CutoutForm onClose={() => setCutoutForm(false)}/>
         )}
 
         {/* Module option popup */}

@@ -2751,6 +2751,19 @@ async def cover_remove_bg_proxy(request: Request):
                             created_at, last_used_at, use_count
                         ) VALUES (?, ?, NULL, 0, NULL, 0, ?, ?, 1)
                     """, (_uid, _oss_key, _now, _now))
+                # 限制每用户最多 10 个 cutout — 超过删最旧的 (按 last_used_at 升序)
+                _MAX_PER_USER = 10
+                _excess = _conn.execute(
+                    "SELECT id FROM user_person_cutout WHERE user_id = ? ORDER BY last_used_at ASC",
+                    (_uid,)
+                ).fetchall()
+                if len(_excess) > _MAX_PER_USER:
+                    _drop_ids = [r['id'] for r in _excess[: len(_excess) - _MAX_PER_USER]]
+                    _conn.executemany(
+                        "DELETE FROM user_person_cutout WHERE id = ?",
+                        [(i,) for i in _drop_ids]
+                    )
+                    print(f"[cutout-cap] 删旧 cutout: user={_uid} drop={_drop_ids}", flush=True)
                 _conn.commit()
                 _conn.close()
             except Exception as _le:
