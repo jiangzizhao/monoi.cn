@@ -319,6 +319,62 @@ export async function adminUpdateCoverTemplate(template_id: number, req: {
   return data
 }
 
+// ================= 主页示例视频管理 =================
+
+export interface AdminLandingDemo {
+  id: number
+  title: string
+  video_oss_key: string
+  video_url?: string                      // 1h 签名
+  thumb_oss_key?: string | null
+  thumb_url?: string
+  order_index: number
+  visible: number                         // 1 = 显示, 0 = 隐藏
+  uploaded_by: number
+  created_at: number
+}
+
+export async function adminListLandingDemos(): Promise<{ demos: AdminLandingDemo[] }> {
+  return get('/api/admin/landing-demos')
+}
+
+export async function adminAddLandingDemo(req: {
+  title: string
+  video_oss_key: string
+  thumb_oss_key?: string | null
+  order_index?: number
+  visible?: number
+}): Promise<{ success: boolean; id: number }> {
+  return post('/api/admin/landing-demos', req)
+}
+
+export async function adminUpdateLandingDemo(demo_id: number, req: {
+  title?: string
+  thumb_oss_key?: string | null
+  order_index?: number
+  visible?: number
+}): Promise<{ success: boolean }> {
+  const res = await fetch(directBase + `/api/admin/landing-demos/${demo_id}`, {
+    method: 'PUT',
+    headers: headers(),
+    body: JSON.stringify(req),
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.detail || data.error || `update failed ${res.status}`)
+  return data
+}
+
+export async function adminDeleteLandingDemo(demo_id: number): Promise<{ success: boolean }> {
+  const res = await fetch(directBase + `/api/admin/landing-demos/${demo_id}`, {
+    method: 'DELETE',
+    headers: headers(),
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.detail || data.error || `delete failed ${res.status}`)
+  return data
+}
+
+
 /** 单独保存模板的示例人物图 (跟完整 update 解耦). 上传完抠图直接调这个. */
 export async function adminSetSamplePerson(
   template_id: number,

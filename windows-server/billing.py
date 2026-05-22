@@ -439,6 +439,21 @@ def init_billing_tables():
     """)
     c.execute("CREATE INDEX IF NOT EXISTS idx_rembg_cache_created ON rembg_cache(created_at DESC)")
 
+    # 12. Landing 主页示例视频 — admin 上传, 公开展示给所有访客看 (转化用)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS landing_demo (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL DEFAULT '',           -- 视频标题, 鼠标悬停显示
+            video_oss_key TEXT NOT NULL,              -- 视频文件 OSS key (landing_demos/)
+            thumb_oss_key TEXT,                       -- 封面图 OSS key (可选, 不传后端用 ffmpeg 截首帧)
+            order_index INTEGER DEFAULT 0,            -- 显示顺序 (小的在前)
+            visible INTEGER DEFAULT 1,                -- 1 = 显示, 0 = 隐藏 (留库不展示)
+            uploaded_by INTEGER,                      -- admin user_id
+            created_at REAL NOT NULL
+        )
+    """)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_landing_demo_visible ON landing_demo(visible, order_index)")
+
     # 11. 用户人物库 — 用户抠过的所有人物图, "我的人物" 列表用
     # 跟 rembg_cache 互补: rembg_cache 是字节级去重 (内部缓存), user_person_cutout 是用户视角的资产列表.
     # 同一个 user 多次抠出来的图都进这里 (即使源图字节一样, 也至少留一条 — 用户可能想多版本对比).
@@ -460,7 +475,7 @@ def init_billing_tables():
 
     conn.commit()
     conn.close()
-    print("[billing] 11 张商业化表已初始化 (CREATE IF NOT EXISTS)", flush=True)
+    print("[billing] 12 张商业化表已初始化 (CREATE IF NOT EXISTS)", flush=True)
 
 
 # ============================== 积分 helpers ==============================

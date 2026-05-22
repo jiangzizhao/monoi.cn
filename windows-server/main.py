@@ -2265,7 +2265,7 @@ class OssSignUploadRequest(BaseModel):
 
 
 # 白名单, 防恶意客户端传随便 prefix 把文件传到非预期路径
-_ALLOWED_UPLOAD_PREFIXES = {'uploads', 'cover_templates', 'bgm_library', 'avatars'}
+_ALLOWED_UPLOAD_PREFIXES = {'uploads', 'cover_templates', 'bgm_library', 'avatars', 'landing_demos'}
 
 
 @app.post("/api/oss/sign-upload")
@@ -2554,6 +2554,46 @@ def cover_templates_proxy():
         return resp.json()
     except _req.exceptions.ConnectionError:
         raise HTTPException(503, "voice-server (9001) 未启动")
+
+
+@app.get("/api/landing-demos")
+def public_landing_demos():
+    """公共端点: Landing 主页拉示例视频. 不需要登录.
+    返签好的 1h URL, 只返 visible=1 的, 按 order_index 升序."""
+    conn = get_db()
+    conn.row_factory = sqlite3.Row
+    try:
+        # 表可能还没建 (老库), 容错
+        try:
+            rows = conn.execute("""
+                SELECT id, title, video_oss_key, thumb_oss_key, order_index, created_at
+                FROM landing_demo
+                WHERE visible = 1
+                ORDER BY order_index ASC, created_at DESC
+                LIMIT 30
+            """).fetchall()
+        except sqlite3.OperationalError:
+            return {'demos': []}
+    finally:
+        conn.close()
+
+    from oss_helper import oss_sign_get
+    items = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d['video_url'] = oss_sign_get(d['video_oss_key'], expires=3600)
+        except Exception:
+            continue   # 签不到就跳过, 不让一条坏数据搞挂主页
+        if d.get('thumb_oss_key'):
+            try:
+                d['thumb_url'] = oss_sign_get(d['thumb_oss_key'], expires=3600)
+            except Exception:
+                d['thumb_url'] = ''
+        else:
+            d['thumb_url'] = ''
+        items.append(d)
+    return {'demos': items}
 
 
 def _extract_original_filename(request) -> Optional[str]:

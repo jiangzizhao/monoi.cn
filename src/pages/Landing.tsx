@@ -2,8 +2,18 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Sparkles, ArrowRight, Play, MessageSquare, Mic, Video, Film, Scissors, Image as ImageIcon,
-  Send, ChevronDown, ChevronUp, Check, PencilLine,
+  Send, ChevronDown, ChevronUp, Check, PencilLine, X, Wand2, Music2, Sticker,
+  Users, Briefcase, GraduationCap, ShoppingBag,
 } from 'lucide-react'
+
+const directBase = (import.meta as any).env?.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'
+
+interface LandingDemo {
+  id: number
+  title: string
+  video_url: string
+  thumb_url: string
+}
 
 
 // =============== 内容数据 ===============
@@ -16,21 +26,34 @@ const PLACEHOLDER_PROMPTS = [
   '推荐最近看的 3 本好书, 每本简评 30 字',
 ]
 
-const STEPS = [
-  { Icon: MessageSquare, title: '输入想法', desc: '一句话告诉 monoi 你要做什么主题' },
-  { Icon: PencilLine,    title: 'AI 写文案', desc: '自动生成爆款结构的口播稿' },
-  { Icon: Mic,           title: '配音 / 数字人', desc: '选音色 · 克隆你的声音 · 数字人念稿' },
-  { Icon: Scissors,      title: '智能剪辑', desc: '自动找素材 · 配字幕 · 加封面' },
-  { Icon: Send,          title: '一键发布', desc: '直接发到抖音 / 小红书' },
+const FEATURES = [
+  { icon: MessageSquare, title: 'AI 文案生成', desc: '基于爆款结构, 第一秒抓眼球. 原创 / 仿写 / 改方言都能干' },
+  { icon: Mic, title: '配音音色库 + 克隆', desc: '300+ 预设音色, 也能上传 5 秒录音克隆你自己的声音' },
+  { icon: Video, title: 'AI 数字人', desc: '上传一段形象视频, AI 替你出镜口播, 真人不用露脸' },
+  { icon: Film, title: '智能素材匹配', desc: 'AI 按文案逐句拆解, 自动拉 Pexels/Pixabay 对应画面' },
+  { icon: Scissors, title: '口播剪辑', desc: '词级时间戳, 一句话一句话编辑, 删气口 / 删口误一键完成' },
+  { icon: Wand2, title: '一键合成', desc: 'b-roll + PIP 小窗 + BGM + 字幕, 全套自动拼成成品' },
+  { icon: ImageIcon, title: '封面 + 抠图', desc: 'AI 抠人物 + 套模板, 多平台尺寸一次输出' },
+  { icon: Send, title: '剪映草稿 + 自动发布', desc: '一键打包剪映继续精修, 或直传抖音/小红书 (Max 起, Beta)' },
 ]
 
-const FEATURES = [
-  { icon: MessageSquare, title: 'AI 文案生成', desc: '基于爆款结构, 第一秒抓人眼球. 仿写 / 原创 / 改 dialect 都行' },
-  { icon: Mic, title: '配音音色库 + 克隆', desc: '300+ 预设音色, 也能上传 5 秒录音克隆你自己声音' },
-  { icon: Video, title: '数字人 (HeyGem)', desc: '上传一段形象视频, AI 替你出镜口播, 解放真人露脸' },
-  { icon: Film, title: '智能素材匹配', desc: '按口播内容自动拆句, 从 Pexels/Pixabay 拉对应画面 b-roll' },
-  { icon: Scissors, title: '口播剪辑', desc: 'whisper 识别 + 按词级编辑, 删气口 / 删口误一键搞定' },
-  { icon: ImageIcon, title: '封面 + 自动发布', desc: 'AI 生成封面图, 一键打包剪映草稿; 自动发布到抖音/小红书 (Max 起)' },
+
+const AUDIENCES = [
+  { icon: Users, title: '个人创作者', desc: '从 0 起号, 想多平台分发但没时间一条一条拍' },
+  { icon: Briefcase, title: '工作室 / MCN', desc: '批量产出口播内容, 数字人复制多个主播' },
+  { icon: GraduationCap, title: '教培 / 知识博主', desc: '把课程内容拆成短视频, AI 替你重复出镜' },
+  { icon: ShoppingBag, title: '电商 / 带货', desc: '种草 + 测评 + 上新通告快速量产' },
+]
+
+// 传统做法 vs monoi (无中间箭头, 平铺对比)
+const TRADITIONAL_STEPS = [
+  { icon: Sparkles, label: '想选题' },
+  { icon: PencilLine, label: '写文案' },
+  { icon: Video, label: '拍视频' },
+  { icon: Scissors, label: '剪辑' },
+  { icon: Music2, label: '配音' },
+  { icon: Sticker, label: '加字幕封面' },
+  { icon: Send, label: '上传发布' },
 ]
 
 const PRICING = [
@@ -103,6 +126,16 @@ export default function Landing() {
   const [scrolled, setScrolled] = useState(false)
   const [openFaq, setOpenFaq] = useState<number | null>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+
+  // 示例视频圆盘 (从后端拉)
+  const [demos, setDemos] = useState<LandingDemo[]>([])
+  const [playingDemo, setPlayingDemo] = useState<LandingDemo | null>(null)
+  useEffect(() => {
+    fetch(directBase + '/api/landing-demos')
+      .then(r => r.json())
+      .then(d => setDemos(d.demos || []))
+      .catch(() => setDemos([]))
+  }, [])
 
   // placeholder 轮播
   useEffect(() => {
@@ -190,7 +223,7 @@ export default function Landing() {
             />
             <div className="flex items-center justify-between px-2">
               <span className="text-[11px] text-[var(--text-3)]">
-                ⚡ 注册送 50 积分 · 不需要任何视频技能
+                ⚡ 免费 7 天 · 每天送 60 积分 · 不需要任何视频技能
               </span>
               <button onClick={submitPrompt}
                 className="inline-flex items-center gap-1.5 px-4 py-2 bg-[var(--text)] text-[var(--bg)] rounded-xl text-sm font-medium hover:opacity-80 cursor-pointer">
@@ -207,50 +240,96 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* =============== 示例视频墙 =============== */}
-      <section id="examples" className="px-4 sm:px-6 py-12 sm:py-20 max-w-6xl mx-auto">
-        <div className="text-center mb-8 sm:mb-12">
-          <h2 className="text-2xl sm:text-4xl font-bold mb-3">用 monoi 已经做出的视频</h2>
-          <p className="text-sm text-[var(--text-3)]">真实用户作品 · 一句话生成的完整短视频</p>
-        </div>
-        <div className="flex gap-3 sm:gap-4 overflow-x-auto pb-4 -mx-4 px-4 sm:mx-0 sm:px-0 scroll-smooth snap-x snap-mandatory">
-          {[...Array(6)].map((_, i) => (
-            <div key={i} className="flex-shrink-0 w-40 sm:w-48 snap-start">
-              <div className="aspect-[9/16] rounded-2xl bg-gradient-to-br from-[var(--bg-card)] to-[var(--bg-hover)] border border-[var(--border)] flex items-center justify-center cursor-pointer hover:scale-105 transition-transform group relative overflow-hidden">
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="w-12 h-12 rounded-full bg-white/90 flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
-                    <Play size={20} className="text-black ml-1" fill="currentColor"/>
-                  </div>
-                </div>
-                <span className="text-[10px] text-[var(--text-3)] absolute bottom-2 left-2">示例 #{i+1}</span>
+      {/* =============== 示例视频圆盘 =============== */}
+      {demos.length > 0 && (
+        <section id="examples" className="px-4 sm:px-6 py-12 sm:py-20 max-w-6xl mx-auto">
+          <div className="text-center mb-8 sm:mb-12">
+            <h2 className="text-2xl sm:text-4xl font-bold mb-3">用 monoi 做出的视频</h2>
+            <p className="text-sm text-[var(--text-3)]">真实作品 · 点任一个观看</p>
+          </div>
+          <DemoCircle demos={demos} onPlay={setPlayingDemo}/>
+        </section>
+      )}
+
+      {/* 视频播放弹窗 */}
+      {playingDemo && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 backdrop-blur-sm p-4"
+          onClick={() => setPlayingDemo(null)}>
+          <button onClick={() => setPlayingDemo(null)}
+            className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white cursor-pointer">
+            <X size={20}/>
+          </button>
+          <div className="relative max-h-full" onClick={e => e.stopPropagation()}>
+            <video src={playingDemo.video_url} controls autoPlay
+              className="max-h-[85vh] max-w-full rounded-2xl shadow-2xl"/>
+            {playingDemo.title && (
+              <div className="absolute -top-9 left-1/2 -translate-x-1/2 text-white text-sm font-medium whitespace-nowrap">
+                {playingDemo.title}
               </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* =============== 传统做法 vs monoi (无中间箭头) =============== */}
+      <section className="px-4 sm:px-6 py-12 sm:py-20 max-w-6xl mx-auto">
+        <div className="text-center mb-8 sm:mb-12">
+          <h2 className="text-2xl sm:text-4xl font-bold mb-3">传统做法 vs monoi</h2>
+          <p className="text-sm text-[var(--text-3)]">同样一条短视频, monoi 帮你省 90% 时间</p>
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* 传统 — 7 步平铺, 无箭头 */}
+          <div className="p-6 rounded-2xl border border-[var(--border)] bg-[var(--bg-card)]">
+            <div className="text-sm font-semibold text-[var(--text-3)] mb-4">传统流程 · 3-5 小时</div>
+            <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
+              {TRADITIONAL_STEPS.map((s, i) => (
+                <div key={i} className="flex flex-col items-center gap-1.5 p-2 rounded-xl bg-[var(--bg)] border border-[var(--border-subtle)]">
+                  <s.icon size={20} className="text-[var(--text-3)]" strokeWidth={1.6}/>
+                  <div className="text-[11px] text-[var(--text-2)]">{s.label}</div>
+                </div>
+              ))}
             </div>
-          ))}
+            <div className="mt-4 text-xs text-[var(--text-3)]">不会写文案 / 不愿出镜 / 不会剪 — 每个环节都卡点</div>
+          </div>
+
+          {/* monoi — 单步 */}
+          <div className="p-6 rounded-2xl border-2 border-amber-400 bg-amber-50/30 dark:bg-amber-950/10 relative">
+            <div className="absolute -top-2.5 left-6 px-2.5 py-0.5 rounded-full bg-amber-400 text-black text-[10px] font-medium">monoi · 5 分钟</div>
+            <div className="text-sm font-semibold text-[var(--text-2)] mb-4 mt-2">一句话搞定</div>
+            <div className="bg-[var(--bg-card)] rounded-xl border border-[var(--border)] p-4 mb-4">
+              <div className="text-xs text-[var(--text-3)] mb-1">用户输入</div>
+              <div className="text-sm text-[var(--text)]">"做一条减肥科普视频, 讲清楚为啥少吃多动不一定瘦"</div>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-[var(--text-2)]">
+              <Check size={14} className="text-green-500"/>
+              <span>AI 自动: 写稿 · 配音 · 数字人出镜 · 配画面 · 加字幕 · 出封面</span>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-[var(--text-2)] mt-2">
+              <Check size={14} className="text-green-500"/>
+              <span>对话改动: 不喜欢哪段说一句, AI 改完给你</span>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-[var(--text-2)] mt-2">
+              <Check size={14} className="text-green-500"/>
+              <span>一键发布到抖音 / 小红书 (Max 起)</span>
+            </div>
+          </div>
         </div>
       </section>
 
-      {/* =============== 5 步流程 =============== */}
+      {/* =============== 适合谁 =============== */}
       <section className="px-4 sm:px-6 py-12 sm:py-20 max-w-6xl mx-auto bg-[var(--bg-hover)]/30 rounded-3xl">
         <div className="text-center mb-8 sm:mb-12">
-          <h2 className="text-2xl sm:text-4xl font-bold mb-3">从一段文字, 到一条能发的视频</h2>
-          <p className="text-sm text-[var(--text-3)]">5 步, 全程对话</p>
+          <h2 className="text-2xl sm:text-4xl font-bold mb-3">谁在用 monoi</h2>
+          <p className="text-sm text-[var(--text-3)]">从 0 起号的个人, 到批量产出的工作室</p>
         </div>
-        <div className="flex flex-col sm:flex-row items-center sm:items-stretch gap-3 sm:gap-2">
-          {STEPS.map((s, i) => (
-            <div key={i} className="flex-1 flex sm:flex-col items-center gap-3 sm:gap-2 w-full">
-              <div className="flex flex-col items-center flex-shrink-0">
-                <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-[var(--bg-card)] border border-[var(--border)] flex items-center justify-center mb-1 sm:mb-2">
-                  <s.Icon size={22} className="text-[var(--text-2)]" strokeWidth={1.6}/>
-                </div>
-                <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-[var(--text)] text-[var(--bg)] flex items-center justify-center text-xs font-bold">{i+1}</div>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+          {AUDIENCES.map((a, i) => (
+            <div key={i} className="p-5 rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] hover:border-[var(--text-3)] transition-colors">
+              <div className="w-10 h-10 rounded-xl bg-[var(--bg-hover)] flex items-center justify-center mb-3">
+                <a.icon size={18} className="text-[var(--text-2)]" strokeWidth={1.8}/>
               </div>
-              <div className="flex-1 text-left sm:text-center">
-                <div className="text-sm sm:text-base font-semibold mb-0.5 sm:mb-1">{s.title}</div>
-                <div className="text-xs text-[var(--text-3)] leading-relaxed">{s.desc}</div>
-              </div>
-              {i < STEPS.length - 1 && (
-                <ArrowRight size={16} className="hidden sm:block text-[var(--text-3)] flex-shrink-0 self-center"/>
-              )}
+              <div className="text-base font-semibold mb-1.5">{a.title}</div>
+              <div className="text-xs text-[var(--text-3)] leading-relaxed">{a.desc}</div>
             </div>
           ))}
         </div>
@@ -341,7 +420,7 @@ export default function Landing() {
       {/* =============== 底部 CTA =============== */}
       <section className="px-4 sm:px-6 py-16 sm:py-24 text-center bg-[var(--text)] text-[var(--bg)] mx-4 sm:mx-6 mb-12 rounded-3xl">
         <h2 className="text-3xl sm:text-5xl font-bold mb-4">现在开始你的第一条视频</h2>
-        <p className="text-sm sm:text-base opacity-80 mb-8">注册即送 50 积分体验, 不需要任何视频技能</p>
+        <p className="text-sm sm:text-base opacity-80 mb-8">免费 7 天体验, 不需要任何视频技能</p>
         <button onClick={() => nav('/register')}
           className="inline-flex items-center gap-2 px-8 py-3.5 bg-[var(--bg)] text-[var(--text)] rounded-xl text-base font-medium hover:opacity-90 cursor-pointer">
           免费开始 <Send size={16}/>
@@ -395,5 +474,105 @@ export default function Landing() {
         </div>
       </footer>
     </div>
+  )
+}
+
+
+/** 圆盘状视频墙 — 中心 1 个大缩略图 + 周围 N 个小的环绕.
+ * 移动端退化为横向滚动 (圆盘在小屏体验差).
+ * hover 时小视频播一段 muted 预览, 点击全屏播放. */
+function DemoCircle({ demos, onPlay }: {
+  demos: LandingDemo[]
+  onPlay: (d: LandingDemo) => void
+}) {
+  // 居中那个 = 第一个 (admin order_index 最小的)
+  const center = demos[0]
+  const ring = demos.slice(1, 9)   // 周围最多 8 个
+
+  return (
+    <>
+      {/* 桌面: 真正的圆盘布局 */}
+      <div className="hidden md:block">
+        <div className="relative w-full aspect-square max-w-[560px] mx-auto">
+          {/* 装饰背景圆 */}
+          <div className="absolute inset-[10%] rounded-full border border-dashed border-[var(--border)] pointer-events-none"/>
+          <div className="absolute inset-[20%] rounded-full border border-dashed border-[var(--border-subtle)] pointer-events-none"/>
+
+          {/* 中心 — 大缩略图 */}
+          {center && (
+            <DemoCard demo={center} size="lg"
+              className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[28%] aspect-[9/16]"
+              onClick={() => onPlay(center)}/>
+          )}
+
+          {/* 环绕 — 按角度均匀排布 */}
+          {ring.map((d, i) => {
+            const angleDeg = (360 / ring.length) * i - 90  // -90 让第一个在正上方
+            const angleRad = (angleDeg * Math.PI) / 180
+            const r = 40   // 半径 (相对容器宽度的 %)
+            const cx = 50 + r * Math.cos(angleRad)
+            const cy = 50 + r * Math.sin(angleRad)
+            return (
+              <DemoCard key={d.id} demo={d} size="sm"
+                className="absolute -translate-x-1/2 -translate-y-1/2 w-[16%] aspect-[9/16]"
+                style={{ top: `${cy}%`, left: `${cx}%` }}
+                onClick={() => onPlay(d)}/>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* 移动端: 横向滚动列表 (圆盘小屏挤不下) */}
+      <div className="md:hidden flex gap-3 overflow-x-auto pb-4 -mx-4 px-4 snap-x snap-mandatory">
+        {demos.map(d => (
+          <DemoCard key={d.id} demo={d} size="lg"
+            className="flex-shrink-0 w-40 snap-start aspect-[9/16]"
+            onClick={() => onPlay(d)}/>
+        ))}
+      </div>
+    </>
+  )
+}
+
+
+function DemoCard({ demo, size, className, style, onClick }: {
+  demo: LandingDemo
+  size: 'sm' | 'lg'
+  className?: string
+  style?: React.CSSProperties
+  onClick: () => void
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const [hovering, setHovering] = useState(false)
+
+  useEffect(() => {
+    const v = videoRef.current
+    if (!v) return
+    if (hovering) v.play().catch(() => {})
+    else { v.pause(); v.currentTime = 0 }
+  }, [hovering])
+
+  return (
+    <button onClick={onClick} style={style}
+      onMouseEnter={() => setHovering(true)}
+      onMouseLeave={() => setHovering(false)}
+      className={`group rounded-2xl overflow-hidden bg-black shadow-lg border-2 border-[var(--border)] hover:border-amber-400 transition-all hover:scale-105 cursor-pointer ${className || ''}`}>
+      {demo.thumb_url && !hovering ? (
+        <img src={demo.thumb_url} alt={demo.title || ''}
+          className="w-full h-full object-cover"/>
+      ) : (
+        <video ref={videoRef} src={demo.video_url}
+          muted playsInline preload="metadata"
+          className="w-full h-full object-cover"/>
+      )}
+      {/* 播放按钮悬浮 */}
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+        <div className={`rounded-full bg-white/90 flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform ${
+          size === 'lg' ? 'w-12 h-12' : 'w-8 h-8'
+        }`}>
+          <Play size={size === 'lg' ? 20 : 14} className="text-black ml-0.5" fill="currentColor"/>
+        </div>
+      </div>
+    </button>
   )
 }

@@ -979,6 +979,115 @@ def admin_delete_cover_template(template_id: int, request: Request):
     return {'success': True}
 
 
+# ============== Landing 主页示例视频管理 ==============
+
+
+class AddLandingDemoRequest(BaseModel):
+    title: str = ''
+    video_oss_key: str                       # admin 先调 sign-upload (prefix=landing_demos) 上传到 OSS, 给 key
+    thumb_oss_key: Optional[str] = None      # 封面图 OSS key, 不传后端可以 ffmpeg 截首帧 (未实现)
+    order_index: int = 0
+    visible: int = 1
+
+
+@router.get("/landing-demos")
+def admin_list_landing_demos(request: Request):
+    """admin 列出所有示例视频 (含隐藏的)"""
+    require_admin(request)
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT id, title, video_oss_key, thumb_oss_key, order_index, visible, uploaded_by, created_at
+        FROM landing_demo ORDER BY order_index ASC, created_at DESC
+    """).fetchall()
+    conn.close()
+    # 签 1h URL (admin 后台缩略图用)
+    import sys, os as _os
+    sys.path.insert(0, _os.path.dirname(__file__))
+    from oss_helper import oss_sign_get
+    items = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d['video_url'] = oss_sign_get(d['video_oss_key'], expires=3600)
+        except Exception:
+            d['video_url'] = ''
+        if d.get('thumb_oss_key'):
+            try:
+                d['thumb_url'] = oss_sign_get(d['thumb_oss_key'], expires=3600)
+            except Exception:
+                d['thumb_url'] = ''
+        else:
+            d['thumb_url'] = ''
+        items.append(d)
+    return {'demos': items}
+
+
+@router.post("/landing-demos")
+def admin_add_landing_demo(req: AddLandingDemoRequest, request: Request):
+    """admin 添加一条示例视频. 前端先调 /api/oss/sign-upload (prefix=landing_demos) 上传, 拿 key 再调这里."""
+    admin_id = require_admin(request)
+    if not req.video_oss_key.strip():
+        raise HTTPException(400, 'video_oss_key 不能为空')
+    conn = get_db()
+    cursor = conn.execute("""
+        INSERT INTO landing_demo (title, video_oss_key, thumb_oss_key, order_index, visible, uploaded_by, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (
+        req.title.strip(), req.video_oss_key.strip(), req.thumb_oss_key,
+        req.order_index, req.visible, admin_id, time.time(),
+    ))
+    new_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return {'success': True, 'id': new_id}
+
+
+class UpdateLandingDemoRequest(BaseModel):
+    title: Optional[str] = None
+    thumb_oss_key: Optional[str] = None      # None 不变, '' 清掉, 字符串 = 新值
+    order_index: Optional[int] = None
+    visible: Optional[int] = None
+
+
+@router.put("/landing-demos/{demo_id}")
+def admin_update_landing_demo(demo_id: int, req: UpdateLandingDemoRequest, request: Request):
+    """admin 改示例视频的元数据 (改不了视频文件本身, 想换重新创建)."""
+    require_admin(request)
+    conn = get_db()
+    exists = conn.execute("SELECT 1 FROM landing_demo WHERE id = ?", (demo_id,)).fetchone()
+    if not exists:
+        conn.close()
+        raise HTTPException(404, '不存在')
+    sets = []
+    vals = []
+    if req.title is not None:
+        sets.append('title = ?'); vals.append(req.title.strip())
+    if req.thumb_oss_key is not None:
+        sets.append('thumb_oss_key = ?'); vals.append(req.thumb_oss_key or None)
+    if req.order_index is not None:
+        sets.append('order_index = ?'); vals.append(req.order_index)
+    if req.visible is not None:
+        sets.append('visible = ?'); vals.append(req.visible)
+    if not sets:
+        conn.close()
+        return {'success': True}
+    vals.append(demo_id)
+    conn.execute(f"UPDATE landing_demo SET {', '.join(sets)} WHERE id = ?", vals)
+    conn.commit()
+    conn.close()
+    return {'success': True}
+
+
+@router.delete("/landing-demos/{demo_id}")
+def admin_delete_landing_demo(demo_id: int, request: Request):
+    require_admin(request)
+    conn = get_db()
+    conn.execute("DELETE FROM landing_demo WHERE id = ?", (demo_id,))
+    conn.commit()
+    conn.close()
+    return {'success': True}
+
+
 # ============== API 用量 ==============
 
 

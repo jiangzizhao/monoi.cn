@@ -13,6 +13,8 @@ import {
   adminListFonts, adminUploadFont, adminDeleteFont,
   adminListCoverTemplates, adminAddCoverTemplate, adminUpdateCoverTemplate, adminDeleteCoverTemplate,
   adminSetSamplePerson,
+  adminListLandingDemos, adminAddLandingDemo, adminUpdateLandingDemo, adminDeleteLandingDemo,
+  type AdminLandingDemo,
   adminApiUsage,
   type AdminUserRow, type AdminOrderRow, type AdminWithdrawalRow, type AdminStats,
   type AdminBgmRow, type AdminFontRow, type AdminCoverTemplate, type CoverTextField, type CoverPersonSlot,
@@ -24,7 +26,7 @@ import { loadFont, fontFamily, parseSegments } from '../utils/coverFonts'
 import { TemplatePreview } from '../components/chat/forms/TemplateCoverPicker'
 
 
-type TabKey = 'dashboard' | 'users' | 'orders' | 'withdrawals' | 'bgm' | 'fonts' | 'covers' | 'apiusage'
+type TabKey = 'dashboard' | 'users' | 'orders' | 'withdrawals' | 'bgm' | 'fonts' | 'covers' | 'demos' | 'apiusage'
 
 const TABS: { key: TabKey; label: string; Icon: any }[] = [
   { key: 'dashboard', label: '数据看板', Icon: BarChart3 },
@@ -34,6 +36,7 @@ const TABS: { key: TabKey; label: string; Icon: any }[] = [
   { key: 'bgm', label: 'BGM 库', Icon: Music },
   { key: 'fonts', label: '字体库', Icon: Type },
   { key: 'covers', label: '封面模板', Icon: ImageIcon },
+  { key: 'demos', label: '主页示例视频', Icon: Play },
   { key: 'apiusage', label: 'API 用量', Icon: Activity },
 ]
 
@@ -149,6 +152,7 @@ export default function Admin() {
           {activeTab === 'bgm' && <BgmLibraryTab/>}
           {activeTab === 'fonts' && <FontLibraryTab/>}
           {activeTab === 'covers' && <CoverTemplateTab/>}
+          {activeTab === 'demos' && <LandingDemosTab/>}
           {activeTab === 'apiusage' && <ApiUsageTab/>}
         </div>
       </div>
@@ -2262,6 +2266,241 @@ const PROVIDER_LABEL: Record<string, string> = {
   pixabay: 'Pixabay 素材',
   wxpay: '微信支付',
 }
+
+// ========== 主页示例视频管理 ==========
+
+function LandingDemosTab() {
+  const [list, setList] = useState<AdminLandingDemo[]>([])
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState('')
+  const [showForm, setShowForm] = useState(false)
+  const directBase = (import.meta as any).env?.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'
+
+  const reload = () => {
+    setLoading(true); setErr('')
+    adminListLandingDemos().then(r => setList(r.demos || [])).catch(e => setErr(e.message)).finally(() => setLoading(false))
+  }
+  useEffect(reload, [])
+
+  const handleDelete = async (id: number, title: string) => {
+    if (!confirm(`删示例视频 "${title || `#${id}`}"?`)) return
+    try {
+      await adminDeleteLandingDemo(id)
+      setList(prev => prev.filter(d => d.id !== id))
+    } catch (e: any) {
+      alert('删除失败: ' + e.message)
+    }
+  }
+
+  const handleToggleVisible = async (d: AdminLandingDemo) => {
+    try {
+      await adminUpdateLandingDemo(d.id, { visible: d.visible ? 0 : 1 })
+      setList(prev => prev.map(x => x.id === d.id ? { ...x, visible: x.visible ? 0 : 1 } : x))
+    } catch (e: any) {
+      alert('切换失败: ' + e.message)
+    }
+  }
+
+  const handleOrderChange = async (d: AdminLandingDemo, newOrder: number) => {
+    try {
+      await adminUpdateLandingDemo(d.id, { order_index: newOrder })
+      setList(prev => prev.map(x => x.id === d.id ? { ...x, order_index: newOrder } : x).sort((a, b) => a.order_index - b.order_index))
+    } catch (e: any) {
+      alert('排序失败: ' + e.message)
+    }
+  }
+
+  if (loading) return <div className="text-sm text-[var(--text-3)] py-8 flex items-center gap-2"><Loader2 size={14} className="animate-spin"/> 加载中...</div>
+  if (err) return <div className="text-sm text-red-400">{err}</div>
+
+  return (
+    <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] overflow-hidden">
+      <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
+        <div>
+          <div className="text-base font-semibold">主页示例视频管理</div>
+          <div className="text-[11px] text-[var(--text-3)] mt-0.5">展示给所有访客 (圆盘状排列). order_index 小的在前, 隐藏的不显示</div>
+        </div>
+        <button onClick={() => setShowForm(true)}
+          className="px-3 py-1.5 rounded-lg bg-[var(--text)] text-[var(--bg)] text-sm cursor-pointer hover:opacity-80 flex items-center gap-1">
+          <Plus size={14}/> 新建
+        </button>
+      </div>
+
+      {list.length === 0 ? (
+        <div className="text-center text-[var(--text-3)] py-12 text-sm">还没有示例视频, 点 "新建" 添加一个</div>
+      ) : (
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 p-4">
+          {list.map(d => (
+            <div key={d.id} className={`relative rounded-lg border overflow-hidden group ${d.visible ? 'border-[var(--border)]' : 'border-[var(--border-subtle)] opacity-50'}`}>
+              <div className="aspect-[9/16] bg-black relative">
+                {d.video_url && (
+                  <video src={d.video_url} className="absolute inset-0 w-full h-full object-cover"
+                    muted playsInline preload="metadata"
+                    onMouseEnter={e => { (e.target as HTMLVideoElement).play().catch(()=>{}) }}
+                    onMouseLeave={e => { (e.target as HTMLVideoElement).pause(); (e.target as HTMLVideoElement).currentTime = 0 }}/>
+                )}
+                {!d.visible && (
+                  <div className="absolute inset-0 flex items-center justify-center text-white text-xs">已隐藏</div>
+                )}
+              </div>
+              <div className="px-2 py-1.5 bg-[var(--bg-card)] text-xs text-[var(--text)] flex items-center gap-1">
+                <span className="flex-1 truncate">{d.title || `示例 #${d.id}`}</span>
+                <input type="number" value={d.order_index} onChange={e => handleOrderChange(d, +e.target.value)}
+                  className="w-10 bg-[var(--bg)] border border-[var(--border)] rounded px-1 py-0.5 text-[10px]"
+                  title="排序: 小的在前"/>
+              </div>
+              <div className="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button onClick={() => handleToggleVisible(d)}
+                  className="px-2 py-1 rounded bg-black/70 text-white text-[10px] cursor-pointer hover:bg-black/90"
+                  title={d.visible ? '隐藏' : '显示'}>
+                  {d.visible ? '隐藏' : '显示'}
+                </button>
+                <button onClick={() => handleDelete(d.id, d.title)}
+                  className="p-1 rounded bg-red-500/80 text-white cursor-pointer hover:bg-red-500">
+                  <Trash2 size={11}/>
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {showForm && (
+        <LandingDemoUploadForm directBase={directBase}
+          onClose={() => setShowForm(false)}
+          onAdded={() => { setShowForm(false); reload() }}/>
+      )}
+    </div>
+  )
+}
+
+
+function LandingDemoUploadForm({ directBase, onClose, onAdded }: {
+  directBase: string
+  onClose: () => void
+  onAdded: () => void
+}) {
+  const [title, setTitle] = useState('')
+  const [orderIndex, setOrderIndex] = useState(0)
+  const [videoFile, setVideoFile] = useState<File | null>(null)
+  const [videoOssKey, setVideoOssKey] = useState('')
+  const [uploading, setUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(0)
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState('')
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const handleFile = async (f: File) => {
+    if (!f.type.startsWith('video/')) { setErr('请选视频文件'); return }
+    if (f.size > 100 * 1024 * 1024) { setErr('视频太大 (>100MB)'); return }
+    setVideoFile(f); setErr(''); setVideoOssKey('')
+    setUploading(true); setUploadProgress(0)
+    try {
+      const token = localStorage.getItem('monoi_token') || ''
+      const signRes = await fetch(directBase + '/api/oss/sign-upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ filename: f.name, content_type: f.type || 'video/mp4', prefix: 'landing_demos' }),
+      })
+      if (!signRes.ok) {
+        const t = await signRes.text().catch(() => '')
+        throw new Error(`OSS 签名 ${signRes.status}: ${t.slice(0, 200)}`)
+      }
+      const { put_url, oss_key, content_type } = await signRes.json()
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest()
+        xhr.open('PUT', put_url)
+        xhr.setRequestHeader('Content-Type', content_type)
+        xhr.upload.onprogress = e => {
+          if (e.lengthComputable) setUploadProgress(Math.round(e.loaded / e.total * 100))
+        }
+        xhr.onload = () => xhr.status >= 200 && xhr.status < 300
+          ? resolve()
+          : reject(new Error(`OSS PUT 失败 ${xhr.status}`))
+        xhr.onerror = () => reject(new Error('OSS PUT 网络错误'))
+        xhr.send(f)
+      })
+      setVideoOssKey(oss_key)
+    } catch (e: any) {
+      setErr('上传失败: ' + (e.message || e))
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const handleSave = async () => {
+    if (!videoOssKey) { setErr('请先上传视频'); return }
+    setSaving(true); setErr('')
+    try {
+      await adminAddLandingDemo({
+        title: title.trim(),
+        video_oss_key: videoOssKey,
+        order_index: orderIndex,
+        visible: 1,
+      })
+      onAdded()
+    } catch (e: any) {
+      setErr(e.message || '保存失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-[var(--bg-card)] rounded-2xl border border-[var(--border)] w-full max-w-md p-5 flex flex-col gap-3" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <div className="text-base font-semibold">新建示例视频</div>
+          <button onClick={onClose} className="text-[var(--text-3)] hover:text-[var(--text)] cursor-pointer"><X size={18}/></button>
+        </div>
+
+        <div>
+          <label className="text-xs text-[var(--text-3)]">视频文件 (mp4, ≤100MB, 推荐 9:16 竖屏)</label>
+          <input ref={fileRef} type="file" accept="video/*" className="hidden"
+            onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f) }}/>
+          <button onClick={() => fileRef.current?.click()} disabled={uploading}
+            className="w-full mt-1 px-3 py-3 rounded-lg border border-dashed border-[var(--border)] text-xs text-[var(--text-2)] hover:bg-[var(--bg-hover)] cursor-pointer">
+            {uploading ? (
+              <span className="flex items-center justify-center gap-2">
+                <Loader2 size={12} className="animate-spin"/> 上传中 {uploadProgress}%
+              </span>
+            ) : videoOssKey ? (
+              <span className="text-green-500">✓ {videoFile?.name} (已上传)</span>
+            ) : videoFile ? videoFile.name : '选择视频文件'}
+          </button>
+        </div>
+
+        <div>
+          <label className="text-xs text-[var(--text-3)]">标题 (可选, 鼠标悬停显示)</label>
+          <input value={title} onChange={e => setTitle(e.target.value)}
+            placeholder="例: 减肥科普 30 秒成片"
+            className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm mt-1"/>
+        </div>
+
+        <div>
+          <label className="text-xs text-[var(--text-3)]">排序 (小的在前, 默认 0)</label>
+          <input type="number" value={orderIndex} onChange={e => setOrderIndex(+e.target.value)}
+            className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm mt-1"/>
+        </div>
+
+        {err && <div className="text-xs text-red-400 bg-red-950/20 border border-red-900/30 rounded-lg px-3 py-2">{err}</div>}
+
+        <div className="flex gap-2 mt-1">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-[var(--text-2)] hover:bg-[var(--bg-hover)] rounded-lg cursor-pointer">取消</button>
+          <button onClick={handleSave} disabled={!videoOssKey || saving}
+            className={`flex-1 py-2 rounded-lg text-sm font-medium ${
+              !videoOssKey || saving
+                ? 'bg-[var(--bg-hover)] text-[var(--text-3)] cursor-not-allowed'
+                : 'bg-[var(--text)] text-[var(--bg)] hover:opacity-80 cursor-pointer'
+            }`}>
+            {saving ? '保存中...' : '保存'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 
 function ApiUsageTab() {
   const [data, setData] = useState<ApiUsageResp | null>(null)
