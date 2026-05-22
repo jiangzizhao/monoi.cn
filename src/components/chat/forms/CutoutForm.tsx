@@ -89,7 +89,6 @@ export function CutoutForm({ onClose }: Props) {
           <div className="text-[11px] text-[var(--text-3)] leading-relaxed border-t border-[var(--border-subtle)] pt-3">
             <div className="font-medium text-[var(--text-2)] mb-1">说明</div>
             <ul className="space-y-0.5 list-disc list-inside">
-              <li>每次抠图扣 <span className="text-[var(--text-2)]">2 积分</span>. 同一张图重传不重复扣费 (有缓存)</li>
               <li>"我的人物"库每用户最多存 <span className="text-[var(--text-2)]">10 张</span>, 超过自动清最旧的</li>
               <li>下载后保存到本地, 不占库存额度</li>
               <li>用做封面 / 数字人形象 都可以直接复用</li>
