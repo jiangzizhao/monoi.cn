@@ -527,39 +527,43 @@ def try_daily_grant(user_id: int) -> Optional[dict]:
         if not is_free:
             return {'granted': False, 'amount': 0, 'day_index': day_index, 'days_remaining': max(0, DAILY_FREE_GRANT_DAYS - day_index)}
 
+        # 曾经付费过 (user_subscription 有 row 就算曾经付过, 哪怕现在过期) → 不再发 daily grant
+        # 但 Phase 1 清零照旧, 用户明确选择 "过期回 free 积分也清"
+        ever_paid = sub_row is not None
+
         today = time.strftime('%Y-%m-%d', time.localtime())
 
-        # ============== Phase 1: 清昨天 leftover (day 1-8 跑, day 9+ 跳过) ==============
-        # day 7 是最后一次发, day 8 早上要清掉 day 7 的剩余. day 9+ 再也没东西可清, 不跑了.
-        # 用 monthly_credits_reset_at 防一天清多次.
-        old_monthly = 0
-        last_reset_day = ''
-        if day_index <= DAILY_FREE_GRANT_DAYS + 1:
-            cb_row = conn.execute(
-                "SELECT monthly_credits, monthly_credits_reset_at FROM credit_balance WHERE user_id = ?",
-                (user_id,)
-            ).fetchone()
-            old_monthly = (cb_row['monthly_credits'] or 0) if cb_row else 0
-            last_reset_ts = (cb_row['monthly_credits_reset_at'] or 0) if cb_row else 0
-            last_reset_day = time.strftime('%Y-%m-%d', time.localtime(last_reset_ts)) if last_reset_ts else ''
-            if last_reset_day != today and old_monthly > 0:
-                conn.execute(
-                    "UPDATE credit_balance SET monthly_credits = 0, monthly_credits_reset_at = ?, updated_at = ? WHERE user_id = ?",
-                    (time.time(), time.time(), user_id)
-                )
-                conn.execute(
-                    """INSERT INTO credit_log (user_id, feature, delta, source, ref_id, created_at)
-                       VALUES (?, ?, ?, ?, ?, ?)""",
-                    (user_id, 'daily_free_expire', -old_monthly, 'daily_expire', today, time.time())
-                )
-                conn.commit()
+        # ============== Phase 1: 只要当前是 free, 每天清 monthly_credits ==============
+        # 用户规则: free 状态下积分 "当天不用就没". 不管 free 是因为新注册还是付费过期 — 一视同仁.
+        # 付费过期回 free 后, 剩余的积分也会被这里清零 (用户明确选择的策略).
+        # monthly_credits_reset_at 防一天清多次.
+        cb_row = conn.execute(
+            "SELECT monthly_credits, monthly_credits_reset_at FROM credit_balance WHERE user_id = ?",
+            (user_id,)
+        ).fetchone()
+        old_monthly = (cb_row['monthly_credits'] or 0) if cb_row else 0
+        last_reset_ts = (cb_row['monthly_credits_reset_at'] or 0) if cb_row else 0
+        last_reset_day = time.strftime('%Y-%m-%d', time.localtime(last_reset_ts)) if last_reset_ts else ''
+        if last_reset_day != today and old_monthly > 0:
+            conn.execute(
+                "UPDATE credit_balance SET monthly_credits = 0, monthly_credits_reset_at = ?, updated_at = ? WHERE user_id = ?",
+                (time.time(), time.time(), user_id)
+            )
+            conn.execute(
+                """INSERT INTO credit_log (user_id, feature, delta, source, ref_id, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (user_id, 'daily_free_expire', -old_monthly, 'daily_expire', today, time.time())
+            )
+            conn.commit()
 
-        # ============== Phase 2: 超过 7 天就不送新积分 ==============
-        if day_index > DAILY_FREE_GRANT_DAYS:
+        # ============== Phase 2: 超过 7 天 / 曾经付费过 → 不送新积分 ==============
+        # daily grant 只送给"首次注册" 的全新用户. 付费过的 (即使现在过期) 不再发.
+        if day_index > DAILY_FREE_GRANT_DAYS or ever_paid:
             return {
                 'granted': False, 'amount': 0,
                 'day_index': day_index, 'days_remaining': 0,
                 'expired_yesterday': old_monthly if last_reset_day != today else 0,
+                'reason': 'ever_paid' if ever_paid else 'past_7_days',
             }
 
         # ============== Phase 3: 今天还没送过 → 送 60 ==============
