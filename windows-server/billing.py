@@ -922,19 +922,26 @@ def ensure_referrer_status(user_id: int) -> dict:
 
 
 def bind_referrer(user_id: int, referral_code: str) -> bool:
-    """用户首次注册时绑定推广关系. 已绑定则 no-op (终身不变)."""
+    """用户首次注册时绑定推广关系. 已绑定则 no-op (终身不变).
+    双方各 30 积分 (推广员 + 被邀请方), 不依赖付费."""
     conn = get_db()
     existing = conn.execute(
         "SELECT 1 FROM referral_binding WHERE user_id = ?", (user_id,)
     ).fetchone()
     if existing:
         conn.close()
+        print(f"[bind_referrer] skip — user={user_id} 已绑定过推广关系", flush=True)
         return False
     referrer = conn.execute(
         "SELECT user_id FROM referrer_status WHERE referral_code = ?", (referral_code,)
     ).fetchone()
-    if not referrer or referrer['user_id'] == user_id:
+    if not referrer:
         conn.close()
+        print(f"[bind_referrer] fail — referral_code={referral_code!r} 找不到对应推广员", flush=True)
+        return False
+    if referrer['user_id'] == user_id:
+        conn.close()
+        print(f"[bind_referrer] fail — user={user_id} 用了自己的推广码", flush=True)
         return False
     now = time.time()
     conn.execute("""
@@ -945,8 +952,12 @@ def bind_referrer(user_id: int, referral_code: str) -> bool:
     conn.close()
     # 双方各 30 积分 (注册奖励, 不依赖付费)
     bonus = COMMISSION_RULES['normal']['register_bonus_credits']
-    add_credits(referrer['user_id'], bonus, 'referral', ref_id=f"register_{user_id}", feature='register_referrer')
-    add_credits(user_id, bonus, 'referral', ref_id=f"register_{referrer['user_id']}", feature='register_invitee')
+    try:
+        add_credits(referrer['user_id'], bonus, 'referral', ref_id=f"register_{user_id}", feature='register_referrer')
+        add_credits(user_id, bonus, 'referral', ref_id=f"register_{referrer['user_id']}", feature='register_invitee')
+        print(f"[bind_referrer] OK — referrer={referrer['user_id']} invitee={user_id} 各 +{bonus} 积分", flush=True)
+    except Exception as _e:
+        print(f"[bind_referrer] 绑定成功但加积分失败: {_e}", flush=True)
     return True
 
 
