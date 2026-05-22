@@ -16,7 +16,7 @@ import {
   type OrderEntry,
   type UserProfile, type ReferredUser, type CommissionDetail,
 } from '../services/billing'
-import { sendSmsCode } from '../lib/auth'
+import { sendSmsCode, getToken } from '../lib/auth'
 import { isLoggedIn } from '../lib/auth'
 import { PaymentDialog } from '../components/PaymentDialog'
 
@@ -55,45 +55,116 @@ const FAQS = [
   { q: '退款政策?', a: '所有套餐和积分包不支持退款, 请按需购买. 月卡可随时取消自动续费, 当期用完为止.' },
 ]
 
+// 对比表 — 简化版本, 只显示**真实生效**的字段 + 真正落地的功能
+// (单视频时长 / 清晰度 / 优先 GPU / 水印 / 商用授权 / 转售授权 / 多平台账号 / 团队席位 / API
+//  现在没在代码里强制限制, 暂时不列, 避免误导用户)
+type TierKey = 'free' | 'pro_monthly' | 'max_monthly' | 'flagship_yearly'
 const COMPARE_ROWS: Array<{
-  key: keyof PlanConfig | 'price'
   label: string
   group?: string
-  render?: (p: PlanConfig) => React.ReactNode
+  // 每档显示的内容, 直接写死方便维护
+  values: Record<TierKey, string>
 }> = [
-  { key: 'price', label: '价格', group: '基础', render: p => p.price_yuan === 0 ? '免费' : `¥${p.price_yuan}/${p.period_days === 365 ? '年' : '月'}` },
-  { key: 'monthly_credits', label: '月送积分', render: p => p.monthly_credits.toLocaleString() },
-  { key: 'digital_human_quota', label: '数字人合成', render: p => `${p.digital_human_quota} 条/月` },
-  { key: 'max_video_minutes', label: '单视频时长', render: p => p.unlimited_duration ? '不限' : `≤ ${p.max_video_minutes} 分钟` },
-  { key: 'max_resolution', label: '导出清晰度', render: p => p.max_resolution },
-  { key: 'clone_voice_slots', label: '克隆音色', render: p => `${p.clone_voice_slots} 个` },
-  { key: 'priority_gpu', label: '优先 GPU 队列', group: '功能', render: p => p.priority_gpu ? '✓' : '✗' },
-  { key: 'watermark', label: '视频水印', render: p => p.watermark ? '带 monoi 水印' : '无水印' },
-  { key: 'commercial_license', label: '商用授权', render: p => p.commercial_license ? '✓' : '✗' },
-  { key: 'transferable_license', label: '转售授权', render: p => p.transferable_license ? '✓' : '✗' },
-  { key: 'multi_platform_accounts', label: '多平台账号数', render: p => `${p.multi_platform_accounts} 个` },
-  { key: 'team_seats', label: '团队子账号', render: p => p.team_seats > 0 ? `${p.team_seats} 个` : '—' },
-  { key: 'vip_support', label: 'VIP 1v1 客服', group: '服务', render: p => p.vip_support ? '✓' : '✗' },
-  { key: 'early_access', label: '提前体验新功能', render: p => p.early_access ? '✓' : '✗' },
-  { key: 'api_access', label: 'API 访问', render: p => p.api_access ? '✓' : '✗' },
-  { key: 'referral_boost', label: '推广分成提升', render: p => p.referral_boost ? '一次性 30%' : '按等级' },
-  { key: 'support_response_hours', label: '客服响应', render: p => `${p.support_response_hours}h` },
-  { key: 'credit_pack_rate', label: '加买积分单价', group: '积分包', render: p => `¥1 = ${p.credit_pack_rate} 积分` },
+  // —— 基础 ——
+  { label: '价格', group: '基础', values: {
+    free: '免费', pro_monthly: '¥99/月', max_monthly: '¥199/月', flagship_yearly: '¥2980/年',
+  }},
+  { label: '月送积分', values: {
+    free: '60/天 × 7 天', pro_monthly: '1,500', max_monthly: '4,000', flagship_yearly: '5,000/月',
+  }},
+  { label: '克隆音色', values: {
+    free: '✗', pro_monthly: '1 个', max_monthly: '3 个', flagship_yearly: '5 个',
+  }},
+  { label: '数字人形象', values: {
+    free: '1 个', pro_monthly: '5 个', max_monthly: '10 个', flagship_yearly: '不限',
+  }},
+
+  // —— 主要功能 ——
+  { label: '配音预设', group: '主要功能', values: {
+    free: '✓', pro_monthly: '✓', max_monthly: '✓', flagship_yearly: '✓',
+  }},
+  { label: '文案 (原创/仿写/方言)', values: {
+    free: '✓', pro_monthly: '✓', max_monthly: '✓', flagship_yearly: '✓',
+  }},
+  { label: '数字人合成', values: {
+    free: '✓', pro_monthly: '✓', max_monthly: '✓', flagship_yearly: '✓',
+  }},
+  { label: '封面 + 封面模板', values: {
+    free: '✓', pro_monthly: '✓', max_monthly: '✓', flagship_yearly: '✓',
+  }},
+  { label: '克隆声音', values: {
+    free: '✗', pro_monthly: '✓', max_monthly: '✓', flagship_yearly: '✓',
+  }},
+  { label: '素材智能匹配', values: {
+    free: '✗', pro_monthly: '✓', max_monthly: '✓', flagship_yearly: '✓',
+  }},
+  { label: '口播剪辑导出草稿', values: {
+    free: '✗', pro_monthly: '✓', max_monthly: '✓', flagship_yearly: '✓',
+  }},
+  { label: '一键合成 (PIP+BGM+字幕)', values: {
+    free: '✗', pro_monthly: '✓', max_monthly: '✓', flagship_yearly: '✓',
+  }},
+  { label: '抠图人物', values: {
+    free: '✗', pro_monthly: '✓', max_monthly: '✓', flagship_yearly: '✓',
+  }},
+  { label: '去人声 (Demucs)', values: {
+    free: '✗', pro_monthly: '✗', max_monthly: '✓', flagship_yearly: '✓',
+  }},
+  { label: '自动发布', values: {
+    free: '✗', pro_monthly: '✗', max_monthly: '✓ Beta', flagship_yearly: '✓ Beta',
+  }},
+
+  // —— 专享 ——
+  { label: '提前体验新功能', group: '专享', values: {
+    free: '✗', pro_monthly: '✗', max_monthly: '✓', flagship_yearly: '✓',
+  }},
+  { label: 'VIP 1v1 客服', values: {
+    free: '✗', pro_monthly: '✗', max_monthly: '✗', flagship_yearly: '✓',
+  }},
 ]
 
 function planHighlights(tier: string, p: PlanConfig): string[] {
-  const base = [
-    `${p.monthly_credits} 积分/月`,
-    `${p.digital_human_quota} 条数字人/月`,
-    `${p.unlimited_duration ? '不限时长' : `≤ ${p.max_video_minutes} 分钟`}`,
-    `${p.max_resolution} 导出`,
-    `${p.clone_voice_slots} 个克隆音色`,
-  ]
-  if (tier === 'free') base.push('视频带 monoi 水印')
-  else if (tier === 'pro_monthly') base.push('无水印', `${p.multi_platform_accounts} 个平台账号`)
-  else if (tier === 'max_monthly') base.push('优先 GPU 队列', '商用授权', `${p.multi_platform_accounts} 个平台账号`)
-  else if (tier === 'flagship_yearly') base.push('VIP 1v1 客服', '提前体验新功能', '商用 + 转售授权', `团队 ${p.team_seats} 席位`)
-  return base
+  // 每档卡片只列**最直观的差异**, 详细对比表里看完整功能.
+  if (tier === 'free') {
+    return [
+      `${p.monthly_credits} 积分 (7 天体验)`,
+      '配音预设',
+      '数字人 (1 个形象)',
+      '文案 / 封面',
+    ]
+  }
+  if (tier === 'pro_monthly') {
+    return [
+      `${p.monthly_credits} 积分/月`,
+      '配音预设 + 1 个克隆声音',
+      '数字人 (5 个形象)',
+      '口播剪辑导出草稿',
+      '一键合成 + 素材匹配 + 抠图',
+      '封面模板',
+    ]
+  }
+  if (tier === 'max_monthly') {
+    return [
+      `${p.monthly_credits} 积分/月`,
+      'Pro 全部功能',
+      '3 个克隆声音',
+      '数字人 (10 个形象)',
+      '去人声 (Demucs)',
+      '自动发布 (Beta)',
+      '提前体验新功能',
+    ]
+  }
+  if (tier === 'flagship_yearly') {
+    return [
+      `${p.monthly_credits} 积分/月`,
+      'Max 全部功能',
+      '5 个克隆声音',
+      '数字人 (不限形象)',
+      'VIP 1v1 客服',
+      '提前体验新功能',
+    ]
+  }
+  return []
 }
 
 const fmtDate = (ts?: number | string) => {
@@ -336,8 +407,9 @@ function ProfileTab({ me, sub, credits, refCode, plans, onReload }: {
     try {
       const signRes = await fetch(directBase + '/api/oss/sign-upload', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filename: file.name, content_type: file.type }),
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken() || ''}` },
+        // prefix: 'avatars' — uploads/ 有 24h 生命周期会被删, avatars/ 在持久白名单
+        body: JSON.stringify({ filename: file.name, content_type: file.type, prefix: 'avatars' }),
       })
       if (!signRes.ok) throw new Error('签名失败')
       const { put_url, oss_key, content_type } = await signRes.json()
@@ -622,10 +694,9 @@ function MembershipTab({ sub, plans, credits, onUpgrade }: {
                       )}
                       <tr key={i} className="border-t border-[var(--border-subtle)]">
                         <td className="px-4 py-2 text-[var(--text-2)]">{row.label}</td>
-                        {TIER_ORDER.map(t => {
-                          const p = t === 'free' ? plans.free : plans.plans[t]
-                          return <td key={t} className="text-center px-3 py-2 text-[var(--text)]">{p && row.render ? row.render(p) : '-'}</td>
-                        })}
+                        {TIER_ORDER.map(t => (
+                          <td key={t} className="text-center px-3 py-2 text-[var(--text)]">{row.values[t as TierKey]}</td>
+                        ))}
                       </tr>
                     </>
                   )
