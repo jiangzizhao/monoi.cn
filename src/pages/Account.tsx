@@ -3,8 +3,9 @@ import { useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, Copy, Check, Crown, Zap, Gem, Gift, ChevronDown, ChevronUp, X,
   QrCode, Download, User, Wallet, History, Share2, Shield, Edit2, Camera,
-  TrendingUp, ArrowRight,
+  TrendingUp, ArrowRight, Sticker,
 } from 'lucide-react'
+import { PersonLibrary } from '../components/chat/forms/PersonLibrary'
 import { QRCodeCanvas } from 'qrcode.react'
 import {
   fetchPlans, fetchMyCredits, fetchMySubscription, fetchMyReferralCode,
@@ -23,13 +24,14 @@ import { PaymentDialog } from '../components/PaymentDialog'
 
 // ========== 常量 ==========
 
-type TabKey = 'profile' | 'membership' | 'credits' | 'transactions' | 'referral' | 'security'
+type TabKey = 'profile' | 'membership' | 'credits' | 'transactions' | 'referral' | 'cutouts' | 'security'
 
 const TABS: { key: TabKey; label: string; Icon: any }[] = [
   { key: 'profile',      label: '个人资料', Icon: User },
   { key: 'membership',   label: '会员中心', Icon: Crown },
   { key: 'credits',      label: '充值积分', Icon: Wallet },
   { key: 'transactions', label: '消费记录', Icon: History },
+  { key: 'cutouts',      label: '我的人物', Icon: Sticker },
   { key: 'referral',     label: '我的推广', Icon: Share2 },
   { key: 'security',     label: '安全设置', Icon: Shield },
 ]
@@ -302,6 +304,7 @@ export default function Account() {
           {activeTab === 'membership' && <MembershipTab sub={sub} plans={plans} credits={credits} onUpgrade={t => setUpgradeDialog(t)}/>}
           {activeTab === 'credits' && <CreditsTab credits={credits} plans={plans} sub={sub} onBuyPack={c => setUpgradeDialog(c)}/>}
           {activeTab === 'transactions' && <TransactionsTab creditLog={creditLog} orders={orders} friendlyName={friendlyName}/>}
+          {activeTab === 'cutouts' && <MyCutoutsTab/>}
           {activeTab === 'referral' && <ReferralTab refCode={refCode} refStatus={refStatus} refBalance={refBalance} onShowQr={() => setQrOpen(true)} onReload={reloadAll}/>}
           {activeTab === 'security' && <SecurityTab me={me} onReload={reloadAll}/>}
         </div>
@@ -1255,6 +1258,64 @@ function ProgressLine({ label, got, need, unit, prefix = '' }: { label: string; 
 
 
 // ========== Tab 6: 安全设置 ==========
+
+function MyCutoutsTab() {
+  const [selectedOssKey, setSelectedOssKey] = useState('')
+  const [selectedUrl, setSelectedUrl] = useState('')
+  const [err, setErr] = useState('')
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="p-5 rounded-2xl border border-[var(--border)] bg-[var(--bg-card)]">
+        <div className="text-base font-semibold mb-1">我的人物</div>
+        <div className="text-xs text-[var(--text-3)]">
+          抠过的人物图都在这里. 最多保存 <span className="text-[var(--text-2)] font-medium">10 张</span>,
+          满了上传新的会**自动删除最久没用的**那张. 想保留可以点选中后下载 PNG 到本地.
+        </div>
+      </div>
+
+      <div className="p-5 rounded-2xl border border-[var(--border)] bg-[var(--bg-card)]">
+        <PersonLibrary
+          selectedOssKey={selectedOssKey}
+          onSelect={(ossKey, previewUrl) => {
+            setSelectedOssKey(ossKey)
+            setSelectedUrl(previewUrl)
+            setErr('')
+          }}
+          stroke={{ enabled: false, color: '#FFFFFF', width: 0 }}
+          onUploadingChange={() => {}}
+          onError={setErr}
+        />
+        {err && (
+          <div className="mt-2 text-xs text-red-400 bg-red-950/20 border border-red-900/30 rounded-lg px-3 py-2">{err}</div>
+        )}
+        {selectedUrl && (
+          <div className="mt-4 flex flex-col gap-3">
+            <div className="rounded-lg bg-[repeating-conic-gradient(#ddd_0deg_25%,#fff_0deg_50%)] [background-size:20px_20px] p-4 flex items-center justify-center">
+              <img src={selectedUrl} alt="人物" className="max-w-full max-h-[40vh] object-contain"/>
+            </div>
+            <button onClick={() => {
+              const a = document.createElement('a')
+              a.href = selectedUrl
+              a.download = `monoi-cutout-${Date.now()}.png`
+              document.body.appendChild(a)
+              a.click()
+              document.body.removeChild(a)
+            }}
+              className="py-2.5 rounded-lg bg-[var(--text)] text-[var(--bg)] text-sm hover:opacity-80 cursor-pointer flex items-center justify-center gap-2">
+              <Download size={14}/> 下载透明 PNG
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="text-[11px] text-[var(--text-3)] px-1 leading-relaxed">
+        想抠新的图? 回到聊天界面, 点底部工具栏的 <Sticker size={11} className="inline -mt-0.5"/> "抠图" 按钮.
+      </div>
+    </div>
+  )
+}
+
 
 function SecurityTab({ me, onReload }: { me: UserProfile | null; onReload: () => void }) {
   const [oldPwd, setOldPwd] = useState('')
