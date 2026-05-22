@@ -529,19 +529,20 @@ def try_daily_grant(user_id: int) -> Optional[dict]:
 
         today = time.strftime('%Y-%m-%d', time.localtime())
 
-        # ============== Phase 1: 每日清零 (不管 day_index, 都跑) ==============
-        # 用 monthly_credits_reset_at 判断今天有没有清过, 防一天清多次.
-        # 这样 day 8+ (没新 grant 的日子) 也会清掉昨天的 leftover, 严格执行 "当天不用就没了".
-        cb_row = conn.execute(
-            "SELECT monthly_credits, monthly_credits_reset_at FROM credit_balance WHERE user_id = ?",
-            (user_id,)
-        ).fetchone()
-        old_monthly = (cb_row['monthly_credits'] or 0) if cb_row else 0
-        last_reset_ts = (cb_row['monthly_credits_reset_at'] or 0) if cb_row else 0
-        last_reset_day = time.strftime('%Y-%m-%d', time.localtime(last_reset_ts)) if last_reset_ts else ''
-        if last_reset_day != today:
-            # 今天还没清过 — 清 + 标记 reset_at
-            if old_monthly > 0:
+        # ============== Phase 1: 清昨天 leftover (day 1-8 跑, day 9+ 跳过) ==============
+        # day 7 是最后一次发, day 8 早上要清掉 day 7 的剩余. day 9+ 再也没东西可清, 不跑了.
+        # 用 monthly_credits_reset_at 防一天清多次.
+        old_monthly = 0
+        last_reset_day = ''
+        if day_index <= DAILY_FREE_GRANT_DAYS + 1:
+            cb_row = conn.execute(
+                "SELECT monthly_credits, monthly_credits_reset_at FROM credit_balance WHERE user_id = ?",
+                (user_id,)
+            ).fetchone()
+            old_monthly = (cb_row['monthly_credits'] or 0) if cb_row else 0
+            last_reset_ts = (cb_row['monthly_credits_reset_at'] or 0) if cb_row else 0
+            last_reset_day = time.strftime('%Y-%m-%d', time.localtime(last_reset_ts)) if last_reset_ts else ''
+            if last_reset_day != today and old_monthly > 0:
                 conn.execute(
                     "UPDATE credit_balance SET monthly_credits = 0, monthly_credits_reset_at = ?, updated_at = ? WHERE user_id = ?",
                     (time.time(), time.time(), user_id)
@@ -551,16 +552,9 @@ def try_daily_grant(user_id: int) -> Optional[dict]:
                        VALUES (?, ?, ?, ?, ?, ?)""",
                     (user_id, 'daily_free_expire', -old_monthly, 'daily_expire', today, time.time())
                 )
-            else:
-                # 没积分剩, 但要更新 reset_at 防下次重新进入这个分支白跑
-                if cb_row:
-                    conn.execute(
-                        "UPDATE credit_balance SET monthly_credits_reset_at = ? WHERE user_id = ?",
-                        (time.time(), user_id)
-                    )
-            conn.commit()
+                conn.commit()
 
-        # ============== Phase 2: 超过 7 天就不送了, 但 Phase 1 已经清完, 返回即可 ==============
+        # ============== Phase 2: 超过 7 天就不送新积分 ==============
         if day_index > DAILY_FREE_GRANT_DAYS:
             return {
                 'granted': False, 'amount': 0,
