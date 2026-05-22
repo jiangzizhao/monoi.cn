@@ -1251,9 +1251,12 @@ def buy_credits(req: BuyCreditsRequest, request: Request):
 def my_referral_code(request: Request):
     user_id = get_current_user_id(request)
     status = ensure_referrer_status(user_id)
+    # 公网域名: 备案完了用 monoi.cn, 备案前用 Vercel 域名. 通过 env 切换.
+    import os as _os
+    base = (_os.environ.get('PUBLIC_BASE_URL') or 'https://monoi-cn.vercel.app').rstrip('/')
     return {
         'referral_code': status['referral_code'],
-        'link': f"https://monoi.cn/register?ref={status['referral_code']}",
+        'link': f"{base}/register?ref={status['referral_code']}",
     }
 
 
