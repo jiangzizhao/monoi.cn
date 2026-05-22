@@ -30,7 +30,7 @@ const TABS: { key: TabKey; label: string; Icon: any }[] = [
   { key: 'profile',      label: '个人资料', Icon: User },
   { key: 'membership',   label: '会员中心', Icon: Crown },
   { key: 'credits',      label: '充值积分', Icon: Wallet },
-  { key: 'transactions', label: '消费记录', Icon: History },
+  { key: 'transactions', label: '我的账单', Icon: History },
   { key: 'cutouts',      label: '我的人物', Icon: Sticker },
   { key: 'referral',     label: '我的推广', Icon: Share2 },
   { key: 'security',     label: '安全设置', Icon: Shield },
@@ -854,7 +854,7 @@ function TransactionsTab({ creditLog, orders, friendlyName }: {
     <>
       <div className="flex border-b border-[var(--border)]">
         {[
-          { k: 'credit', l: '积分流水' },
+          { k: 'credit', l: '积分赠送' },
           { k: 'order', l: '订单记录' },
         ].map(t => (
           <button key={t.k} onClick={() => setSubTab(t.k as any)}
@@ -864,27 +864,28 @@ function TransactionsTab({ creditLog, orders, friendlyName }: {
         ))}
       </div>
 
-      {subTab === 'credit' && (
-        <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] overflow-hidden">
-          {creditLog.length === 0 ? (
-            <div className="px-5 py-8 text-center text-sm text-[var(--text-3)]">还没有积分流水</div>
-          ) : (
-            <div className="divide-y divide-[var(--border-subtle)]">
-              {creditLog.map(log => (
-                <div key={log.id} className="px-5 py-3 flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-3">
-                    <span className="text-[10px] text-[var(--text-3)] w-32">{fmtTime(log.created_at)}</span>
-                    <span className="text-[var(--text-2)]">{friendlyName(log.feature || log.source)}</span>
+      {subTab === 'credit' && (() => {
+        const grants = creditLog.filter(l => l.delta > 0)
+        return (
+          <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] overflow-hidden">
+            {grants.length === 0 ? (
+              <div className="px-5 py-8 text-center text-sm text-[var(--text-3)]">还没有积分赠送</div>
+            ) : (
+              <div className="divide-y divide-[var(--border-subtle)]">
+                {grants.map(log => (
+                  <div key={log.id} className="px-5 py-3 flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-3">
+                      <span className="text-[10px] text-[var(--text-3)] w-32">{fmtTime(log.created_at)}</span>
+                      <span className="text-[var(--text-2)]">{friendlyName(log.feature || log.source)}</span>
+                    </div>
+                    <span className="text-green-500 font-medium">+{log.delta}</span>
                   </div>
-                  <span className={log.delta > 0 ? 'text-green-500 font-medium' : 'text-red-400 font-medium'}>
-                    {log.delta > 0 ? '+' : ''}{log.delta}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })()}
 
       {subTab === 'order' && (
         <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] overflow-hidden">
@@ -963,7 +964,7 @@ function ReferralTab({ refCode, refStatus, refBalance, onShowQr, onReload }: {
     try {
       const r = await checkReferrerUpgrade()
       if (r.upgraded) {
-        alert(`🎉 已升级为${eligibility.nextLevelLabel}!`)
+        alert(`已升级为${eligibility.nextLevelLabel}!`)
         onReload()
       } else {
         alert('未达升级条件')
@@ -1000,7 +1001,7 @@ function ReferralTab({ refCode, refStatus, refBalance, onShowQr, onReload }: {
             <div className="text-xs opacity-80">推广 Max 月卡, 30% 持续分成 · 月推 20 人月入 ¥6000</div>
           </div>
           <div className="hidden sm:flex items-center gap-1 text-sm opacity-80">
-            <span>查看推广技巧</span>
+            <span>查看推广规则</span>
             <ArrowRight size={14}/>
           </div>
         </div>
@@ -1031,7 +1032,7 @@ function ReferralTab({ refCode, refStatus, refBalance, onShowQr, onReload }: {
         </div>
         {refStatus.level === 'normal' && (
           <div className="mt-3 text-[11px] text-[var(--text-3)] leading-relaxed">
-            💡 普通用户推荐拿积分奖励. 累计带来 5 个付费用户或 ¥500 流水后升级认证推广员 (现金 30% 首单 + 10%×3 月续费). 月推 20 人或 ¥3000 流水升核心合伙人.
+            普通用户推荐拿积分奖励. 累计带来 5 个付费用户或 ¥500 流水后升级认证推广员 (现金 30% 持续分成). 月推 20 人或 ¥3000 流水升核心合伙人 (50% 首单 + 15%×3 续费).
           </div>
         )}
 
@@ -1040,7 +1041,7 @@ function ReferralTab({ refCode, refStatus, refBalance, onShowQr, onReload }: {
           <div className={`mt-4 p-3.5 rounded-xl ${eligibility.eligible ? 'bg-amber-50 dark:bg-amber-950/20 border border-amber-300 dark:border-amber-900/50' : 'bg-[var(--bg-hover)] border border-[var(--border)]'}`}>
             <div className="flex items-center justify-between gap-3 mb-2">
               <div className="text-xs font-medium text-[var(--text-2)]">
-                {eligibility.eligible ? `🎉 已达升级条件 → ${eligibility.nextLevelLabel}` : `距离升级 ${eligibility.nextLevelLabel}`}
+                {eligibility.eligible ? `已达升级条件 → ${eligibility.nextLevelLabel}` : `距离升级 ${eligibility.nextLevelLabel}`}
               </div>
               {eligibility.eligible && (
                 <button onClick={handleUpgrade} disabled={upgrading}
@@ -1175,49 +1176,80 @@ function ReferralTab({ refCode, refStatus, refBalance, onShowQr, onReload }: {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={() => setGuideOpen(false)}>
           <div onClick={e => e.stopPropagation()} className="relative bg-[var(--bg-card)] border border-[var(--border)] rounded-2xl shadow-ios-lg w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 flex flex-col gap-4">
             <button onClick={() => setGuideOpen(false)} className="absolute top-4 right-4 p-1 rounded text-[var(--text-3)] hover:bg-[var(--bg-hover)] cursor-pointer"><X size={14}/></button>
-            <div className="text-lg font-semibold">推广技巧 + 话术</div>
+            <div className="text-lg font-semibold">推广员规则说明</div>
 
-            <section className="text-sm text-[var(--text-2)] leading-relaxed space-y-3">
+            <section className="text-sm text-[var(--text-2)] leading-relaxed space-y-4">
               <div>
-                <div className="font-medium text-[var(--text)] mb-1.5">💡 推广哪一档最赚</div>
-                <p className="text-xs">主推 <b className="text-[var(--text)]">Max ¥199/月</b> — 30% 持续分成, 每带 1 人月入 ¥60, 月卡续费每月持续拿. 比一次性卖年卡更稳.</p>
+                <div className="font-medium text-[var(--text)] mb-1.5">注册奖励</div>
+                <ul className="text-xs space-y-1 list-disc ml-5">
+                  <li>对方通过你的链接注册成功 → 双方各得 <b>30 积分</b> (不需付费)</li>
+                  <li>同一手机号 / 同一设备多账号刷量不计入</li>
+                  <li>奖励即时到账, 不分等级</li>
+                </ul>
               </div>
 
               <div>
-                <div className="font-medium text-[var(--text)] mb-1.5">📋 朋友圈文案模板</div>
-                <div className="bg-[var(--bg-input)] rounded-lg p-3 text-xs leading-relaxed font-mono">
-                  "做短视频苦于没素材/没文案/没数字人? <br/>
-                  monoi 一站搞定: AI 文案 + 配音 + 数字人 + 自动剪辑 + 一键发布. <br/>
-                  我自己用了 1 个月效率翻 3 倍, 大家可以试试 → [我的推广链接]"
+                <div className="font-medium text-[var(--text)] mb-1.5">等级权益</div>
+                <div className="overflow-x-auto -mx-1">
+                  <table className="w-full text-[11px] border-collapse">
+                    <thead>
+                      <tr className="border-b border-[var(--border)] text-[var(--text-3)]">
+                        <th className="py-1.5 px-2 text-left font-normal">等级</th>
+                        <th className="py-1.5 px-2 text-left font-normal">注册奖励</th>
+                        <th className="py-1.5 px-2 text-left font-normal">付费分成</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr className="border-b border-[var(--border-subtle)]">
+                        <td className="py-1.5 px-2 text-[var(--text)]">普通用户</td>
+                        <td className="py-1.5 px-2">30 积分</td>
+                        <td className="py-1.5 px-2 text-[var(--text-3)]">无</td>
+                      </tr>
+                      <tr className="border-b border-[var(--border-subtle)]">
+                        <td className="py-1.5 px-2 text-[var(--text)]">认证推广员</td>
+                        <td className="py-1.5 px-2">30 积分</td>
+                        <td className="py-1.5 px-2"><b>30% 持续分成</b></td>
+                      </tr>
+                      <tr>
+                        <td className="py-1.5 px-2 text-[var(--text)]">核心合伙人</td>
+                        <td className="py-1.5 px-2">30 积分</td>
+                        <td className="py-1.5 px-2"><b>50% 首单 + 15%×3 续费</b></td>
+                      </tr>
+                    </tbody>
+                  </table>
                 </div>
               </div>
 
               <div>
-                <div className="font-medium text-[var(--text)] mb-1.5">🎯 哪些人是目标用户</div>
+                <div className="font-medium text-[var(--text)] mb-1.5">升级路径</div>
                 <ul className="text-xs space-y-1 list-disc ml-5">
-                  <li>抖音/小红书新手博主 (没时间剪辑)</li>
-                  <li>口播创作者 (要做数字人解放真人出镜)</li>
-                  <li>知识付费/课程讲师 (批量生产口播课)</li>
-                  <li>带货达人 (一天发 5-10 条视频)</li>
-                  <li>MCN / 内容工作室 (旗舰用户大单)</li>
+                  <li>普通用户 → 累计带来 <b>5 付费用户</b> 或 <b>¥500 流水</b> → 自动升 <b>认证推广员</b></li>
+                  <li>认证推广员 → 月推 <b>20 人</b> 或 <b>¥3000 流水</b> → 自动升 <b>核心合伙人</b></li>
+                  <li>等级一旦达成不会回退, 持续享有对应分成比例</li>
                 </ul>
               </div>
 
               <div>
-                <div className="font-medium text-[var(--text)] mb-1.5">📈 升级路径</div>
-                <ul className="text-xs space-y-1">
-                  <li>普通用户 → 累计带来 <b>5 付费用户</b> 或 <b>¥500 流水</b> → 自动升 <b>认证推广员</b> (现金分成)</li>
-                  <li>认证推广员 → 月推 <b>20 人</b> 或 <b>¥3000 流水</b> → 自动升 <b>核心合伙人</b> (50% 首单 + 15%×3 续费)</li>
+                <div className="font-medium text-[var(--text)] mb-1.5">分成结算</div>
+                <ul className="text-xs space-y-1 list-disc ml-5">
+                  <li>对方付费后 <b>T+7 天</b> 结算到现金余额 (过 7 天退款窗口)</li>
+                  <li>分成按对方实付金额计算, 不含优惠券抵扣部分</li>
+                  <li>认证推广员 / 核心合伙人都是 <b>终身分成</b>, 对方一直续费你一直拿</li>
                 </ul>
               </div>
 
               <div>
-                <div className="font-medium text-[var(--text)] mb-1.5">💰 提现说明</div>
+                <div className="font-medium text-[var(--text)] mb-1.5">提现说明</div>
                 <ul className="text-xs space-y-1 list-disc ml-5">
                   <li>认证推广员 / 核心合伙人, 现金余额 <b>≥ ¥100</b> 可申请提现</li>
                   <li>提现方式: 微信 / 支付宝, 1-3 个工作日到账</li>
                   <li>异常订单 (3 月内退费率 &gt; 30%) 不计入佣金</li>
                 </ul>
+              </div>
+
+              <div>
+                <div className="font-medium text-[var(--text)] mb-1.5">联系与申诉</div>
+                <p className="text-xs">分成 / 提现 / 等级有异议, 加客服微信沟通, 工作日 24h 内回复.</p>
               </div>
             </section>
 
