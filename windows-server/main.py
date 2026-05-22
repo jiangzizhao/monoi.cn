@@ -3134,12 +3134,10 @@ def submit_digital_human(
         raise HTTPException(500, f"准备文件失败: {e}")
 
     # 先扣费 — 按音频时长 × 2 积分/秒. 拿不到时长 fallback 20 积分.
-    # 同时检查本月数字人月配额 (Free 3 / Pro 30 / Max 100 / 旗舰 300)
+    # 不做条数配额, 积分覆盖一切 (积分扣光 = 不能用)
     try:
         _uid = _user_id_from_request(request)
-        from billing import consume_credits, check_feature_quota
-        # 配额检查在扣费前 — 超额直接 402, 不扣费不提交任务
-        check_feature_quota(_uid, 'digital_human', 'digital_human_quota')
+        from billing import consume_credits
         # 读音频时长 (wav 标准库, 不依赖 ffprobe)
         try:
             import wave as _wave
