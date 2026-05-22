@@ -1156,11 +1156,29 @@ def get_voice_presets():
         conn.close()
 
 
-MAX_CLONES_PER_USER = 5
+MAX_CLONES_PER_USER = 5     # 兜底默认 (没 user_id 时用), 实际按 tier 走 _get_max_clones()
+
+
+def _get_max_clones(user_id: Optional[int]) -> int:
+    """按用户 tier 返回能传几个克隆音色. -1 = 不限. 没 user_id 返回默认 5."""
+    if user_id is None:
+        return MAX_CLONES_PER_USER
+    try:
+        from billing import get_user_subscription
+        sub = get_user_subscription(user_id)
+        return int(sub.get('clone_voice_slots', MAX_CLONES_PER_USER))
+    except Exception:
+        return MAX_CLONES_PER_USER
 
 @app.get("/api/voice/my-clones")
-def get_my_clones():
-    """用户克隆音色列表（与系统预设独立）"""
+def get_my_clones(request: Request):
+    """用户克隆音色列表 (与系统预设独立).
+    max_count 按 tier 返回 (Free 0 / Pro 1 / Max 3 / 旗舰 5).
+    -1 = 不限 (理论上没有这种 tier, 防御性写法)."""
+    try:
+        user_id = _user_id_from_request(request)
+    except Exception:
+        user_id = None
     conn = get_db()
     conn.row_factory = sqlite3.Row
     try:
@@ -1172,7 +1190,7 @@ def get_my_clones():
         """).fetchall()
         return {
             "items": [row_to_dict(row) for row in rows],
-            "max_count": MAX_CLONES_PER_USER,
+            "max_count": _get_max_clones(user_id),
             "current_count": len(rows),
         }
     finally:
@@ -1245,13 +1263,14 @@ VOICE_PROMPTS_DIR = r"D:\monoi-server\models\cosyvoice\voice_prompts"
 
 @app.post("/api/voice/upload-clone")
 async def upload_clone(
+    request: Request,
     file: UploadFile = File(...),
     clone_name: str = Form("我的声音"),
     transcript: str = Form(""),
     gender: str = Form("female"),
     user_id: Optional[int] = Form(None),
 ):
-    """用户上传录音作为 CosyVoice2 克隆的 prompt 音频"""
+    """用户上传录音作为 CosyVoice2 克隆的 prompt 音频. 数量上限按 tier (Free 0 / Pro 1 / Max 3 / 旗舰 5)."""
     import shutil
     import uuid as _uuid
     import time as _t
@@ -1260,14 +1279,33 @@ async def upload_clone(
         clone_name = "我的声音"
     os.makedirs(VOICE_PROMPTS_DIR, exist_ok=True)
 
-    # 检查克隆数量上限
+    # 优先从 token 解析 user_id (新方式), Form 字段兼容旧调用
+    if user_id is None:
+        try:
+            user_id = _user_id_from_request(request)
+        except Exception:
+            user_id = None
+
+    # 检查克隆数量上限 (按 tier)
+    _max = _get_max_clones(user_id)
+    if _max <= 0:
+        raise HTTPException(403, "当前套餐不支持克隆音色, 请升级到 Pro 及以上")
     conn0 = get_db()
     try:
-        count = conn0.execute("SELECT COUNT(*) FROM voice_presets WHERE category = 'clone'").fetchone()[0]
+        if user_id is None:
+            count = conn0.execute("SELECT COUNT(*) FROM voice_presets WHERE category = 'clone'").fetchone()[0]
+        else:
+            # 这里通过 voice_clones.user_id 关联出该用户的 clone keys, 然后 join 算
+            count = conn0.execute("""
+                SELECT COUNT(*) FROM voice_clones WHERE user_id = ?
+            """, (user_id,)).fetchone()[0]
     finally:
         conn0.close()
-    if count >= MAX_CLONES_PER_USER:
-        raise HTTPException(400, f"已达上限：最多保留 {MAX_CLONES_PER_USER} 个克隆音色，请先删除一个再上传")
+    if _max >= 0 and count >= _max:
+        raise HTTPException(
+            400,
+            f"已达上限: 当前套餐最多保留 {_max} 个克隆音色, 升级套餐或先删除一个再上传",
+        )
 
     clone_key = f"clone_{int(_t.time())}_{_uuid.uuid4().hex[:6]}"
     raw_path = os.path.join(tempfile.gettempdir(), f"{clone_key}_raw")
@@ -2451,11 +2489,13 @@ def compose_jianying_draft_proxy(req: dict):
 
 @app.post("/api/voice/remove-vocals")
 async def remove_vocals_proxy(request: Request):
-    """转发到 voice-server: demucs 去人声. 重消耗 (CPU 2-5 min), 扣 15 积分."""
+    """转发到 voice-server: demucs 去人声. 重消耗 (CPU 2-5 min), 扣 15 积分.
+    Max 套餐起才能用 (Free / Pro 拒绝)."""
     import requests as _req
     try:
         _uid = _user_id_from_request(request)
-        from billing import consume_credits
+        from billing import consume_credits, check_feature_tier
+        check_feature_tier(_uid, '去人声', 'max_monthly')
         consume_credits(_uid, 'remove_vocals', 15, ref_id='')
     except HTTPException: raise
     except Exception as _ce:
@@ -2795,7 +2835,19 @@ def proxy_audio_minimax(name: str):
 DUIX_API_BASE = "http://127.0.0.1:8383/easy"
 DUIX_DATA_DIR = r"D:\monoi-server\heygem-data\face2face\temp"
 DUIX_AVATAR_DIR = r"D:\monoi-server\heygem-data\avatars"
-MAX_AVATARS_PER_USER = 5
+MAX_AVATARS_PER_USER = 5    # 兜底默认 (没 user_id 时用), 实际按 tier 走 _get_max_avatars()
+
+
+def _get_max_avatars(user_id: Optional[int]) -> int:
+    """按用户 tier 返回能传几个数字人形象. -1 = 不限. 没 user_id 返回默认 5."""
+    if user_id is None:
+        return MAX_AVATARS_PER_USER
+    try:
+        from billing import get_user_subscription
+        sub = get_user_subscription(user_id)
+        return int(sub.get('max_avatars', MAX_AVATARS_PER_USER))
+    except Exception:
+        return MAX_AVATARS_PER_USER
 os.makedirs(DUIX_DATA_DIR, exist_ok=True)
 os.makedirs(DUIX_AVATAR_DIR, exist_ok=True)
 
@@ -2842,8 +2894,18 @@ def _probe_video_meta(path: str) -> dict:
 
 
 @app.get("/api/digital-human/avatars")
-def list_avatars(user_id: Optional[int] = None):
-    """列出已保存的数字人形象 (最多 5 个)"""
+def list_avatars(request: Request, user_id: Optional[int] = None):
+    """列出已保存的数字人形象. max_count 按 tier 返回 (Free 1 / Pro 5 / Max 10 / 旗舰 不限).
+
+    user_id 优先从 Authorization JWT 解析, query 参数兼容旧调用方式.
+    """
+    # 优先从 token 解析 user_id (新方式)
+    if user_id is None:
+        try:
+            user_id = _user_id_from_request(request)
+        except Exception:
+            user_id = None  # 没 token 也允许 (兼容旧 admin / 测试)
+
     conn = get_db()
     conn.row_factory = sqlite3.Row
     try:
@@ -2864,7 +2926,7 @@ def list_avatars(user_id: Optional[int] = None):
         return {
             "items": items,
             "count": len(items),
-            "max_count": MAX_AVATARS_PER_USER,
+            "max_count": _get_max_avatars(user_id),    # 按 tier 算, -1 表示不限
         }
     finally:
         conn.close()
@@ -2872,16 +2934,24 @@ def list_avatars(user_id: Optional[int] = None):
 
 @app.post("/api/digital-human/avatars")
 async def upload_avatar(
+    request: Request,
     file: UploadFile = File(...),
     name: str = Form("我的形象"),
     user_id: Optional[int] = Form(None),
 ):
-    """上传形象视频, 保存为可复用的 avatar"""
+    """上传形象视频, 保存为可复用的 avatar. 上限按 tier 走 (Free 1 / Pro 5 / Max 10 / 旗舰 不限)."""
     import shutil
     import uuid as _uuid
     import time as _t
 
     name = name.strip() or "我的形象"
+
+    # 优先从 token 解析 user_id (新方式), Form 字段兼容旧调用
+    if user_id is None:
+        try:
+            user_id = _user_id_from_request(request)
+        except Exception:
+            user_id = None
 
     # 检查上限
     conn0 = get_db()
@@ -2897,10 +2967,12 @@ async def upload_avatar(
             ).fetchone()[0]
     finally:
         conn0.close()
-    if count >= MAX_AVATARS_PER_USER:
+    _max = _get_max_avatars(user_id)
+    if _max >= 0 and count >= _max:
+        # _max=-1 表示不限, 跳过这个检查; >=0 才挡
         raise HTTPException(
             400,
-            f"已达上限: 最多保留 {MAX_AVATARS_PER_USER} 个数字人形象, 请先删除一个再上传",
+            f"已达上限: 当前套餐最多保留 {_max} 个数字人形象, 升级套餐或先删除一个再上传",
         )
 
     avatar_key = f"avatar_{int(_t.time())}_{_uuid.uuid4().hex[:6]}"
@@ -3022,8 +3094,12 @@ def submit_digital_human(
         raise HTTPException(500, f"准备文件失败: {e}")
 
     # 先扣费 — 按音频时长 × 2 积分/秒. 拿不到时长 fallback 20 积分.
+    # 同时检查本月数字人月配额 (Free 3 / Pro 30 / Max 100 / 旗舰 300)
     try:
         _uid = _user_id_from_request(request)
+        from billing import consume_credits, check_feature_quota
+        # 配额检查在扣费前 — 超额直接 402, 不扣费不提交任务
+        check_feature_quota(_uid, 'digital_human', 'digital_human_quota')
         # 读音频时长 (wav 标准库, 不依赖 ffprobe)
         try:
             import wave as _wave
@@ -3032,7 +3108,6 @@ def submit_digital_human(
         except Exception:
             _dur = 0
         _amount = max(1, round(_dur * 2)) if _dur > 0 else 20
-        from billing import consume_credits
         consume_credits(_uid, 'digital_human', _amount, ref_id=code)
     except HTTPException as _he:
         _duix_cleanup(audio_path, video_path)

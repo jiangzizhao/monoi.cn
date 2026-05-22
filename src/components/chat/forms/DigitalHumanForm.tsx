@@ -112,7 +112,8 @@ export function DigitalHumanForm({ onSubmit, onClose }: Props) {
         const data = await r.json()
         if (!alive) return
         setAvatars(data.items || [])
-        setMaxAvatars(data.max_count || 5)
+        // 后端 max_count: -1 = 不限 (旗舰套餐). 前端用 Infinity 处理, 永远 canUploadMore
+        setMaxAvatars(data.max_count === -1 ? Infinity : (data.max_count || 5))
         // 默认选第一个
         if ((data.items || []).length > 0 && !selectedAvatarKey) {
           setSelectedAvatarKey(data.items[0].avatar_key)
@@ -559,7 +560,7 @@ function AvatarPickGroup({
     <div>
       <div className="text-xs font-medium text-[var(--text-2)] mb-1.5 flex items-center justify-between">
         <span>
-          形象 <span className="text-[var(--text-3)] font-normal">· {avatars.length}/{maxCount}</span>
+          形象 <span className="text-[var(--text-3)] font-normal">· {avatars.length}/{maxCount === Infinity ? '不限' : maxCount}</span>
         </span>
         {avatars.length === 0 && !loading && (
           <span className="text-[11px] text-[var(--text-3)]">点 + 上传第一个形象</span>

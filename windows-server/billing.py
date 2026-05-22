@@ -46,6 +46,7 @@ PLANS = {
         'monthly_credits': 1500,
         'credit_pack_rate': 15,                       # 加买积分 ¥1=15 (1.5x 标准)
         'digital_human_quota': 30,                    # 月配额
+        'max_avatars': 5,                             # 数字人形象数量上限
         'max_video_minutes': 15,                      # 单视频最长时长
         'max_resolution': '720p',                     # 视频导出最高清晰度
         'clone_voice_slots': 1,
@@ -69,6 +70,7 @@ PLANS = {
         'monthly_credits': 4000,
         'credit_pack_rate': 20,                       # ¥1=20 (2x)
         'digital_human_quota': 100,
+        'max_avatars': 10,                            # 数字人形象数量上限
         'max_video_minutes': 30,
         'max_resolution': '1080p',
         'clone_voice_slots': 3,
@@ -93,6 +95,7 @@ PLANS = {
         'yearly_total_credits': 60000,
         'credit_pack_rate': 25,                       # ¥1=25 (2.5x)
         'digital_human_quota': 300,
+        'max_avatars': -1,                            # -1 = 不限
         'max_video_minutes': 60,
         'max_resolution': '4K',
         'clone_voice_slots': 5,
@@ -119,6 +122,7 @@ FREE_PLAN = {
     'monthly_credits': 150,                           # 一次性, 注册时给 (够跑 1-2 个完整流程)
     'credit_pack_rate': 10,                           # ¥1=10 标准
     'digital_human_quota': 3,
+    'max_avatars': 1,                                 # 免费只 1 个形象
     'max_video_minutes': 5,
     'max_resolution': '480p',
     'clone_voice_slots': 0,
@@ -753,6 +757,64 @@ def get_user_subscription(user_id: int) -> dict:
     else:
         sub.update(PLANS.get(sub['tier'], {}))
     return sub
+
+
+def count_feature_usage_this_month(user_id: int, feature: str) -> int:
+    """统计本月用户某 feature 的调用次数 (按 credit_log 行数), 用于配额检查 (数字人 / 去人声等).
+
+    本月起算 = 当月 1 号 00:00. credit_log.delta < 0 (扣分) 的 feature 行才算 (排除赠送行).
+    """
+    import time as _t
+    # 本月 1 号 0 点的 Unix 时间戳
+    _tm = _t.localtime()
+    month_start = _t.mktime((_tm.tm_year, _tm.tm_mon, 1, 0, 0, 0, 0, 0, -1))
+    conn = get_db()
+    row = conn.execute(
+        "SELECT COUNT(*) FROM credit_log WHERE user_id = ? AND feature = ? AND delta < 0 AND created_at >= ?",
+        (user_id, feature, month_start)
+    ).fetchone()
+    conn.close()
+    return int(row[0]) if row else 0
+
+
+# 套餐等级排序 (低到高), 用于 tier 门禁判断
+_TIER_ORDER = ['free', 'pro_monthly', 'max_monthly', 'flagship_yearly']
+_TIER_DISPLAY = {
+    'free': '免费', 'pro_monthly': 'Pro', 'max_monthly': 'Max', 'flagship_yearly': '旗舰',
+}
+
+
+def check_feature_tier(user_id: int, feature_name: str, min_tier: str):
+    """检查用户当前 tier 够不够用某个功能. 不够抛 402.
+
+    feature_name: 给用户看的中文功能名 (例 '去人声')
+    min_tier: 最低需要的 tier (例 'max_monthly')
+    """
+    sub = get_user_subscription(user_id)
+    user_tier = sub.get('tier', 'free')
+    try:
+        user_idx = _TIER_ORDER.index(user_tier)
+        min_idx = _TIER_ORDER.index(min_tier)
+    except ValueError:
+        return  # 未知 tier, 不强制
+    if user_idx < min_idx:
+        raise HTTPException(
+            402,
+            f"{feature_name} 需要 {_TIER_DISPLAY.get(min_tier, min_tier)} 套餐及以上, 升级后即可使用",
+        )
+
+
+def check_feature_quota(user_id: int, feature: str, quota_field: str):
+    """检查用户本月某 feature 配额. 超额抛 402.
+    quota_field 是 PLANS / FREE_PLAN 里的字段名 (例 'digital_human_quota').
+    quota = -1 表示不限."""
+    sub = get_user_subscription(user_id)
+    quota = int(sub.get(quota_field, 0) or 0)
+    if quota < 0:
+        return  # 不限
+    used = count_feature_usage_this_month(user_id, feature)
+    if used >= quota:
+        raise HTTPException(402, f"本月{quota_field} {quota} 已用完, 升级套餐或下个月再试 (已用 {used}/{quota})")
 
 
 def activate_subscription(user_id: int, tier: str, payment_method: str = 'manual',
