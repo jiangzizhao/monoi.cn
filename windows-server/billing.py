@@ -517,19 +517,58 @@ def try_daily_grant(user_id: int) -> Optional[dict]:
         # 注册的几天后了 (注册当天 = day 1)
         days_since = (time.time() - created_at) / 86400
         day_index = int(days_since) + 1     # 1..N
-        if day_index > DAILY_FREE_GRANT_DAYS:
-            return {'granted': False, 'amount': 0, 'day_index': day_index, 'days_remaining': 0}
 
-        # 只 free 用户走
+        # 只 free 用户走 (付费用户的月送积分不该每天清)
         sub_row = conn.execute(
             "SELECT tier, current_period_end FROM user_subscription WHERE user_id = ?",
             (user_id,)
         ).fetchone()
         is_free = (not sub_row) or (sub_row['current_period_end'] or 0) < time.time()
         if not is_free:
-            return {'granted': False, 'amount': 0, 'day_index': day_index, 'days_remaining': DAILY_FREE_GRANT_DAYS - day_index}
+            return {'granted': False, 'amount': 0, 'day_index': day_index, 'days_remaining': max(0, DAILY_FREE_GRANT_DAYS - day_index)}
 
         today = time.strftime('%Y-%m-%d', time.localtime())
+
+        # ============== Phase 1: 每日清零 (不管 day_index, 都跑) ==============
+        # 用 monthly_credits_reset_at 判断今天有没有清过, 防一天清多次.
+        # 这样 day 8+ (没新 grant 的日子) 也会清掉昨天的 leftover, 严格执行 "当天不用就没了".
+        cb_row = conn.execute(
+            "SELECT monthly_credits, monthly_credits_reset_at FROM credit_balance WHERE user_id = ?",
+            (user_id,)
+        ).fetchone()
+        old_monthly = (cb_row['monthly_credits'] or 0) if cb_row else 0
+        last_reset_ts = (cb_row['monthly_credits_reset_at'] or 0) if cb_row else 0
+        last_reset_day = time.strftime('%Y-%m-%d', time.localtime(last_reset_ts)) if last_reset_ts else ''
+        if last_reset_day != today:
+            # 今天还没清过 — 清 + 标记 reset_at
+            if old_monthly > 0:
+                conn.execute(
+                    "UPDATE credit_balance SET monthly_credits = 0, monthly_credits_reset_at = ?, updated_at = ? WHERE user_id = ?",
+                    (time.time(), time.time(), user_id)
+                )
+                conn.execute(
+                    """INSERT INTO credit_log (user_id, feature, delta, source, ref_id, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (user_id, 'daily_free_expire', -old_monthly, 'daily_expire', today, time.time())
+                )
+            else:
+                # 没积分剩, 但要更新 reset_at 防下次重新进入这个分支白跑
+                if cb_row:
+                    conn.execute(
+                        "UPDATE credit_balance SET monthly_credits_reset_at = ? WHERE user_id = ?",
+                        (time.time(), user_id)
+                    )
+            conn.commit()
+
+        # ============== Phase 2: 超过 7 天就不送了, 但 Phase 1 已经清完, 返回即可 ==============
+        if day_index > DAILY_FREE_GRANT_DAYS:
+            return {
+                'granted': False, 'amount': 0,
+                'day_index': day_index, 'days_remaining': 0,
+                'expired_yesterday': old_monthly if last_reset_day != today else 0,
+            }
+
+        # ============== Phase 3: 今天还没送过 → 送 60 ==============
         already = conn.execute(
             "SELECT 1 FROM daily_credit_grant WHERE user_id = ? AND grant_date = ?",
             (user_id, today)
@@ -537,7 +576,6 @@ def try_daily_grant(user_id: int) -> Optional[dict]:
         if already:
             return {'granted': False, 'amount': 0, 'day_index': day_index, 'days_remaining': DAILY_FREE_GRANT_DAYS - day_index, 'reason': 'already_today'}
 
-        # 插记录 — UNIQUE 约束防并发重复 grant
         try:
             conn.execute("""
                 INSERT INTO daily_credit_grant (user_id, grant_date, amount, granted_at)
@@ -546,25 +584,6 @@ def try_daily_grant(user_id: int) -> Optional[dict]:
             conn.commit()
         except sqlite3.IntegrityError:
             return {'granted': False, 'amount': 0, 'day_index': day_index, 'days_remaining': DAILY_FREE_GRANT_DAYS - day_index, 'reason': 'race'}
-
-        # ⚠️ free 每日清零策略: grant 新的之前, 昨天剩的 monthly_credits 清掉 (不影响 purchased).
-        # 用 UPDATE SET monthly_credits=0 + 记一条 expire 流水 (delta = -之前剩的).
-        old_row = conn.execute(
-            "SELECT monthly_credits FROM credit_balance WHERE user_id = ?",
-            (user_id,)
-        ).fetchone()
-        old_monthly = (old_row['monthly_credits'] or 0) if old_row else 0
-        if old_monthly > 0:
-            conn.execute(
-                "UPDATE credit_balance SET monthly_credits = 0, updated_at = ? WHERE user_id = ?",
-                (time.time(), user_id)
-            )
-            conn.execute(
-                """INSERT INTO credit_log (user_id, feature, delta, source, ref_id, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (user_id, 'daily_free_expire', -old_monthly, 'daily_expire', today, time.time())
-            )
-            conn.commit()
     finally:
         conn.close()
 
@@ -574,7 +593,7 @@ def try_daily_grant(user_id: int) -> Optional[dict]:
     return {
         'granted': True, 'amount': DAILY_FREE_GRANT_AMOUNT,
         'day_index': day_index, 'days_remaining': DAILY_FREE_GRANT_DAYS - day_index,
-        'expired_yesterday': old_monthly,
+        'expired_yesterday': old_monthly if last_reset_day != today else 0,
     }
 
 
