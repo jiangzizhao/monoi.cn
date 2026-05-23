@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
-import { RefreshCw, Pencil, Download, Check, ExternalLink, Play, Upload, Loader2 } from 'lucide-react'
+import { RefreshCw, Pencil, Download, Check, ExternalLink, Play, Upload, Loader2, Package } from 'lucide-react'
+import JSZip from 'jszip'
 import { Badge } from '../ui/Badge'
 import { searchPexels } from '../../services/pexels'
 import { searchPixabay } from '../../services/pixabay'
@@ -233,6 +234,8 @@ export function FootageGrid({ data, videoUrl, segmentTimes, narrationOssKey, onU
 }) {
   const [selected, setSelected] = useState<Record<number, VideoAsset[]>>({})
   const [previewOpen, setPreviewOpen] = useState(false)
+  // 视频包下载进度: 'idle' | '准备中' | `下载 3/9` | '打包中' | '完成'
+  const [zipStatus, setZipStatus] = useState<string>('')
 
   const refresh = async (index: number, keyword: string) => {
     const updated = data.map((it, i) => i === index ? { ...it, loadingAssets: true } : it)
@@ -258,10 +261,64 @@ export function FootageGrid({ data, videoUrl, segmentTimes, narrationOssKey, onU
       .map(([i, list]) => {
         const s = data[Number(i)]
         const items = list.map((a, idx) => `  ${idx + 1}. [${a.source}] ${a.source_url}`).join('\n')
-        return `句子 ${Number(i)+1}：${s?.text}\n${items}`
+        return `句子 ${Number(i)+1}:${s?.text}\n${items}`
       }).join('\n\n---\n\n')
     const blob = new Blob([lines], { type: 'text/plain' })
     const el = document.createElement('a'); el.href = URL.createObjectURL(blob); el.download = 'footage.txt'; el.click()
+  }
+
+  /** 下载所有选中视频, 打包成 zip — 一次性给用户真视频, 不用她一个个点 Pexels 链接下载 */
+  const downloadAllVideos = async () => {
+    const allAssets = Object.entries(selected).flatMap(([i, list]) =>
+      list.map(a => ({ sentenceIdx: Number(i), text: data[Number(i)]?.text || '', asset: a }))
+    )
+    const downloadable = allAssets.filter(x => x.asset.preview_url || x.asset.oss_key)
+    if (downloadable.length === 0) {
+      setZipStatus('选中的视频没有直链可下载')
+      setTimeout(() => setZipStatus(''), 3000)
+      return
+    }
+    const zip = new JSZip()
+    setZipStatus(`准备下载 ${downloadable.length} 个视频...`)
+    let okCount = 0
+    let failCount = 0
+    for (let i = 0; i < downloadable.length; i++) {
+      const { sentenceIdx, text, asset } = downloadable[i]
+      setZipStatus(`下载中 ${i + 1}/${downloadable.length}...`)
+      const url = asset.preview_url || ''
+      if (!url) { failCount++; continue }
+      try {
+        const res = await fetch(url)
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const blob = await res.blob()
+        // 文件名: 句子序号_文本前6字_source.mp4 (避免重名 + 用户能从名字猜出是哪句)
+        const safeText = (text.slice(0, 6) || 'shot').replace(/[\\/:*?"<>|]/g, '_')
+        const ext = (url.match(/\.(mp4|mov|webm|mkv)(?:\?|$)/i)?.[1] || 'mp4').toLowerCase()
+        const fname = `${String(sentenceIdx + 1).padStart(2, '0')}_${safeText}_${asset.source}_${i}.${ext}`
+        zip.file(fname, blob)
+        okCount++
+      } catch (e) {
+        console.warn('下载失败', url, e)
+        failCount++
+      }
+    }
+    if (okCount === 0) {
+      setZipStatus(`全部 ${failCount} 个视频都下载失败 (可能 Pexels 限流), 稍后重试`)
+      setTimeout(() => setZipStatus(''), 5000)
+      return
+    }
+    setZipStatus('打包中...')
+    const content = await zip.generateAsync({ type: 'blob' }, (meta) => {
+      setZipStatus(`打包中 ${meta.percent.toFixed(0)}%...`)
+    })
+    const el = document.createElement('a')
+    el.href = URL.createObjectURL(content)
+    el.download = `footage_${Date.now()}.zip`
+    el.click()
+    setZipStatus(failCount > 0
+      ? `已下载 ${okCount} 个 (${failCount} 个失败)`
+      : `已下载 ${okCount} 个视频`)
+    setTimeout(() => setZipStatus(''), 5000)
   }
 
   const selTotal = Object.values(selected).reduce((sum, list) => sum + list.length, 0)
@@ -282,21 +339,36 @@ export function FootageGrid({ data, videoUrl, segmentTimes, narrationOssKey, onU
           }}/>
       ))}
       {selTotal > 0 && (
-        <div className="flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-[var(--bg-hover)] border border-[var(--border)]">
-          <span className="text-xs text-[var(--text-2)]">已选 {selTotal} 个素材 · 覆盖 {selSentenceCount} / {data.length} 句</span>
-          <div className="flex gap-2">
-            {videoUrl && segmentTimes && (
-              <button
-                onClick={() => setPreviewOpen(true)}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[var(--text)] text-[var(--bg)] text-xs cursor-pointer hover:opacity-80 transition-opacity"
-              >
-                <Play size={12}/> 预览效果
+        <div className="flex flex-col gap-2 px-3.5 py-2.5 rounded-xl bg-[var(--bg-hover)] border border-[var(--border)]">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <span className="text-xs text-[var(--text-2)]">已选 {selTotal} 个素材 · 覆盖 {selSentenceCount} / {data.length} 句</span>
+            <div className="flex gap-2 flex-wrap">
+              {videoUrl && segmentTimes && (
+                <button
+                  onClick={() => setPreviewOpen(true)}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[var(--text)] text-[var(--bg)] text-xs cursor-pointer hover:opacity-80 transition-opacity"
+                >
+                  <Play size={12}/> 预览效果
+                </button>
+              )}
+              <button onClick={downloadAllVideos}
+                disabled={!!zipStatus && zipStatus !== '完成'}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-[var(--border)] text-[var(--text-2)] hover:bg-[var(--bg-card)] text-xs cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                title="把选中的视频文件打包成 zip 直接下载到本地">
+                <Package size={12}/> 下载视频包
               </button>
-            )}
-            <button onClick={exportList} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-[var(--border)] text-[var(--text-2)] hover:bg-[var(--bg-card)] text-xs cursor-pointer transition-colors">
-              <Download size={12}/> 导出清单
-            </button>
+              <button onClick={exportList} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-[var(--border)] text-[var(--text-2)] hover:bg-[var(--bg-card)] text-xs cursor-pointer transition-colors"
+                title="只导出选中视频的 Pexels/Pixabay 链接 txt, 自己浏览器打开下载">
+                <Download size={12}/> 导出 URL 清单
+              </button>
+            </div>
           </div>
+          {zipStatus && (
+            <div className="text-[11px] text-[var(--text-3)] flex items-center gap-1.5">
+              {zipStatus.includes('下载中') || zipStatus.includes('打包中') ? <Loader2 size={11} className="animate-spin"/> : null}
+              {zipStatus}
+            </div>
+          )}
         </div>
       )}
 
