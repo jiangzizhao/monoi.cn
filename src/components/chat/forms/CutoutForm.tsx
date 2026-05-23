@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { X, Download, Sticker, AlertCircle } from 'lucide-react'
 import { PersonLibrary } from './PersonLibrary'
-import { fetchMyCredits } from '../../../services/billing'
+import { fetchMyCredits, chargeCredit } from '../../../services/billing'
 import { UpgradeGate } from '../../UpgradeGate'
 
 interface Props {
@@ -30,8 +30,16 @@ export function CutoutForm({ onClose }: Props) {
   // 默认 stroke 配置 — 抠图器独立用, 不带描边 (用户原图样)
   const STROKE = { enabled: false, color: '#FFFFFF', width: 0 }
 
-  const handleDownload = () => {
+  const handleDownload = async () => {
     if (!selectedUrl) return
+    // 扣 2 积分/张 (按钮按一次扣一次). 失败 (积分不足) 直接停, 不下载
+    try {
+      await chargeCredit('cutout_download', 2, selectedOssKey || `cutout_${Date.now()}`)
+    } catch (e: any) {
+      const msg = String(e?.message || '')
+      setErr(msg.includes('402') || msg.includes('积分') ? '积分不足, 去账户中心充值再来' : `扣费失败: ${msg}`)
+      return
+    }
     // 用 a 标签下载, 透明 PNG 保留
     const a = document.createElement('a')
     a.href = selectedUrl

@@ -5,6 +5,7 @@ import { useChatStore, makeAssistantMsg } from '../../../store/chatStore'
 import { TemplateCoverPicker } from './TemplateCoverPicker'
 import { getToken } from '../../../lib/auth'
 import { consumePrefill } from '../../../lib/formPrefill'
+import { chargeCredit } from '../../../services/billing'
 
 interface Props {
   // 从对话最近的合成视频或口播视频拿
@@ -549,15 +550,34 @@ export function CoverGeneratorForm({ defaultVideoOssKey, defaultVideoUrl, onClos
                     <img src={r.url} alt="" className="w-full rounded bg-black max-h-[30vh] object-contain"/>
                     <div className="flex items-center justify-between">
                       <span className="text-[11px] text-[var(--text-3)]">{r.ratio}</span>
-                      <a
-                        href={r.url}
-                        download={`cover-${r.ratio.replace(':', 'x')}.jpg`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1 text-[11px] text-[var(--text)] hover:opacity-80 cursor-pointer"
+                      <button
+                        onClick={async () => {
+                          // 扣 2 积分/张 (按下载键一次扣一次). 失败就停, 不下载
+                          try {
+                            await chargeCredit('cover_download', 2, `cover_${r.ratio}_${Date.now()}`)
+                          } catch (e: any) {
+                            const msg = String(e?.message || '')
+                            alert(msg.includes('402') || msg.includes('积分') ? '积分不足, 去账户中心充值再来' : `扣费失败: ${msg}`)
+                            return
+                          }
+                          try {
+                            // 直接 fetch + blob 下载, 不靠 <a download> (a download 同源策略下 OSS URL 不一定生效)
+                            const res = await fetch(r.url)
+                            const blob = await res.blob()
+                            const a = document.createElement('a')
+                            a.href = URL.createObjectURL(blob)
+                            a.download = `cover-${r.ratio.replace(':', 'x')}.jpg`
+                            document.body.appendChild(a); a.click(); document.body.removeChild(a)
+                          } catch {
+                            // fetch 失败的兜底: 用旧的新窗口打开
+                            window.open(r.url, '_blank')
+                          }
+                        }}
+                        className="inline-flex items-center gap-1 text-[11px] text-[var(--text)] hover:opacity-80 cursor-pointer bg-transparent border-0 p-0"
+                        title="下载这张封面, 扣 2 积分"
                       >
                         <DownloadIcon size={11}/> 下载
-                      </a>
+                      </button>
                     </div>
                   </div>
                 ))}

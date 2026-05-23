@@ -1167,7 +1167,12 @@ class ChargeRequest(BaseModel):
 
 # 仅允许这些 feature 走前端上报, 防恶意客户端绕过扣费
 # footage_download: 用户下载 b-roll 视频包, 按数量扣 (2 积分/视频), 多选时 amount 可能超 50
-_ALLOWED_CHARGE_FEATURES = {'ai_writing', 'footage_match', 'ai_writing_regen', 'footage_download'}
+# cover_download: 用户下载已生成的封面图 (2 积分/张, 按下载按钮一次扣一次)
+# cutout_download: 用户下载抠图透明 PNG (2 积分/张)
+_ALLOWED_CHARGE_FEATURES = {
+    'ai_writing', 'footage_match', 'ai_writing_regen',
+    'footage_download', 'cover_download', 'cutout_download',
+}
 
 
 @router.post("/charge")
