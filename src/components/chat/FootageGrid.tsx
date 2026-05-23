@@ -1,11 +1,16 @@
 import { useRef, useState } from 'react'
-import { RefreshCw, Pencil, Download, Check, ExternalLink, Play, Upload, Loader2, Package } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { RefreshCw, Pencil, Download, Check, ExternalLink, Play, Upload, Loader2, Package, Lock } from 'lucide-react'
 import JSZip from 'jszip'
 import { Badge } from '../ui/Badge'
 import { searchPexels } from '../../services/pexels'
 import { searchPixabay } from '../../services/pixabay'
+import { fetchMyCredits, chargeCredit } from '../../services/billing'
 import type { FootageSentenceItem, VideoAsset } from '../../types'
 import { TimelinePreview } from './TimelinePreview'
+
+// 下载视频包扣费规则: 2 积分/视频. 跟用户拍板对齐.
+const FOOTAGE_DOWNLOAD_CREDITS_PER_VIDEO = 2
 
 // 浏览器侧截视频首帧做缩略图 (avoid 上传服务器再下回来)
 // .mov HEVC 等浏览器无法解码的格式不触发 onseeked → 加 5s timeout 兜底
@@ -236,6 +241,9 @@ export function FootageGrid({ data, videoUrl, segmentTimes, narrationOssKey, onU
   const [previewOpen, setPreviewOpen] = useState(false)
   // 视频包下载进度: 'idle' | '准备中' | `下载 3/9` | '打包中' | '完成'
   const [zipStatus, setZipStatus] = useState<string>('')
+  // 免费用户点下载视频包 → 弹升级 modal
+  const [upgradeOpen, setUpgradeOpen] = useState(false)
+  const nav = useNavigate()
 
   const refresh = async (index: number, keyword: string) => {
     const updated = data.map((it, i) => i === index ? { ...it, loadingAssets: true } : it)
@@ -267,7 +275,8 @@ export function FootageGrid({ data, videoUrl, segmentTimes, narrationOssKey, onU
     const el = document.createElement('a'); el.href = URL.createObjectURL(blob); el.download = 'footage.txt'; el.click()
   }
 
-  /** 下载所有选中视频, 打包成 zip — 一次性给用户真视频, 不用她一个个点 Pexels 链接下载 */
+  /** 下载所有选中视频, 打包成 zip — 一次性给用户真视频, 不用她一个个点 Pexels 链接下载.
+   * 免费用户挡: 弹升级 modal. 付费用户: 按数量扣 2 积分/视频, 扣完才真下. */
   const downloadAllVideos = async () => {
     const allAssets = Object.entries(selected).flatMap(([i, list]) =>
       list.map(a => ({ sentenceIdx: Number(i), text: data[Number(i)]?.text || '', asset: a }))
@@ -278,6 +287,34 @@ export function FootageGrid({ data, videoUrl, segmentTimes, narrationOssKey, onU
       setTimeout(() => setZipStatus(''), 3000)
       return
     }
+
+    // tier 检查: 免费用户挡, 弹升级 modal (不扣费, 不下载)
+    setZipStatus('检查套餐...')
+    try {
+      const c = await fetchMyCredits()
+      if (c.tier === 'free') {
+        setZipStatus('')
+        setUpgradeOpen(true)
+        return
+      }
+    } catch (e) {
+      setZipStatus('套餐检查失败, 请重试')
+      setTimeout(() => setZipStatus(''), 3000)
+      return
+    }
+
+    // 扣费 — 2 积分/视频. 失败 (余额不足 402) 直接停, 不进 zip 流程
+    const cost = downloadable.length * FOOTAGE_DOWNLOAD_CREDITS_PER_VIDEO
+    setZipStatus(`扣费 ${cost} 积分中...`)
+    try {
+      await chargeCredit('footage_download', cost, `footage_${Date.now()}`)
+    } catch (e: any) {
+      const msg = String(e?.message || '')
+      setZipStatus(msg.includes('402') || msg.includes('积分') ? '积分不足, 去账户中心充值' : `扣费失败: ${msg}`)
+      setTimeout(() => setZipStatus(''), 5000)
+      return
+    }
+
     const zip = new JSZip()
     setZipStatus(`准备下载 ${downloadable.length} 个视频...`)
     let okCount = 0
@@ -354,7 +391,7 @@ export function FootageGrid({ data, videoUrl, segmentTimes, narrationOssKey, onU
               <button onClick={downloadAllVideos}
                 disabled={!!zipStatus && zipStatus !== '完成'}
                 className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-[var(--border)] text-[var(--text-2)] hover:bg-[var(--bg-card)] text-xs cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                title="把选中的视频文件打包成 zip 直接下载到本地">
+                title={`Pro 及以上专享 · 扣 ${selTotal * FOOTAGE_DOWNLOAD_CREDITS_PER_VIDEO} 积分把选中的 ${selTotal} 个视频打包下载`}>
                 <Package size={12}/> 下载视频包
               </button>
               <button onClick={exportList} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-[var(--border)] text-[var(--text-2)] hover:bg-[var(--bg-card)] text-xs cursor-pointer transition-colors"
@@ -381,6 +418,34 @@ export function FootageGrid({ data, videoUrl, segmentTimes, narrationOssKey, onU
           selected={selected}
           onClose={() => setPreviewOpen(false)}
         />
+      )}
+
+      {/* 免费用户点 下载视频包 → 升级 Pro/Max modal */}
+      {upgradeOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={() => setUpgradeOpen(false)}>
+          <div onClick={e => e.stopPropagation()} className="relative bg-[var(--bg-card)] border border-[var(--border)] rounded-2xl shadow-ios-lg w-full max-w-sm p-6 flex flex-col gap-4">
+            <div className="flex items-center gap-2">
+              <Lock size={18} className="text-amber-500"/>
+              <div className="text-base font-semibold">下载视频包是付费功能</div>
+            </div>
+            <p className="text-sm text-[var(--text-2)] leading-relaxed">
+              批量下载素材需要升级到 <b>Pro</b> 或更高套餐. 升级后扣 <b>2 积分/视频</b>, 不限次.
+            </p>
+            <div className="text-xs text-[var(--text-3)] bg-[var(--bg-hover)] rounded-lg p-3 leading-relaxed">
+              想免费体验? 你可以点 "<b>导出 URL 清单</b>" 按钮拿到 Pexels/Pixabay 链接, 自己浏览器打开下载是免费的.
+            </p>
+            <div className="flex gap-2">
+              <button onClick={() => setUpgradeOpen(false)}
+                className="flex-1 py-2 rounded-lg border border-[var(--border)] text-[var(--text-2)] text-sm hover:bg-[var(--bg-hover)] cursor-pointer">
+                先不升级
+              </button>
+              <button onClick={() => { setUpgradeOpen(false); nav('/app/account#membership') }}
+                className="flex-1 py-2 rounded-lg bg-[var(--text)] text-[var(--bg)] text-sm hover:opacity-80 cursor-pointer">
+                去升级
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

@@ -1166,7 +1166,8 @@ class ChargeRequest(BaseModel):
 
 
 # 仅允许这些 feature 走前端上报, 防恶意客户端绕过扣费
-_ALLOWED_CHARGE_FEATURES = {'ai_writing', 'footage_match', 'ai_writing_regen'}
+# footage_download: 用户下载 b-roll 视频包, 按数量扣 (2 积分/视频), 多选时 amount 可能超 50
+_ALLOWED_CHARGE_FEATURES = {'ai_writing', 'footage_match', 'ai_writing_regen', 'footage_download'}
 
 
 @router.post("/charge")
@@ -1176,8 +1177,8 @@ def charge(req: ChargeRequest, request: Request):
     user_id = get_current_user_id(request)
     if req.feature not in _ALLOWED_CHARGE_FEATURES:
         raise HTTPException(400, f"不允许扣费的 feature: {req.feature}")
-    if req.amount <= 0 or req.amount > 50:
-        raise HTTPException(400, "amount 必须在 1-50 之间")
+    if req.amount <= 0 or req.amount > 200:
+        raise HTTPException(400, "amount 必须在 1-200 之间")
     consume_credits(user_id, req.feature, req.amount, ref_id=req.ref_id)
     bal = get_balance(user_id)
     return {'success': True, 'balance': bal}
