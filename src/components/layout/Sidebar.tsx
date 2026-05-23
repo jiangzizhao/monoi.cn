@@ -21,7 +21,13 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
   const isAdmin = !!me?.is_admin
 
   useEffect(() => {
-    if (isLoggedIn()) fetchMyProfile().then(setMe).catch(() => {})
+    const reload = () => {
+      if (isLoggedIn()) fetchMyProfile().then(setMe).catch(() => {})
+    }
+    reload()
+    // Account 改完头像/用户名后会 dispatch 这个事件, 听到就重新拉一遍
+    window.addEventListener('monoi:profile-updated', reload)
+    return () => window.removeEventListener('monoi:profile-updated', reload)
   }, [])
 
   const handleLogout = () => {

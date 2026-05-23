@@ -427,6 +427,8 @@ function ProfileTab({ me, sub, credits, refCode, plans, onReload }: {
       await updateProfile({ avatar_oss_key: oss_key })
       setMsg('头像已更新')
       onReload()
+      // 通知 Sidebar / AppShell 重新拉 profile, 否则它们用挂载时的旧头像直到页面刷新
+      window.dispatchEvent(new CustomEvent('monoi:profile-updated'))
     } catch (e: any) {
       setMsg(e.message || '上传失败')
     } finally {

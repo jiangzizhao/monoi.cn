@@ -714,12 +714,15 @@ def get_me(request: Request):
     if not row:
         raise HTTPException(404, '用户不存在')
     d = dict(row)
-    # 头像签名 URL (avatar_oss_key 是裸 key, 签 6 小时 GET URL 给前端)
+    # 头像签名 URL (avatar_oss_key 是裸 key, 签 7 天 GET URL 给前端)
+    # 之前 6h 用户反馈"头像又没了" — 改 7 天大幅缓解
+    # 签名失败不再静默, 打 log 方便排查 (用户反馈过头像间歇性消失)
     if d.get('avatar_oss_key'):
         try:
             from oss_helper import oss_sign_get
-            d['avatar_url'] = oss_sign_get(d['avatar_oss_key'], expires=6 * 3600)
-        except Exception:
+            d['avatar_url'] = oss_sign_get(d['avatar_oss_key'], expires=7 * 24 * 3600)
+        except Exception as _ae:
+            print(f"[api/me] 头像签名失败 user={user_id} key={d.get('avatar_oss_key')} err={_ae}", flush=True)
             d['avatar_url'] = ''
     else:
         d['avatar_url'] = ''
