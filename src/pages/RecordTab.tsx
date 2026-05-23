@@ -30,6 +30,10 @@ export default function RecordTab() {
   const [recordedUrl, setRecordedUrl] = useState<string>('')
   const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null)
   const [error, setError] = useState('')
+  // 跨设备摄像头管理: enumerateDevices 列出所有 videoinput, 让用户能切换
+  // (寻影 / iPhone Continuity / USB 外接 / Mac 内置 都在这个列表里)
+  const [availableCameras, setAvailableCameras] = useState<MediaDeviceInfo[]>([])
+  const [selectedCameraId, setSelectedCameraId] = useState<string>('')
 
   const screenVideoRef = useRef<HTMLVideoElement | null>(null)
   const cameraVideoRef = useRef<HTMLVideoElement | null>(null)
@@ -117,43 +121,97 @@ export default function RecordTab() {
       else setError(`获取屏幕失败: ${e.message || e}`)
     }
   }
-  const requestCamera = async () => {
+  /** 枚举 Chrome 看到的所有摄像头 — 调试 + 让用户切换源 (寻影 / iPhone / USB 都列). */
+  const refreshCameras = async (): Promise<MediaDeviceInfo[]> => {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices()
+      const cams = devices.filter(d => d.kind === 'videoinput')
+      setAvailableCameras(cams)
+      return cams
+    } catch { return [] }
+  }
+
+  /** 获取摄像头. deviceId 可选 (从下拉切换源用). 没传就让浏览器自选. */
+  const requestCamera = async (deviceId?: string) => {
     setError('')
-    // 不写死 width/height (Mac 摄像头有时 exact 640x480 不匹配 → NotFoundError).
-    // 先试纯 video:true (浏览器选最合适), 失败再退到 ideal 软约束
-    const tryGet = async (constraints: MediaStreamConstraints) =>
+    // 切换源: 关掉旧 stream 再请求新的
+    if (deviceId && cameraStream) {
+      cameraStream.getTracks().forEach(t => t.stop())
+      setCameraStream(null)
+    }
+    const tryGet = (constraints: MediaStreamConstraints) =>
       navigator.mediaDevices.getUserMedia(constraints)
     try {
       let s: MediaStream
-      try {
-        s = await tryGet({ video: true, audio: { echoCancellation: true, noiseSuppression: true } })
-      } catch {
-        // 兜底: 摄像头要求软约束 (ideal 不是 exact, 任何分辨率都接受)
-        s = await tryGet({
-          video: { width: { ideal: 640 }, height: { ideal: 480 } },
-          audio: { echoCancellation: true, noiseSuppression: true },
-        })
+      const baseAudio = { echoCancellation: true, noiseSuppression: true }
+      if (deviceId) {
+        // 用户指定了源 → exact deviceId
+        s = await tryGet({ video: { deviceId: { exact: deviceId } }, audio: baseAudio })
+      } else {
+        // 没指定 → 软约束让浏览器选 (寻影虚拟摄像头如果是默认源会被选中)
+        try {
+          s = await tryGet({ video: true, audio: baseAudio })
+        } catch {
+          s = await tryGet({ video: { width: { ideal: 640 }, height: { ideal: 480 } }, audio: baseAudio })
+        }
       }
       setCameraStream(s)
+      setSelectedCameraId(s.getVideoTracks()[0]?.getSettings().deviceId || '')
+      await refreshCameras()  // 授权后 label 才有内容 (浏览器隐私规则)
       if (screenStream || phase === 'setup') setPhase('previewing')
     } catch (e: any) {
-      const name = e?.name || ''
-      const isMac = /Mac/i.test(navigator.userAgent)
-      if (name === 'NotAllowedError') {
-        setError(isMac
-          ? '摄像头被拒. 去 macOS 系统设置 → 隐私与安全 → 摄像头 → 勾选 Chrome / Edge, 重启浏览器'
-          : '你拒绝了摄像头/麦克风权限. 浏览器地址栏左侧的锁图标里改')
-      } else if (name === 'NotFoundError' || name === 'OverconstrainedError') {
-        setError(isMac
-          ? '没找到摄像头. 检查: 1) macOS 系统设置 → 隐私 → 摄像头 是否允许浏览器; 2) 摄像头有没有被 Zoom/腾讯会议/OBS 占用; 3) 外接摄像头线松了'
-          : '没找到摄像头. 检查浏览器隐私设置或外接摄像头连接')
-      } else if (name === 'NotReadableError') {
-        setError('摄像头被别的程序占用了 (Zoom / 腾讯会议 / OBS / FaceTime 等), 关掉那个再试')
-      } else {
-        setError(`获取摄像头失败: ${e?.message || e}`)
-      }
+      const cams = await refreshCameras()
+      handleCameraError(e, cams)
     }
   }
+
+  /** 分平台 + 分场景的错误提示 — 帮用户最快定位 */
+  const handleCameraError = (e: any, cams: MediaDeviceInfo[]) => {
+    const name = e?.name || ''
+    const ua = typeof navigator !== 'undefined' ? navigator.userAgent : ''
+    const isMac = /Mac/i.test(ua)
+    const isWin = /Windows/i.test(ua)
+    const isChrome = /Chrome/i.test(ua) && !/Edg/i.test(ua)
+    const isEdge = /Edg/i.test(ua)
+    const isSafari = /Safari/i.test(ua) && !/Chrome/i.test(ua)
+    const browserName = isEdge ? 'Microsoft Edge' : isChrome ? 'Chrome' : isSafari ? 'Safari' : '浏览器'
+
+    if (name === 'NotAllowedError') {
+      if (isMac) setError(`摄像头被拒. macOS 系统设置 → 隐私与安全 → 摄像头 → 勾选 ${browserName}, 然后完全退出 ${browserName} (Cmd+Q) 重启再试`)
+      else if (isWin) setError(`摄像头被拒. Windows 设置 → 隐私和安全性 → 摄像头 → 允许桌面应用访问 → 找到 ${browserName} 勾上`)
+      else setError(`${browserName} 拒绝了摄像头权限. 地址栏左侧锁图标里改成允许`)
+      return
+    }
+
+    if (name === 'NotFoundError' || name === 'OverconstrainedError') {
+      // 关键判断: 系统里到底有没有摄像头硬件 (Chrome 能不能看到)
+      if (cams.length === 0) {
+        // Chrome 完全看不到任何摄像头硬件
+        if (isMac) setError(`${browserName} 检测不到任何摄像头. 可能原因: 1) Mac mini 没内置摄像头, 需要插 USB 或开寻影/Continuity Camera; 2) 寻影 Mac 端没运行 (打开寻影大师 + iPhone 端寻影 app, 确认 Mac 端能看 iPhone 画面再试); 3) Continuity Camera 需要 iPhone XR+, 跟 Mac 同 Apple ID, 接力开关打开`)
+        else if (isWin) setError(`${browserName} 检测不到任何摄像头. 检查 USB 摄像头是否插好, 设备管理器里看摄像头是不是禁用了, 或重启浏览器`)
+        else setError(`${browserName} 检测不到任何摄像头. 检查硬件连接和系统权限`)
+      } else {
+        // 有摄像头但请求失败 — 一般是 deviceId 失效或约束不匹配
+        setError(`${browserName} 检测到 ${cams.length} 个摄像头但都用不了, 试试下拉切换其他源`)
+      }
+      return
+    }
+
+    if (name === 'NotReadableError') {
+      setError('摄像头被别的程序占用了 (Zoom / 腾讯会议 / OBS / FaceTime / 寻影 等). 关掉所有占用摄像头的 app 再试')
+      return
+    }
+
+    setError(`获取摄像头失败 (${name}): ${e?.message || e}`)
+  }
+
+  // 挂载时枚举一次 — 给用户看 Chrome 默认能看到啥 (没授权前 label 是空, 但能知道数量)
+  useEffect(() => {
+    refreshCameras()
+    // 用户插拔设备时也刷新
+    navigator.mediaDevices?.addEventListener?.('devicechange', refreshCameras)
+    return () => navigator.mediaDevices?.removeEventListener?.('devicechange', refreshCameras)
+  }, [])
   const onPresetPick = async (preset: string) => {
     setError('')
     if (preset === 'screen_camera' || preset === 'window_camera') {
@@ -237,8 +295,25 @@ export default function RecordTab() {
         <div className="max-w-3xl mx-auto px-4 py-8 flex flex-col gap-6">
 
           {error && (
-            <div className="text-sm text-red-400 bg-red-950/20 border border-red-900/30 rounded-lg px-3 py-2 flex items-start gap-2">
-              <AlertCircle size={14} className="mt-0.5 flex-shrink-0"/><span>{error}</span>
+            <div className="text-sm text-red-400 bg-red-950/20 border border-red-900/30 rounded-lg px-3 py-2 flex flex-col gap-2">
+              <div className="flex items-start gap-2">
+                <AlertCircle size={14} className="mt-0.5 flex-shrink-0"/>
+                <span className="leading-relaxed">{error}</span>
+              </div>
+              {/* 调试信息: 显示浏览器看到的摄像头列表, 帮用户判断是不是寻影/iPhone 没被识别 */}
+              {availableCameras.length > 0 && (
+                <div className="text-[11px] text-red-300/80 border-t border-red-900/30 pt-2 mt-1">
+                  浏览器检测到 {availableCameras.length} 个摄像头:
+                  {availableCameras.map((c, i) => (
+                    <div key={i} className="pl-3">· {c.label || `(未授权, 设备 ID ${c.deviceId.slice(0, 8)}...)`}</div>
+                  ))}
+                </div>
+              )}
+              {availableCameras.length === 0 && (
+                <div className="text-[11px] text-red-300/80 border-t border-red-900/30 pt-2 mt-1">
+                  浏览器一个摄像头都检测不到. 寻影 / 外接 / 内置都没看见.
+                </div>
+              )}
             </div>
           )}
 
@@ -298,6 +373,19 @@ export default function RecordTab() {
                 <p className="text-[11px] text-[var(--text-3)] text-center">
                   💡 屏幕共享建议选**单个应用窗口** (如 PPT / Keynote / 浏览器某个标签页), 不要选"整个屏幕" — 否则录到 monoi 自己, 画面套娃无限镜子.
                 </p>
+              )}
+
+              {/* 摄像头源切换 — 多个摄像头时显示下拉 (寻影/iPhone/USB/内置), 单个不显示 */}
+              {cameraStream && availableCameras.length > 1 && phase === 'previewing' && (
+                <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] p-3 flex items-center gap-3">
+                  <span className="text-xs text-[var(--text-3)] flex-shrink-0">摄像头源:</span>
+                  <select value={selectedCameraId} onChange={e => requestCamera(e.target.value)}
+                    className="flex-1 bg-[var(--bg-input)] border border-[var(--border)] rounded-lg px-2 py-1.5 text-xs text-[var(--text)] cursor-pointer">
+                    {availableCameras.map(c => (
+                      <option key={c.deviceId} value={c.deviceId}>{c.label || `摄像头 ${c.deviceId.slice(0, 6)}`}</option>
+                    ))}
+                  </select>
+                </div>
               )}
 
               {showPipSettings && (
@@ -396,7 +484,7 @@ export default function RecordTab() {
 
           {/* 工具栏图标 (跟 ChatInput 文案/配音/口播/封面/抠图 那行一致风格) */}
           <div className="flex items-center gap-1 mt-3 px-1">
-            <button onClick={requestCamera} disabled={!!cameraStream || phase === 'recording'}
+            <button onClick={() => requestCamera()} disabled={!!cameraStream || phase === 'recording'}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${cameraStream ? 'text-green-500' : 'text-[var(--text-3)] hover:text-[var(--text-2)] hover:bg-[var(--bg-hover)]'}`}
               title="摄像头 + 麦克风">
               <Camera size={14}/> 摄像头
