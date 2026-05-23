@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useChatStore } from '../../store/chatStore'
 import { getUsername, logout, isLoggedIn } from '../../lib/auth'
 import { fetchMyProfile, type UserProfile } from '../../services/billing'
+import { TopTabBar } from './TopTabBar'
 
 function timeAgo(ts: number) {
   const diff = Date.now() - ts
@@ -47,8 +48,11 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
 
   return (
     <div className="flex flex-col h-full bg-[var(--bg)] border-r border-[var(--border)]">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-4 border-b border-[var(--border)]">
+      {/* 顶部 tab (创作 / 录屏 / 闪说) — 跟 Claude UI 一致, 放在侧栏最顶上 */}
+      <TopTabBar onPick={onClose}/>
+
+      {/* Header (monoi logo + 新对话+号) */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
         <div className="flex items-center gap-2">
           <img src="/logo.png" alt="monoi" className="w-7 h-7 rounded-lg object-contain"/>
           <span className="text-sm font-semibold text-[var(--text)]">monoi</span>

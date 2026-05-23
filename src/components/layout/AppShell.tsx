@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react'
 import { Menu, Plus } from 'lucide-react'
 import { Link, Outlet, useLocation } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
-import { TopTabBar } from './TopTabBar'
 import { useChatStore } from '../../store/chatStore'
 import { fetchMyProfile, type UserProfile } from '../../services/billing'
 import { isLoggedIn } from '../../lib/auth'
@@ -69,10 +68,7 @@ export function AppShell() {
           </div>
         </div>
 
-        {/* 顶部 tab bar (创作 / 录屏 / 闪说) */}
-        <TopTabBar/>
-
-        {/* 各 tab 内容 */}
+        {/* 各 tab 内容 — 顶部 tab bar 在 Sidebar 顶部, 不在这里 */}
         <Outlet/>
       </div>
     </div>
