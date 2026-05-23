@@ -582,7 +582,7 @@ export async function callFootageAIBySegments(
   return obj.keywords.slice(0, segments.length) as FootageKeywords[]
 }
 
-// 宽松 JSON 解析: 先去掉 markdown fence, 再 parse, 失败再用启发式修复 (常见: 末尾被截断 / 多余逗号)
+// 宽松 JSON 解析: 先去掉 markdown fence, 再 parse, 失败再用 jsonrepair / 启发式修复
 function tryParseJsonLoose(raw: string): any {
   const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim()
   try {
@@ -592,6 +592,8 @@ function tryParseJsonLoose(raw: string): any {
   const match = cleaned.match(/\{[\s\S]*\}/)
   if (match) {
     try { return JSON.parse(match[0]) } catch {}
+    // 修复 0: jsonrepair (常见 LLM 错: 缺引号 / 缺逗号 / 缺右括号 — 比手工修更全面)
+    try { return JSON.parse(jsonrepair(match[0])) } catch {}
     // 修复 1: 去掉末尾多余逗号 (e.g. "...,]" "...,}")
     const fixed = match[0].replace(/,\s*([}\]])/g, '$1')
     try { return JSON.parse(fixed) } catch {}
@@ -601,51 +603,47 @@ function tryParseJsonLoose(raw: string): any {
       // 往前找完整的 keywords 数组结束
       const truncated = match[0].slice(0, lastBrace + 1) + ']}'
       try { return JSON.parse(truncated) } catch {}
+      // 最后 jsonrepair 兜底
+      try { return JSON.parse(jsonrepair(truncated)) } catch {}
     }
   }
-  throw new Error(`AI 返回的 JSON 解析失败: ${cleaned.slice(0, 200)}...`)
+  throw new Error('AI 返回的 JSON 格式有问题, 请点重试一次. 一直失败请联系客服.')
 }
 
 export async function callFootageAI(
   script: string,
   signal?: AbortSignal
 ): Promise<FootageSentence[]> {
-  const res = await fetchWithRetry('/api/chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      system: FOOTAGE_SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: script }],
-      stream: true,
-    }),
-    signal,
-  })
-  if (!res.ok) throw new Error(`API ${res.status}`)
-  const reader = res.body!.getReader()
-  const decoder = new TextDecoder()
-  let full = ''
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    const chunk = decoder.decode(value, { stream: true })
-    for (const line of chunk.split('\n')) {
-      if (!line.startsWith('data: ')) continue
-      const data = line.slice(6).trim()
-      if (data === '[DONE]') continue
-      try {
-        const parsed = JSON.parse(data)
-        const text = parsed.delta?.text || parsed.choices?.[0]?.delta?.content || ''
-        if (text) full += text
-      } catch {}
-    }
+  // 改用 json_mode 非流式 + jsonrepair 兜底, 跟 callFootageAIBySegments 一致.
+  // 之前 stream + naive JSON.parse 经常因为 AI 输出末尾被截断/缺逗号而炸,
+  // 用户看到 'Expected ,, or }, at position 439' 完全看不懂.
+  const callOnce = async (): Promise<any> => {
+    const r = await fetchWithRetry('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        system: FOOTAGE_SYSTEM_PROMPT,
+        messages: [{ role: 'user', content: script }],
+        stream: false,
+        json_mode: true,
+      }),
+      signal,
+    })
+    if (!r.ok) throw new Error(`API ${r.status}`)
+    const data = await r.json()
+    const content = data?.choices?.[0]?.message?.content || ''
+    return tryParseJsonLoose(content)
   }
-  // 解析 JSON
-  const cleaned = full.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim()
-  const match = cleaned.match(/\{[\s\S]*\}/)
-  if (!match) throw new Error('AI 没返回有效 JSON')
-  const obj = JSON.parse(match[0])
+
+  let obj: any
+  try {
+    obj = await callOnce()
+  } catch (_e) {
+    // 重试 1 次 — AI 偶尔抽风返回截断/畸形 JSON, 大多重试就好
+    obj = await callOnce()
+  }
   if (!Array.isArray(obj?.sentences) || obj.sentences.length === 0) {
-    throw new Error('AI 返回的 sentences 为空')
+    throw new Error('AI 拆句失败 — 文案可能太短或格式特殊. 试试更长的文案或联系客服.')
   }
   return obj.sentences as FootageSentence[]
 }
