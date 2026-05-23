@@ -5,8 +5,6 @@ import { useChatStore, makeAssistantMsg } from '../../../store/chatStore'
 import { TemplateCoverPicker } from './TemplateCoverPicker'
 import { getToken } from '../../../lib/auth'
 import { consumePrefill } from '../../../lib/formPrefill'
-import { fetchMyCredits } from '../../../services/billing'
-import { UpgradeGate } from '../../UpgradeGate'
 
 interface Props {
   // 从对话最近的合成视频或口播视频拿
@@ -29,12 +27,6 @@ const RATIOS: { id: Ratio; label: string }[] = [
 ]
 
 export function CoverGeneratorForm({ defaultVideoOssKey, defaultVideoUrl, onClose }: Props) {
-  // 准入: Pro 及以上才能用. 免费用户弹升级 modal
-  const [tier, setTier] = useState<string | null>(null)
-  useEffect(() => {
-    fetchMyCredits().then(c => setTier(c.tier)).catch(() => setTier('free'))
-  }, [])
-
   // Agentic AI 串步预填: AI 写好标题/副标题后直接生成封面
   const initial = consumePrefill<{ title?: string; subtitle?: string; ratios?: string[] }>('__form_cover__')
 
@@ -224,11 +216,6 @@ export function CoverGeneratorForm({ defaultVideoOssKey, defaultVideoUrl, onClos
   }
 
   const fmt = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`
-
-  // 免费用户 → 直接弹升级 modal, 不渲染封面表单
-  if (tier === 'free') {
-    return <UpgradeGate featureName="封面生成" minTier="Pro" onClose={onClose}/>
-  }
 
   const modal = (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={onClose}>

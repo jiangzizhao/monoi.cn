@@ -2805,16 +2805,10 @@ async def cover_remove_bg_proxy(request: Request):
 @app.post("/api/voice/render-cover-from-template")
 def render_cover_from_template_proxy(req: dict, request: Request):
     """转发到 voice-server: 按模板渲染封面. 扣 5 积分 (rembg 抠图 + Pillow 渲染).
-    准入: Pro 套餐及以上 (免费用户被挡, 抛 402). admin 跳过."""
+    准入: 免费用户也能用 (跟套餐表"免费包含封面" 一致), 仅扣积分."""
     import requests as _req
     try:
         _uid = _user_id_from_request(request)
-        # admin 跳过 tier 检查
-        from billing import get_db as _gdb
-        _ar = _gdb().execute("SELECT is_admin FROM users WHERE id = ?", (_uid,)).fetchone()
-        if not (_ar and _ar['is_admin']):
-            from billing import check_feature_tier
-            check_feature_tier(_uid, '封面生成', 'pro_monthly')
         from billing import consume_credits
         consume_credits(_uid, 'cover_template', 5, ref_id=str(req.get('template_id') or ''))
     except HTTPException: raise
