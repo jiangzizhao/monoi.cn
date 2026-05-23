@@ -7,6 +7,9 @@ import Login from './pages/Login'
 import Register from './pages/Register'
 import Account from './pages/Account'
 import Admin from './pages/Admin'
+import ChatTab from './pages/ChatTab'
+import RecordTab from './pages/RecordTab'
+import VoiceTab from './pages/VoiceTab'
 import { isLoggedIn } from './lib/auth'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -77,13 +80,20 @@ export default function App() {
           <Route path="/" element={<Landing/>}/>
           <Route path="/login" element={<Login/>}/>
           <Route path="/register" element={<Register/>}/>
+          {/* /app 改成 layout + 子 tab 路由. AppShell 是壳 (sidebar + topbar + outlet),
+              各 tab 内容在子路由 page 里. /app 默认重定向 /app/chat (创作) */}
           <Route path="/app" element={
             <ProtectedRoute>
               <AppErrorBoundary>
                 <AppShell/>
               </AppErrorBoundary>
             </ProtectedRoute>
-          }/>
+          }>
+            <Route index element={<Navigate to="/app/chat" replace/>}/>
+            <Route path="chat"   element={<ChatTab/>}/>
+            <Route path="record" element={<RecordTab/>}/>
+            <Route path="voice"  element={<VoiceTab/>}/>
+          </Route>
           <Route path="/app/account" element={
             <ProtectedRoute>
               <Account/>
