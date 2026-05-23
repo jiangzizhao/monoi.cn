@@ -208,18 +208,19 @@ export default function Landing() {
       </section>
 
       {/* =============== 示例视频墙 (auto-scroll marquee) =============== */}
-      <section id="examples" className="py-12 sm:py-20 overflow-hidden">
+      <section id="examples" className="py-12 sm:py-20 max-w-6xl mx-auto">
         <div className="text-center mb-8 sm:mb-12 px-4">
           <h2 className="text-2xl sm:text-4xl font-bold mb-3">用 monoi 已经做出的视频</h2>
           <p className="text-sm text-[var(--text-3)]">真实用户作品 · 一句话生成的完整短视频</p>
         </div>
-        {/* 跑马灯: 复制一份元素拼接, animation 平移 50% 形成无缝循环. hover 暂停让用户看清 */}
-        <div className="relative" onMouseEnter={e => { (e.currentTarget.querySelector('[data-marquee]') as HTMLElement)?.style.setProperty('animation-play-state', 'paused') }}
+        {/* 跑马灯: 复制一份元素拼接, animation 平移 50% 形成无缝循环. 容器 overflow-hidden 限制宽度. hover 暂停 */}
+        <div className="relative overflow-hidden mx-4 sm:mx-0"
+          onMouseEnter={e => { (e.currentTarget.querySelector('[data-marquee]') as HTMLElement)?.style.setProperty('animation-play-state', 'paused') }}
           onMouseLeave={e => { (e.currentTarget.querySelector('[data-marquee]') as HTMLElement)?.style.setProperty('animation-play-state', 'running') }}>
           <div data-marquee className="flex gap-3 sm:gap-4 w-max animate-marquee">
             {[...Array(2)].flatMap((_, dup) =>
               [...Array(6)].map((_, i) => (
-                <div key={`${dup}-${i}`} className="flex-shrink-0 w-40 sm:w-48">
+                <div key={`${dup}-${i}`} className="flex-shrink-0 w-36 sm:w-44">
                   <div className="aspect-[9/16] rounded-2xl bg-gradient-to-br from-[var(--bg-card)] to-[var(--bg-hover)] border border-[var(--border)] flex items-center justify-center cursor-pointer hover:scale-105 transition-transform group relative overflow-hidden">
                     <div className="absolute inset-0 flex items-center justify-center">
                       <div className="w-12 h-12 rounded-full bg-white/90 flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
