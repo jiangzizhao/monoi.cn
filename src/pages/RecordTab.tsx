@@ -119,16 +119,39 @@ export default function RecordTab() {
   }
   const requestCamera = async () => {
     setError('')
+    // 不写死 width/height (Mac 摄像头有时 exact 640x480 不匹配 → NotFoundError).
+    // 先试纯 video:true (浏览器选最合适), 失败再退到 ideal 软约束
+    const tryGet = async (constraints: MediaStreamConstraints) =>
+      navigator.mediaDevices.getUserMedia(constraints)
     try {
-      const s = await navigator.mediaDevices.getUserMedia({
-        video: { width: 640, height: 480 },
-        audio: { echoCancellation: true, noiseSuppression: true },
-      })
+      let s: MediaStream
+      try {
+        s = await tryGet({ video: true, audio: { echoCancellation: true, noiseSuppression: true } })
+      } catch {
+        // 兜底: 摄像头要求软约束 (ideal 不是 exact, 任何分辨率都接受)
+        s = await tryGet({
+          video: { width: { ideal: 640 }, height: { ideal: 480 } },
+          audio: { echoCancellation: true, noiseSuppression: true },
+        })
+      }
       setCameraStream(s)
       if (screenStream || phase === 'setup') setPhase('previewing')
     } catch (e: any) {
-      if (e.name === 'NotAllowedError') setError('你拒绝了摄像头/麦克风权限')
-      else setError(`获取摄像头失败: ${e.message || e}`)
+      const name = e?.name || ''
+      const isMac = /Mac/i.test(navigator.userAgent)
+      if (name === 'NotAllowedError') {
+        setError(isMac
+          ? '摄像头被拒. 去 macOS 系统设置 → 隐私与安全 → 摄像头 → 勾选 Chrome / Edge, 重启浏览器'
+          : '你拒绝了摄像头/麦克风权限. 浏览器地址栏左侧的锁图标里改')
+      } else if (name === 'NotFoundError' || name === 'OverconstrainedError') {
+        setError(isMac
+          ? '没找到摄像头. 检查: 1) macOS 系统设置 → 隐私 → 摄像头 是否允许浏览器; 2) 摄像头有没有被 Zoom/腾讯会议/OBS 占用; 3) 外接摄像头线松了'
+          : '没找到摄像头. 检查浏览器隐私设置或外接摄像头连接')
+      } else if (name === 'NotReadableError') {
+        setError('摄像头被别的程序占用了 (Zoom / 腾讯会议 / OBS / FaceTime 等), 关掉那个再试')
+      } else {
+        setError(`获取摄像头失败: ${e?.message || e}`)
+      }
     }
   }
   const onPresetPick = async (preset: string) => {
