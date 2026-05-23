@@ -6,6 +6,7 @@ import { searchPexels } from '../services/pexels'
 import { searchPixabay } from '../services/pixabay'
 import type { ChoiceOption, FootageSentenceItem, MessageBlock } from '../types'
 import { matchIntent, encodeAutoOpenId, decodeAutoOpenId, AUTOOPEN_DISMISS_ID } from '../lib/intentMatcher'
+import { isGreetingOrHelp, WELCOME_OPTIONS } from '../lib/welcomeOptions'
 
 /**
  * 把一个 ASR segment 按 word-level 停顿二次拆分.
@@ -333,6 +334,20 @@ export function useChat() {
     const convId = ensureConv()
     const conv = store.conversations.find(c => c.id === convId)
     if (!conv) return
+
+    // === 第零道闸: 问候 / 求介绍兜底 ===
+    // 用户打"你好" / "在吗" / "你能做什么" 时, DeepSeek 经常返空气泡 (json_mode 抽风).
+    // 前端直接 push 10 选项菜单消息, 不走 AI, 永远稳定回复.
+    if (!opts?.skipIntent && isGreetingOrHelp(text)) {
+      const userMsg = makeUserMsg(text)
+      store.addMessage(convId, userMsg)
+      const greetMsg = makeAssistantMsg([
+        { type: 'text', content: '你好! 我是 monoi, 你的视频口播创作助手. 想做什么? 直接选一个:' },
+        { type: 'choices', options: WELCOME_OPTIONS.map(o => ({ id: o.id, label: o.label, description: o.desc })) },
+      ])
+      store.addMessage(convId, greetMsg)
+      return
+    }
 
     // === Agentic AI 第一道闸: 关键词意图匹配 ===
     // 命中工具关键词 → 直接 push chip 提示, 让用户选打开哪个弹窗; 不走 AI.
