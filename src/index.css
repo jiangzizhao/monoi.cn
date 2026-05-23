@@ -102,6 +102,13 @@
 @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
 .cursor-blink { display: inline-block; width: 2px; height: 1em; background: var(--text); border-radius: 1px; margin-left: 2px; vertical-align: text-bottom; animation: blink 1s step-end infinite; }
 
+/* 主页示例视频墙跑马灯 — 复制一份元素拼接, 平移 50% 形成无缝循环 */
+@keyframes marquee {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+.animate-marquee { animation: marquee 40s linear infinite; }
+
 /* iOS 毛玻璃工具类 */
 .glass {
   background: var(--blur-bg);

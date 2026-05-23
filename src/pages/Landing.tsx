@@ -25,12 +25,12 @@ const STEPS = [
 ]
 
 const FEATURES = [
-  { icon: MessageSquare, title: 'AI 文案生成', desc: '基于爆款结构, 第一秒抓人眼球. 仿写 / 原创 / 改 dialect 都行' },
-  { icon: Mic, title: '配音音色库 + 克隆', desc: '300+ 预设音色, 也能上传 5 秒录音克隆你自己声音' },
-  { icon: Video, title: '数字人 (HeyGem)', desc: '上传一段形象视频, AI 替你出镜口播, 解放真人露脸' },
-  { icon: Film, title: '智能素材匹配', desc: '按口播内容自动拆句, 从 Pexels/Pixabay 拉对应画面 b-roll' },
-  { icon: Scissors, title: '口播剪辑', desc: 'whisper 识别 + 按词级编辑, 删气口 / 删口误一键搞定' },
-  { icon: ImageIcon, title: '封面 + 自动发布', desc: 'AI 生成封面图, 一键打包剪映草稿; 自动发布到抖音/小红书 (Max 起)' },
+  { icon: MessageSquare, title: 'AI 文案生成' },
+  { icon: Mic, title: '配音音色库 + 克隆' },
+  { icon: Video, title: '数字人' },
+  { icon: Film, title: '智能素材匹配' },
+  { icon: Scissors, title: '口播剪辑' },
+  { icon: ImageIcon, title: '封面 + 自动发布' },
 ]
 
 const PRICING = [
@@ -207,25 +207,31 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* =============== 示例视频墙 =============== */}
-      <section id="examples" className="px-4 sm:px-6 py-12 sm:py-20 max-w-6xl mx-auto">
-        <div className="text-center mb-8 sm:mb-12">
+      {/* =============== 示例视频墙 (auto-scroll marquee) =============== */}
+      <section id="examples" className="py-12 sm:py-20 overflow-hidden">
+        <div className="text-center mb-8 sm:mb-12 px-4">
           <h2 className="text-2xl sm:text-4xl font-bold mb-3">用 monoi 已经做出的视频</h2>
           <p className="text-sm text-[var(--text-3)]">真实用户作品 · 一句话生成的完整短视频</p>
         </div>
-        <div className="flex gap-3 sm:gap-4 overflow-x-auto pb-4 -mx-4 px-4 sm:mx-0 sm:px-0 scroll-smooth snap-x snap-mandatory">
-          {[...Array(6)].map((_, i) => (
-            <div key={i} className="flex-shrink-0 w-40 sm:w-48 snap-start">
-              <div className="aspect-[9/16] rounded-2xl bg-gradient-to-br from-[var(--bg-card)] to-[var(--bg-hover)] border border-[var(--border)] flex items-center justify-center cursor-pointer hover:scale-105 transition-transform group relative overflow-hidden">
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="w-12 h-12 rounded-full bg-white/90 flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
-                    <Play size={20} className="text-black ml-1" fill="currentColor"/>
+        {/* 跑马灯: 复制一份元素拼接, animation 平移 50% 形成无缝循环. hover 暂停让用户看清 */}
+        <div className="relative" onMouseEnter={e => { (e.currentTarget.querySelector('[data-marquee]') as HTMLElement)?.style.setProperty('animation-play-state', 'paused') }}
+          onMouseLeave={e => { (e.currentTarget.querySelector('[data-marquee]') as HTMLElement)?.style.setProperty('animation-play-state', 'running') }}>
+          <div data-marquee className="flex gap-3 sm:gap-4 w-max animate-marquee">
+            {[...Array(2)].flatMap((_, dup) =>
+              [...Array(6)].map((_, i) => (
+                <div key={`${dup}-${i}`} className="flex-shrink-0 w-40 sm:w-48">
+                  <div className="aspect-[9/16] rounded-2xl bg-gradient-to-br from-[var(--bg-card)] to-[var(--bg-hover)] border border-[var(--border)] flex items-center justify-center cursor-pointer hover:scale-105 transition-transform group relative overflow-hidden">
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <div className="w-12 h-12 rounded-full bg-white/90 flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
+                        <Play size={20} className="text-black ml-1" fill="currentColor"/>
+                      </div>
+                    </div>
+                    <span className="text-[10px] text-[var(--text-3)] absolute bottom-2 left-2">示例 #{i+1}</span>
                   </div>
                 </div>
-                <span className="text-[10px] text-[var(--text-3)] absolute bottom-2 left-2">示例 #{i+1}</span>
-              </div>
-            </div>
-          ))}
+              ))
+            )}
+          </div>
         </div>
       </section>
 
@@ -248,9 +254,6 @@ export default function Landing() {
                 <div className="text-sm sm:text-base font-semibold mb-0.5 sm:mb-1">{s.title}</div>
                 <div className="text-xs text-[var(--text-3)] leading-relaxed">{s.desc}</div>
               </div>
-              {i < STEPS.length - 1 && (
-                <ArrowRight size={16} className="hidden sm:block text-[var(--text-3)] flex-shrink-0 self-center"/>
-              )}
             </div>
           ))}
         </div>
@@ -269,8 +272,7 @@ export default function Landing() {
               <div className="w-10 h-10 rounded-xl bg-[var(--bg-hover)] flex items-center justify-center mb-3">
                 <f.icon size={18} className="text-[var(--text-2)]" strokeWidth={1.8}/>
               </div>
-              <div className="text-base font-semibold mb-1.5">{f.title}</div>
-              <div className="text-xs text-[var(--text-3)] leading-relaxed">{f.desc}</div>
+              <div className="text-base font-semibold">{f.title}</div>
             </button>
           ))}
         </div>
