@@ -95,10 +95,22 @@ export function ChatInput({ moduleMenu, onModuleClick, onModuleMenuClose }: Prop
   }, [])
 
   // 监听 useChat 派发的"打开表单"事件 (从消息气泡里的选项按钮触发, 比如合成完成后点"生成封面")
+  // detail 兼容两种:
+  //  - string (老调用): 仅 form id, 没有 prefill
+  //  - { id, prefill? } (Agentic AI autoopen 调用): 带预填值, prefill 存到 sessionStorage 让 Form 自己取
   useEffect(() => {
     const handler = (e: Event) => {
-      const id = (e as CustomEvent<string>).detail
-      pickModuleOption(id)
+      const detail = (e as CustomEvent<string | { id: string; prefill?: Record<string, unknown> }>).detail
+      if (typeof detail === 'string') {
+        pickModuleOption(detail)
+      } else if (detail && typeof detail === 'object' && detail.id) {
+        if (detail.prefill) {
+          try {
+            sessionStorage.setItem(`monoi:prefill:${detail.id}`, JSON.stringify(detail.prefill))
+          } catch { /* 写不进就算了, Form 拿不到 prefill 用默认值 */ }
+        }
+        pickModuleOption(detail.id)
+      }
     }
     window.addEventListener('monoi:open-form', handler)
     return () => window.removeEventListener('monoi:open-form', handler)

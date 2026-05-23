@@ -211,6 +211,7 @@ interface ChatState {
   addMessage: (convId: string, msg: ChatMessage) => void
   updateLastAssistantBlocks: (convId: string, blocks: MessageBlock[]) => void
   chooseOption: (convId: string, msgId: string, blockIndex: number, chosenId: string) => void
+  setPipelineState: (convId: string, msgId: string, blockIndex: number, state: { started?: boolean; dismissed?: boolean }) => void
   updateFootageGrid: (convId: string, msgId: string, blockIndex: number, data: import('../types').FootageSentenceItem[]) => void
 
   isGenerating: boolean
@@ -277,6 +278,24 @@ export const useChatStore = create<ChatState>()(
                 const blocks = m.blocks.map((b, i) => {
                   if (i !== blockIndex || b.type !== 'choices') return b
                   return { ...b, chosen: chosenId }
+                })
+                return { ...m, blocks }
+              }),
+            }
+          }),
+        })),
+
+      setPipelineState: (convId, msgId, blockIndex, state) =>
+        set((s) => ({
+          conversations: s.conversations.map((c) => {
+            if (c.id !== convId) return c
+            return {
+              ...c,
+              messages: c.messages.map((m) => {
+                if (m.id !== msgId) return m
+                const blocks = m.blocks.map((b, i) => {
+                  if (i !== blockIndex || b.type !== 'pipeline_intro') return b
+                  return { ...b, ...state }
                 })
                 return { ...m, blocks }
               }),

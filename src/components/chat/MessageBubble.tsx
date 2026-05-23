@@ -7,6 +7,7 @@ import { TeleprompterCard } from './TeleprompterCard'
 import { PlatformCopyCard } from './PlatformCopyCard'
 import { AudioPlayer } from './AudioPlayer'
 import { VideoPlayer } from './VideoPlayer'
+import { PipelineIntro } from './PipelineIntro'
 import type { ChatMessage, MessageBlock, ChoiceOption, FootageSentenceItem } from '../../types'
 
 interface Props {
@@ -18,6 +19,8 @@ interface Props {
   onScriptStoryboard?: (script: string) => void
   onStoryboardMultiPlatform?: (msgId: string) => void
   onFootageUpdate?: (msgId: string, blockIdx: number, data: FootageSentenceItem[]) => void
+  onPipelineStart?: (msgId: string, blockIdx: number) => void
+  onPipelineDismiss?: (msgId: string, blockIdx: number) => void
 }
 
 function StreamText({ content, streaming }: { content: string; streaming?: boolean }) {
@@ -108,6 +111,17 @@ function Block({ block, msgId, blockIdx, props }: { block: MessageBlock; msgId: 
         </div>
       )
     }
+
+    case 'pipeline_intro':
+      return (
+        <PipelineIntro
+          steps={block.data.steps}
+          started={block.started}
+          dismissed={block.dismissed}
+          onStart={() => props.onPipelineStart?.(msgId, blockIdx)}
+          onDismiss={() => props.onPipelineDismiss?.(msgId, blockIdx)}
+        />
+      )
 
     case 'loading':
       return (

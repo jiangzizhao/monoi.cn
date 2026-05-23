@@ -6,7 +6,7 @@ import { MessageBubble } from './MessageBubble'
 import type { FootageSentenceItem } from '../../types'
 
 export function ChatContainer() {
-  const { conversations, activeId, updateFootageGrid } = useChatStore()
+  const { conversations, activeId, updateFootageGrid, setPipelineState } = useChatStore()
   const { send, chooseOption } = useChat()
   const endRef = useRef<HTMLDivElement>(null)
 
@@ -24,6 +24,16 @@ export function ChatContainer() {
   const handleMultiPlatform = () => send('帮我生成各平台的发布文案')
   const handleFootageUpdate = (msgId: string, blockIdx: number, data: FootageSentenceItem[]) => {
     if (activeId) updateFootageGrid(activeId, msgId, blockIdx, data)
+  }
+  const handlePipelineStart = (msgId: string, blockIdx: number) => {
+    if (!activeId) return
+    setPipelineState(activeId, msgId, blockIdx, { started: true })
+    // 一个最简单的确认消息让 AI 知道用户同意 → AI 在下一回合输出第一步产物
+    send('好, 按上面流程开始第一步')
+  }
+  const handlePipelineDismiss = (msgId: string, blockIdx: number) => {
+    if (!activeId) return
+    setPipelineState(activeId, msgId, blockIdx, { dismissed: true })
   }
 
   return (
@@ -43,6 +53,8 @@ export function ChatContainer() {
             onScriptStoryboard={handleScriptStoryboard}
             onStoryboardMultiPlatform={handleMultiPlatform}
             onFootageUpdate={handleFootageUpdate}
+            onPipelineStart={handlePipelineStart}
+            onPipelineDismiss={handlePipelineDismiss}
           />
         ))}
         <div ref={endRef}/>

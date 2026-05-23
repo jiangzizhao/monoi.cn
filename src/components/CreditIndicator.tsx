@@ -36,10 +36,13 @@ export function CreditIndicator() {
   const ringColor = pct >= 95 ? 'text-red-500' : pct >= 80 ? 'text-amber-500' : 'text-[var(--text-3)]'
   const tier = TIER_LABEL[credits.tier] || credits.tier
 
+  // tooltip 不暴露具体积分数 — 跟"用户看油针不看流量计"原则一致.
+  // 只用颜色 + 进度环表达"还够 / 快用完 / 该充值了" 这种粗粒度状态.
+  const stateHint = pct >= 95 ? '额度即将用完, 点击查看' : pct >= 80 ? '本月额度用了不少, 点击查看' : `${tier} 套餐 · 点击查看额度`
   return (
     <button
       onClick={() => nav('/app/account#membership')}
-      title={`${tier} · 本月已用 ${pct}% · 总剩 ${credits.total} 积分${credits.purchased > 0 ? ` (含加买 ${credits.purchased})` : ''} · 点击查看额度`}
+      title={stateHint}
       className="ml-auto flex items-center justify-center p-1.5 rounded-lg hover:bg-[var(--bg-hover)] cursor-pointer transition-colors"
     >
       {/* 只显示圆环 — 用量按 % 转, 颜色 80% 黄 / 95% 红预警, 数字藏在 tooltip 里 */}

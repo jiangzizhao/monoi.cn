@@ -97,6 +97,11 @@ export interface VideoResult {
   jianying_payload?: JianyingDraftPayload  // 有此字段 → VideoPlayer 显示"导出剪映草稿"按钮
 }
 
+export interface PipelineStep {
+  label: string     // 步骤名, 如 "写文案"
+  desc: string      // 短描述, 不带积分数字
+}
+
 export type MessageBlock =
   | { type: 'text';           content: string; streaming?: boolean }
   | { type: 'choices';        question?: string; options: ChoiceOption[]; chosen?: string }
@@ -112,6 +117,7 @@ export type MessageBlock =
   | { type: 'footage_request';     data: { sentences: FootageSentenceItem[] } }
   | { type: 'teleprompter_request';data: { text: string; max_chars?: number } }
   | { type: 'cover_result';        data: { covers: { ratio: string; url: string }[] } }
+  | { type: 'pipeline_intro';      data: { steps: PipelineStep[] }; started?: boolean; dismissed?: boolean }
 
 export interface ChatMessage {
   id: string

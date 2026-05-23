@@ -5,6 +5,7 @@ import { chargeCredit } from '../services/billing'
 import { searchPexels } from '../services/pexels'
 import { searchPixabay } from '../services/pixabay'
 import type { ChoiceOption, FootageSentenceItem, MessageBlock } from '../types'
+import { matchIntent, encodeAutoOpenId, decodeAutoOpenId, AUTOOPEN_DISMISS_ID } from '../lib/intentMatcher'
 
 /**
  * 把一个 ASR segment 按 word-level 停顿二次拆分.
@@ -328,10 +329,47 @@ export function useChat() {
     return store.newConversation()
   }, [store])
 
-  const send = useCallback(async (text: string) => {
+  const send = useCallback(async (text: string, opts?: { skipIntent?: boolean }) => {
     const convId = ensureConv()
     const conv = store.conversations.find(c => c.id === convId)
     if (!conv) return
+
+    // === Agentic AI 第一道闸: 关键词意图匹配 ===
+    // 命中工具关键词 → 直接 push chip 提示, 让用户选打开哪个弹窗; 不走 AI.
+    // 跳过 sentinel/__form_*__ / 内部 payload (text.startsWith('__') 已在 matchIntent 内挡了)
+    // skipIntent=true: 来自 dismiss chip 的二次 send, 跳过匹配避免死循环.
+    const intent = opts?.skipIntent ? { action: 'none' as const, matches: [], topScore: 0 } : matchIntent(text)
+    if (intent.action !== 'none') {
+      const userMsg = makeUserMsg(text)
+      store.addMessage(convId, userMsg)
+
+      // dismiss 选项把原文 base64 编进 id, 用户点"都不是"时拿出来再送给 AI
+      let dismissId = AUTOOPEN_DISMISS_ID
+      try {
+        dismissId = `${AUTOOPEN_DISMISS_ID}:${btoa(unescape(encodeURIComponent(text)))}`
+      } catch { /* 编码失败用裸 dismiss */ }
+
+      const options: ChoiceOption[] =
+        intent.action === 'confirm'
+          ? [
+              { id: encodeAutoOpenId(intent.matches[0].entry.form), label: `打开 ${intent.matches[0].entry.label} 弹窗`, description: '帮你直接打开, 不用我猜' },
+              { id: dismissId, label: '不用, 继续聊', description: '当普通对话, 让 AI 自己想' },
+            ]
+          : [
+              { id: encodeAutoOpenId(intent.matches[0].entry.form), label: intent.matches[0].entry.label, description: `命中关键词: ${intent.matches[0].hitKeyword}` },
+              { id: encodeAutoOpenId(intent.matches[1].entry.form), label: intent.matches[1].entry.label, description: `命中关键词: ${intent.matches[1].hitKeyword}` },
+              { id: dismissId, label: '都不是', description: '把原话发给 AI' },
+            ]
+
+      const chipMsg = makeAssistantMsg([
+        { type: 'text', content: intent.action === 'confirm'
+            ? `看起来你想用 "${intent.matches[0].entry.label}", 要直接打开吗?`
+            : '你这句话有几种可能的方向, 想做哪个?' },
+        { type: 'choices', options },
+      ])
+      store.addMessage(convId, chipMsg)
+      return
+    }
 
     // 配音合成：用户可见消息显示友好标签，而不是原始 payload
     let displayText = text
@@ -786,6 +824,31 @@ export function useChat() {
     const convId = store.activeId
     if (!convId) return
     store.chooseOption(convId, msgId, blockIdx, opt.id)
+
+    // Agentic AI: autoopen chip — 解析 form + prefill, dispatch 带 detail
+    if (opt.id.startsWith('__autoopen__:')) {
+      const decoded = decodeAutoOpenId(opt.id)
+      if (decoded) {
+        window.dispatchEvent(new CustomEvent('monoi:open-form', {
+          detail: { id: decoded.form, prefill: decoded.prefill },
+        }))
+      }
+      return
+    }
+    // Agentic AI: dismiss chip — 把原文从 id 解出来, 直接送给 AI 走正常对话
+    // skipIntent 防止再次命中关键词死循环
+    if (opt.id.startsWith(AUTOOPEN_DISMISS_ID)) {
+      const payload = opt.id.slice(AUTOOPEN_DISMISS_ID.length).replace(/^:/, '')
+      if (payload) {
+        try {
+          const original = decodeURIComponent(escape(atob(payload)))
+          send(original, { skipIntent: true })
+          return
+        } catch { /* 解码失败就不发 */ }
+      }
+      return
+    }
+
     // 表单开启 sentinel: 不发给 LLM, 通知 ChatInput 弹对应表单
     // (跟 __dialect__/__digital_human_video__ 这种"带 payload 给 LLM" 的 sentinel 区分: 这些只是 UI 信号)
     const FORM_SENTINELS = new Set([
@@ -793,6 +856,7 @@ export function useChat() {
       '__voice_preset__', '__voice_upload__', '__voice_clone__',
       '__digital_human__', '__narration_video__',
       '__form_footage__', '__form_cover__', '__form_publish__',
+      '__form_cutout__',
     ])
     if (FORM_SENTINELS.has(opt.id)) {
       window.dispatchEvent(new CustomEvent('monoi:open-form', { detail: opt.id }))

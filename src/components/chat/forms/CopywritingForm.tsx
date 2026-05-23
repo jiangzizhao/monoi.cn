@@ -1,5 +1,6 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { Loader2, AlertCircle, Upload } from 'lucide-react'
+import { consumePrefill } from '../../../lib/formPrefill'
 
 const PLATFORMS = ['抖音', '视频号', '小红书', 'B站', 'YouTube', 'Reels']
 const STYLES = ['案例启发型', '避坑指南型', '反常认知型', '共鸣观点型', '问题解决型']
@@ -36,15 +37,40 @@ export function CopywritingForm({ mode, onSubmit, onClose }: Props) {
 }
 
 function GuidedForm({ mode, onSubmit, onClose }: { mode: 'original' | 'rewrite'; onSubmit: (m: string) => void; onClose: () => void }) {
-  const [step, setStep] = useState(0)
-  const [answers, setAnswers] = useState<Answers>({})
+  // Agentic AI: 如果 prefill 把所有 step 都填齐了, 直接 submit 跳过引导
+  const formId = mode === 'original' ? '__form_original__' : '__form_rewrite__'
+  const initial = consumePrefill<Answers>(formId)
+  const steps = mode === 'original' ? ORIGINAL_STEPS : REWRITE_STEPS
+
+  // 计算从哪个 step 起跳: prefill 填了几项就跳几个
+  const initialStep = (() => {
+    if (!initial) return 0
+    for (let i = 0; i < steps.length; i++) {
+      if (!initial[steps[i] as keyof Answers]) return i
+    }
+    return steps.length  // 全填完了, 应该直接 submit
+  })()
+
+  const [step, setStep] = useState(Math.min(initialStep, steps.length - 1))
+  const [answers, setAnswers] = useState<Answers>(initial || {})
   const [inputVal, setInputVal] = useState('')
   const [fetching, setFetching] = useState(false)
   const [fetchError, setFetchError] = useState('')
 
-  const steps = mode === 'original' ? ORIGINAL_STEPS : REWRITE_STEPS
   const currentStep = steps[step]
   const isLastStep = step === steps.length - 1
+
+  // 全填齐了 → mount 后一次性 submit 跳过整个引导 (deps 空, 只跑一次)
+  useEffect(() => {
+    if (initial && initialStep >= steps.length) {
+      if (mode === 'original') {
+        onSubmit(`【原创文案】平台:${initial.platform},风格:${initial.style},字数:${initial.length},行业:${initial.industry},目标用户:${initial.audience || '通用'}`)
+      } else {
+        onSubmit(`【仿写文案】平台:${initial.platform},风格:${initial.style},字数:${initial.length}\n\n参考原文:\n${initial.url}`)
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const next = (key: string, value: string) => {
     const newAnswers = { ...answers, [key]: value }
@@ -224,7 +250,9 @@ function GuidedForm({ mode, onSubmit, onClose }: { mode: 'original' | 'rewrite';
 }
 
 function PasteScriptForm({ onSubmit, onClose }: { onSubmit: (m: string) => void; onClose: () => void }) {
-  const [text, setText] = useState('')
+  // Agentic AI: AI 串步可以预填文案 (例如写完 script_card 后开 paste 流让用户接配音)
+  const initial = consumePrefill<{ text?: string; script?: string }>('__form_paste__')
+  const [text, setText] = useState(initial?.text || initial?.script || '')
   const [error, setError] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
 
