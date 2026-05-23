@@ -52,11 +52,6 @@ export function FootageMatchForm({ defaultScript = '', onSubmit, onClose }: Prop
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-3">
-          <p className="text-xs text-[var(--text-3)] leading-relaxed">
-            把口播文案粘贴进来, 系统按句子拆开, 自动生成"画面化"英文搜索词
-            (谁/在哪/干什么), 去免费视频素材库匹配候选.
-          </p>
-
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <span className="text-xs font-medium text-[var(--text-2)]">口播文案</span>
