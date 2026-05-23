@@ -272,14 +272,32 @@ export default function RecordTab() {
           {/* === previewing / recording: canvas + 进度 === */}
           {(phase === 'previewing' || phase === 'recording') && (
             <div className="flex flex-col gap-3">
-              <div className="rounded-2xl border border-[var(--border)] bg-black overflow-hidden">
-                <canvas ref={canvasRef} className="w-full h-auto block max-h-[55vh] object-contain"/>
-              </div>
-              {phase === 'recording' && (
-                <div className="flex items-center justify-center gap-2 text-sm text-red-500 font-medium">
-                  <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"/>
-                  录制中 {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}
+              {/* 录制中故意藏画布 — 否则 getDisplayMedia 录到浏览器自己 → 套娃无限镜子.
+                  画布仍然在跑 (requestAnimationFrame + captureStream 都要), 只是 visibility hidden 视觉藏掉 */}
+              {phase === 'previewing' ? (
+                <div className="rounded-2xl border border-[var(--border)] bg-black overflow-hidden">
+                  <canvas ref={canvasRef} className="w-full h-auto block max-h-[55vh] object-contain"/>
                 </div>
+              ) : (
+                // recording 阶段: canvas 绝对定位藏到屏幕外 (浏览器仍渲染 → captureStream 能 capture)
+                <>
+                  <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] py-12 px-6 flex flex-col items-center justify-center gap-3 min-h-[200px]">
+                    <div className="w-3 h-3 rounded-full bg-red-500 animate-pulse"/>
+                    <div className="text-2xl font-semibold text-[var(--text)]">
+                      {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}
+                    </div>
+                    <div className="text-xs text-[var(--text-3)] text-center max-w-xs">
+                      正在录制. 画面已藏起避免"套娃镜子". 录完点停止即可看回放.
+                    </div>
+                  </div>
+                  {/* 隐藏但仍渲染的 canvas — fixed 到屏幕外但浏览器不会优化掉 (vs display:none 可能停渲染) */}
+                  <canvas ref={canvasRef} style={{ position: 'fixed', left: '-9999px', top: 0, width: 1, height: 1 }}/>
+                </>
+              )}
+              {phase === 'previewing' && (
+                <p className="text-[11px] text-[var(--text-3)] text-center">
+                  💡 屏幕共享建议选**单个应用窗口** (如 PPT / Keynote / 浏览器某个标签页), 不要选"整个屏幕" — 否则录到 monoi 自己, 画面套娃无限镜子.
+                </p>
               )}
 
               {showPipSettings && (
