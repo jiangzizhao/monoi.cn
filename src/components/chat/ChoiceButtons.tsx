@@ -15,22 +15,18 @@ export function ChoiceButtons({ question, options, chosen, onChoose }: Props) {
       <div className={`flex gap-2 flex-wrap ${vertical ? 'flex-col' : ''}`}>
         {options.map(opt => {
           const isChosen = chosen === opt.id
-          const isDisabled = !!chosen && !isChosen
-          // 已选中的按钮允许再点 (重开表单/重发文本); 同组的"另一个" 选项保持锁死, 避免再触发别的 LLM 分支
-          const canClick = !chosen || isChosen
+          // 用户反馈: 选了一个之后其他选项也要能继续点 (反悔 / 多试一个).
+          // 之前会锁掉非选中选项, 现在改成全部一直可点, 只用高亮区分选过的.
           return (
             <button
               key={opt.id}
-              disabled={isDisabled}
-              onClick={() => canClick && onChoose(opt)}
+              onClick={() => onChoose(opt)}
               className={[
-                'flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border text-sm transition-all duration-150',
+                'flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border text-sm transition-all duration-150 cursor-pointer',
                 vertical ? 'w-full' : '',
                 isChosen
-                  ? 'bg-[var(--text)] border-[var(--text)] text-[var(--bg)] cursor-pointer hover:opacity-90'
-                  : isDisabled
-                  ? 'bg-transparent border-[var(--border-subtle)] text-[var(--text-3)] cursor-not-allowed opacity-40'
-                  : 'bg-[var(--bg-card)] border-[var(--border)] text-[var(--text)] hover:border-[var(--text-3)] hover:bg-[var(--bg-hover)] cursor-pointer',
+                  ? 'bg-[var(--text)] border-[var(--text)] text-[var(--bg)] hover:opacity-90'
+                  : 'bg-[var(--bg-card)] border-[var(--border)] text-[var(--text)] hover:border-[var(--text-3)] hover:bg-[var(--bg-hover)]',
               ].join(' ')}
             >
               {opt.icon && <span className="text-base flex-shrink-0">{opt.icon}</span>}
