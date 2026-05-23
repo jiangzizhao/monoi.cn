@@ -433,7 +433,7 @@ export function FootageGrid({ data, videoUrl, segmentTimes, narrationOssKey, onU
             </p>
             <div className="text-xs text-[var(--text-3)] bg-[var(--bg-hover)] rounded-lg p-3 leading-relaxed">
               想免费体验? 你可以点 "<b>导出 URL 清单</b>" 按钮拿到 Pexels/Pixabay 链接, 自己浏览器打开下载是免费的.
-            </p>
+            </div>
             <div className="flex gap-2">
               <button onClick={() => setUpgradeOpen(false)}
                 className="flex-1 py-2 rounded-lg border border-[var(--border)] text-[var(--text-2)] text-sm hover:bg-[var(--bg-hover)] cursor-pointer">
