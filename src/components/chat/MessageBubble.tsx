@@ -138,8 +138,18 @@ function Block({ block, msgId, blockIdx, props }: { block: MessageBlock; msgId: 
         </div>
       )
 
-    default:
-      return null
+    default: {
+      // 兜底: AI 输出了未知 type 时, 不要静默渲染空白 (之前 Agentic AI 试验出现过 AI
+      // 输出 'autoopen' 块 → MessageBubble 没 case → 整条消息变成只有 logo 的空气泡).
+      // 这里改成显式渲染一段调试提示, 至少用户能看到"AI 回了点啥但前端不认识", 不会以为坏了.
+      const unknown = block as { type: string }
+      console.warn('[MessageBubble] 未知 block type:', unknown.type, block)
+      return (
+        <div className="text-xs text-amber-500 bg-amber-950/20 border border-amber-900/30 rounded-lg px-3 py-2">
+          AI 输出了一个未知格式的块 ({unknown.type}). 请把这条消息截图给开发者.
+        </div>
+      )
+    }
   }
 }
 
@@ -163,13 +173,26 @@ export function MessageBubble({ message, ...props }: Props) {
     )
   }
 
+  // 兜底: AI 返回 blocks 为空 (可能 DeepSeek 输出畸形 JSON 解析失败), 别让 bubble 渲染纯白.
+  // 之前 2026-05-23 出现过 AI 输出未知 block type 全部静默, 用户看到只剩 logo.
+  const hasRenderableContent = message.blocks.some(b => {
+    if (b.type === 'text') return Boolean(b.content?.trim())
+    return true
+  })
+
   return (
     <div className="flex items-start gap-3 msg-enter">
       <img src="/logo.png" alt="monoi" className="w-8 h-8 rounded-xl object-contain flex-shrink-0 mt-0.5"/>
       <div className="flex-1 min-w-0 flex flex-col gap-3">
-        {message.blocks.map((block, i) => (
-          <Block key={i} block={block} msgId={message.id} blockIdx={i} props={{ message, ...props }}/>
-        ))}
+        {hasRenderableContent ? (
+          message.blocks.map((block, i) => (
+            <Block key={i} block={block} msgId={message.id} blockIdx={i} props={{ message, ...props }}/>
+          ))
+        ) : (
+          <div className="text-xs text-[var(--text-3)] italic">
+            AI 这次没返回内容, 换种说法再问一次试试.
+          </div>
+        )}
       </div>
     </div>
   )
