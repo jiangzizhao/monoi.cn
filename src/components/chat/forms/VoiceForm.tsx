@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { Play, Pause, Loader2 } from 'lucide-react'
 import { NarrationEditor } from '../NarrationEditor'
 import { getToken } from '../../../lib/auth'
+import { consumePrefill } from '../../../lib/formPrefill'
 
 type Mode = 'preset' | 'upload' | 'clone'
 
@@ -78,13 +79,18 @@ function VoiceCard({ voice, selected, playing, loading, onSelect, onPreview }: {
 }
 
 export function VoiceForm({ mode, onSubmit, onClose }: Props) {
+  // Agentic AI: 串步可预填 voice_id / speed / emotion / notes — text 不用预填,
+  // useChat 配音逻辑自己 findLastScript 拿最近 script_card.
+  const formId = mode === 'preset' ? '__voice_preset__' : mode === 'upload' ? '__voice_upload__' : '__voice_clone__'
+  const initial = consumePrefill<{ voice_id?: string; speed?: string; emotion?: string; notes?: string }>(formId)
+
   const [voiceOptions, setVoiceOptions] = useState<VoiceOption[]>([])
   const [presetLoading, setPresetLoading] = useState(false)
   const [presetError, setPresetError] = useState('')
-  const [voice, setVoice] = useState('')
-  const [speed, setSpeed] = useState('1.0x')
-  const [emotion, setEmotion] = useState('自然')
-  const [notes, setNotes] = useState('')
+  const [voice, setVoice] = useState(initial?.voice_id || '')
+  const [speed, setSpeed] = useState(initial?.speed || '1.0x')
+  const [emotion, setEmotion] = useState(initial?.emotion || '自然')
+  const [notes, setNotes] = useState(initial?.notes || '')
   const [fileName, setFileName] = useState('')
   const [fileObj, setFileObj] = useState<File | null>(null)
   const [cloneName, setCloneName] = useState('')
@@ -249,7 +255,8 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
         }))
         if (mapped.length > 0) {
           setVoiceOptions(mapped)
-          setVoice(mapped[0].id)
+          // 仅当还没预填 voice 时, 才默认选第一个 (避免覆盖 prefill 的 voice_id)
+          setVoice(prev => prev || mapped[0].id)
         }
       })
       .catch(() => {

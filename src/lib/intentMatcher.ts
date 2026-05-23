@@ -60,9 +60,9 @@ const INTENTS: IntentEntry[] = [
   { form: '__form_cover__', label: '生成封面', score: 0.95,
     keywords: ['生成封面', '做封面', '封面生成', '出封面图', '弄封面'] },
 
-  // 抠图
+  // 抠图 — '去背景' 太宽容易跟"去背景音乐"撞, 改成"抠掉背景/去除背景"等更精确
   { form: '__form_cutout__', label: '人物抠图', score: 0.95,
-    keywords: ['抠图', '抠人物', '去背景', '透明背景', '抠掉背景', '抠出人物'] },
+    keywords: ['抠图', '抠人物', '抠出人物', '抠掉背景', '去除背景', '透明背景', '透明 png', '透明PNG'] },
 
   // 发布
   { form: '__form_publish__', label: '自动发布', score: 0.9,
@@ -82,6 +82,14 @@ export interface MatchResult {
   action: MatchAction
 }
 
+// 问句词表 — 含这些词的输入认为用户在"问问题", 不是在"下命令", 跳过意图匹配
+// 例: "数字人怎么用" "封面多少钱" "抠图能商用吗" 都不应该弹 chip
+const QUESTION_MARKERS = [
+  '怎么', '怎样', '如何', '啥', '什么', '多少', '为啥', '为什么',
+  '能不能', '可以吗', '行不行', '可不可以', '有没有', '是不是',
+  '?', '？', '麻烦', '请问',
+]
+
 /** 主入口: 用户输入 → 匹配结果. 没命中返 action='none'. */
 export function matchIntent(userInput: string): MatchResult {
   const text = userInput.trim().toLowerCase()
@@ -90,6 +98,11 @@ export function matchIntent(userInput: string): MatchResult {
   // 用户消息以 sentinel/__form_*__ 开头的 (来自表单提交), 不要重新匹配
   if (text.startsWith('__') || text.startsWith('【')) {
     return { matches: [], topScore: 0, action: 'none' }
+  }
+
+  // 问句直接放行给 AI — 用户在问问题不是要打开弹窗
+  for (const q of QUESTION_MARKERS) {
+    if (text.includes(q)) return { matches: [], topScore: 0, action: 'none' }
   }
 
   const hits: IntentMatch[] = []

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Loader2, X, Play, Pause, AudioLines, Check, Plus, Trash2 } from 'lucide-react'
 import { useChatStore } from '../../../store/chatStore'
+import { consumePrefill } from '../../../lib/formPrefill'
 import type { AudioResult, ChatMessage } from '../../../types'
 
 interface Props {
@@ -75,6 +76,9 @@ function audioFileNameFor(opt: AudioOption) {
 }
 
 export function DigitalHumanForm({ onSubmit, onClose }: Props) {
+  // Agentic AI: 串步可指定 avatar_key (推荐用之前用过的 X 形象) 和 audio_url (上一步生成的口播音频)
+  const initial = consumePrefill<{ avatar_key?: string; audio_url?: string }>('__digital_human__')
+
   const conv = useChatStore(s => s.conversations.find(c => c.id === s.activeId))
   const audioOptions = useMemo(() => collectAudioOptions(conv?.messages || []), [conv?.messages])
 
@@ -82,14 +86,14 @@ export function DigitalHumanForm({ onSubmit, onClose }: Props) {
   const [avatars, setAvatars] = useState<Avatar[]>([])
   const [maxAvatars, setMaxAvatars] = useState(5)
   const [avatarsLoading, setAvatarsLoading] = useState(true)
-  const [selectedAvatarKey, setSelectedAvatarKey] = useState('')
+  const [selectedAvatarKey, setSelectedAvatarKey] = useState(initial?.avatar_key || '')
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState('')
   const uploadInputRef = useRef<HTMLInputElement>(null)
   const [pendingDelete, setPendingDelete] = useState<string>('') // 删除中的 key
 
-  // ─── Audio ───
-  const [selectedAudioId, setSelectedAudioId] = useState<string>(audioOptions[0]?.id || '')
+  // ─── Audio ─── (prefill audio_url 优先于"最近一条 audio_player")
+  const [selectedAudioId, setSelectedAudioId] = useState<string>(initial?.audio_url || audioOptions[0]?.id || '')
   const previewAudioRef = useRef<HTMLAudioElement | null>(null)
   const [previewingId, setPreviewingId] = useState('')
 
@@ -114,9 +118,9 @@ export function DigitalHumanForm({ onSubmit, onClose }: Props) {
         setAvatars(data.items || [])
         // 后端 max_count: -1 = 不限 (旗舰套餐). 前端用 Infinity 处理, 永远 canUploadMore
         setMaxAvatars(data.max_count === -1 ? Infinity : (data.max_count || 5))
-        // 默认选第一个
-        if ((data.items || []).length > 0 && !selectedAvatarKey) {
-          setSelectedAvatarKey(data.items[0].avatar_key)
+        // 默认选第一个 (但 prefill 选的不要被覆盖)
+        if ((data.items || []).length > 0) {
+          setSelectedAvatarKey(prev => prev || data.items[0].avatar_key)
         }
       } catch (e) {
         // 加载失败忽略,用户可以重新打开

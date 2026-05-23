@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { createPortal } from 'react-dom'
 import { AlertCircle, X } from 'lucide-react'
+import { consumePrefill } from '../../../lib/formPrefill'
 
 interface Props {
   defaultScript?: string         // 从对话里上一次的 script_card / 转录文本预填
@@ -9,7 +10,9 @@ interface Props {
 }
 
 export function FootageMatchForm({ defaultScript = '', onSubmit, onClose }: Props) {
-  const [text, setText] = useState(defaultScript)
+  // Agentic AI 串步预填优先于 defaultScript (AI 主动塞的 script 比 ChatInput 推断的更准)
+  const initial = consumePrefill<{ script?: string; text?: string }>('__form_footage__')
+  const [text, setText] = useState(initial?.script || initial?.text || defaultScript)
   const [error, setError] = useState('')
 
   const charCount = text.replace(/\s/g, '').length

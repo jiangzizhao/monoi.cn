@@ -4,6 +4,7 @@ import { X, Loader2, Download as DownloadIcon, Upload, Image as ImageIcon, Layou
 import { useChatStore, makeAssistantMsg } from '../../../store/chatStore'
 import { TemplateCoverPicker } from './TemplateCoverPicker'
 import { getToken } from '../../../lib/auth'
+import { consumePrefill } from '../../../lib/formPrefill'
 
 interface Props {
   // 从对话最近的合成视频或口播视频拿
@@ -26,12 +27,15 @@ const RATIOS: { id: Ratio; label: string }[] = [
 ]
 
 export function CoverGeneratorForm({ defaultVideoOssKey, defaultVideoUrl, onClose }: Props) {
+  // Agentic AI 串步预填: AI 写好标题/副标题后直接生成封面
+  const initial = consumePrefill<{ title?: string; subtitle?: string; ratios?: string[] }>('__form_cover__')
+
   const [mode, setMode] = useState<'template' | 'generate' | 'upload'>('template')
   const videoRef = useRef<HTMLVideoElement>(null)
   const [videoDuration, setVideoDuration] = useState(0)
   const [frameTime, setFrameTime] = useState(1.0)
-  const [title, setTitle] = useState('')
-  const [subtitle, setSubtitle] = useState('')
+  const [title, setTitle] = useState(initial?.title || '')
+  const [subtitle, setSubtitle] = useState(initial?.subtitle || '')
   const template: Template = 'youtube'   // 写死 (UI 去掉模板选择, 用自定义参数调)
   const [ratios, setRatios] = useState<Ratio[]>(['9:16', '16:9'])
   const [generating, setGenerating] = useState(false)
@@ -166,7 +170,7 @@ export function CoverGeneratorForm({ defaultVideoOssKey, defaultVideoUrl, onClos
             question: '下一步',
             options: [
               { id: '__form_publish__', label: '去发布', description: '上传到小红书 / 抖音' },
-              { id: '帮我生成各平台的发布文案', label: '先生成发布文案', description: 'AI 给每平台写标题/描述/标签' },
+              { id: '帮我生成各平台的发布文案', label: '生成发布文案', description: 'AI 给每平台写标题/描述/标签' },
               { id: '保留封面, 暂不做下一步', label: '保留封面', description: '稍后再决定' },
             ],
           },
@@ -248,7 +252,7 @@ export function CoverGeneratorForm({ defaultVideoOssKey, defaultVideoUrl, onClos
         </div>
 
         <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-4">
-          {mode === 'template' && <TemplateCoverPicker/>}
+          {mode === 'template' && <TemplateCoverPicker onClose={onClose}/>}
 
           {/* 源选择: 视频截帧 OR 自传图 (mode = 'template' 时不显示这一整块, 模板自己控制) */}
           {mode === 'generate' && (
