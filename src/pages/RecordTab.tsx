@@ -5,7 +5,7 @@
 // Phase 4 Electron 版会加 鼠标跟踪 zoom + 运动模糊 (PixiJS), 这里先不做.
 
 import { useEffect, useRef, useState } from 'react'
-import { Video, Camera, Square, Download, ArrowRight, AlertCircle, RotateCcw } from 'lucide-react'
+import { Camera, Square, Download, ArrowRight, AlertCircle, RotateCcw, Monitor } from 'lucide-react'
 
 type Phase = 'setup' | 'previewing' | 'recording' | 'done'
 type PipShape = 'circle' | 'rounded' | 'square'
@@ -270,12 +270,7 @@ export default function RecordTab() {
       <video ref={screenVideoRef} className="hidden" muted playsInline/>
       <video ref={cameraVideoRef} className="hidden" muted playsInline/>
 
-      <div className="max-w-3xl mx-auto px-4 py-6 flex flex-col gap-4">
-        <div className="flex items-center gap-2">
-          <Video size={20} className="text-[var(--text)]"/>
-          <h1 className="text-lg font-semibold">录屏 · 屏幕 + 人物 PIP</h1>
-        </div>
-
+      <div className="max-w-3xl mx-auto px-4 py-8 flex flex-col gap-4">
         {error && (
           <div className="text-sm text-red-400 bg-red-950/20 border border-red-900/30 rounded-lg px-3 py-2 flex items-start gap-2">
             <AlertCircle size={14} className="mt-0.5 flex-shrink-0"/>
@@ -300,7 +295,7 @@ export default function RecordTab() {
                   className={`flex-1 flex items-center gap-2 px-4 py-3 rounded-xl border text-sm transition-colors cursor-pointer ${
                     screenStream ? 'border-green-500 bg-green-500/10 text-green-500' : 'border-[var(--border)] hover:bg-[var(--bg-hover)]'
                   }`}>
-                  <Video size={16}/>
+                  <Monitor size={16}/>
                   <span className="flex-1 text-left">{screenStream ? '✓ 屏幕已授权' : '选择屏幕 / 窗口'}</span>
                 </button>
               </div>
