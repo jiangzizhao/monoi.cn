@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { Pause, Play, X, Loader2, Music, Upload, Sparkles, Library } from 'lucide-react'
 import type { FootageSentenceItem, VideoAsset } from '../../types'
 import { useChatStore, makeAssistantMsg } from '../../store/chatStore'
+import { humanizeNetworkError } from '../../lib/errorHumanize'
 import { VocalRemoverDialog } from '../VocalRemoverDialog'
 import { listBgmLibrary, type BgmTrack } from '../../services/audio'
 import { getToken } from '../../lib/auth'
@@ -54,6 +55,16 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
   const [composing, setComposing] = useState(false)
   const [composedUrl, setComposedUrl] = useState<string | null>(null)
   const [composeError, setComposeError] = useState('')
+  // 合成 UI 进度: 显示已花时间 + 30s 后给取消按钮
+  const [composeElapsed, setComposeElapsed] = useState(0)
+  const composeAbortRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    if (!composing) { setComposeElapsed(0); return }
+    const start = Date.now()
+    const id = window.setInterval(() => setComposeElapsed(Math.floor((Date.now() - start) / 1000)), 1000)
+    return () => clearInterval(id)
+  }, [composing])
 
   // BGM 状态: 用户上传一个背景音乐 (mp3/wav 等), 合成时跟口播音轨混音 (避免版权)
   const [bgm, setBgm] = useState<{ oss_key: string; name: string; preview_url: string } | null>(null)
@@ -153,10 +164,14 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
         bgm_oss_key: bgm?.oss_key || null,
         bgm_volume: bgmVolume,
       }
+      // AbortController 让"取消"按钮真能中断卡死的 fetch
+      const ctrl = new AbortController()
+      composeAbortRef.current = ctrl
       const res = await fetch(directBase + '/api/voice/compose-footage', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken() || ''}` },
         body: JSON.stringify(body),
+        signal: ctrl.signal,
       })
       const data = await res.json()
       if (!res.ok || !data.success) {
@@ -212,10 +227,20 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
       }
       onClose()
     } catch (e: any) {
-      setComposeError(e.message || '合成失败')
+      // AbortError: 用户主动点取消, 不报错
+      if (e?.name === 'AbortError') {
+        setComposeError('已取消合成')
+      } else {
+        setComposeError(humanizeNetworkError(e))
+      }
     } finally {
       setComposing(false)
+      composeAbortRef.current = null
     }
+  }
+
+  const cancelCompose = () => {
+    composeAbortRef.current?.abort()
   }
 
   // 当前镜头索引: currentTime 落在哪个 segment 时间段
@@ -743,17 +768,27 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
           >
             关闭
           </button>
+          {/* 合成中超过 30s 才出现取消按钮, 避免短任务误触 */}
+          {composing && composeElapsed >= 30 && (
+            <button
+              onClick={cancelCompose}
+              className="px-4 py-2 text-sm rounded-lg border border-[var(--border)] text-[var(--text-2)] hover:bg-[var(--bg-hover)] cursor-pointer transition-colors"
+              title="放弃这次合成, 不扣的积分会自动退"
+            >
+              取消
+            </button>
+          )}
           <button
             onClick={handleCompose}
             disabled={composing || !narrationOssKey}
-            title={!narrationOssKey ? '缺少口播视频, 走口播剪辑流程后再试' : '后端 ffmpeg 合成, 5-30 秒'}
+            title={!narrationOssKey ? '缺少口播视频, 走口播剪辑流程后再试' : '后端 ffmpeg 合成, 通常 5-30 秒, 长视频可能 1-2 分钟'}
             className={`px-4 py-2 text-sm rounded-lg transition-all inline-flex items-center gap-2 ${
               composing || !narrationOssKey
                 ? 'bg-[var(--bg-hover)] text-[var(--text-3)] cursor-not-allowed'
                 : 'bg-[var(--text)] text-[var(--bg)] hover:opacity-80 cursor-pointer'
             }`}
           >
-            {composing ? <><Loader2 size={14} className="animate-spin"/> 合成中...</> : (composedUrl ? '重新合成' : '一键合成')}
+            {composing ? <><Loader2 size={14} className="animate-spin"/> 合成中 {composeElapsed}s</> : (composedUrl ? '重新合成' : '一键合成')}
           </button>
         </div>
       </div>

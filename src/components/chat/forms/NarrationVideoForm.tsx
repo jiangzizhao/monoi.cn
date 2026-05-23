@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { Loader2, Upload, X } from 'lucide-react'
 import { NarrationVideoEditor, type KeptSegment } from '../NarrationVideoEditor'
 import { getToken } from '../../../lib/auth'
+import { humanizeNetworkError } from '../../../lib/errorHumanize'
 
 interface Props {
   onSubmit: (message: string) => void
@@ -131,7 +132,7 @@ export function NarrationVideoForm({ onSubmit, onClose }: Props) {
       setCleanResult(data)
       setPhase('editing')
     } catch (e: any) {
-      setError(e.message || '上传失败')
+      setError(humanizeNetworkError(e))
       setPhase('idle')
     }
   }
