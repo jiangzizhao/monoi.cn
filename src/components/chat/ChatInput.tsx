@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { ArrowUp, FileText, Mic, Video, Music, Sticker } from 'lucide-react'
+import { ArrowUp, FileText, Mic, Video, Music, Sticker, Image as ImageIcon } from 'lucide-react'
 import { VocalRemoverDialog } from '../VocalRemoverDialog'
 import { CreditIndicator } from '../CreditIndicator'
 import type { LucideIcon } from 'lucide-react'
@@ -14,12 +14,14 @@ import { CoverGeneratorForm } from './forms/CoverGeneratorForm'
 import { PublishForm } from './forms/PublishForm'
 import { CutoutForm } from './forms/CutoutForm'
 
-// 底部入口: 只放真正"从零开始"的功能. 流程中段的 (素材/剪辑/封面/发布/导出) 通过
+// 底部入口: 只放真正"从零开始"的功能. 流程中段的 (素材/剪辑/发布/导出) 通过
 // 上一步完成后的 chat 选项按钮自然进入, 不在工具栏重复.
+// 封面单独放是因为用户经常想"只生成一张封面" (做头像/单独素材), 不一定走完整流程.
 const MODULES: { label: string; Icon: LucideIcon }[] = [
   { label: '文案',  Icon: FileText  },
   { label: '配音',  Icon: Mic       },
   { label: '口播',  Icon: Video     },
+  { label: '封面',  Icon: ImageIcon },
   { label: '抠图',  Icon: Sticker   },
 ]
 
