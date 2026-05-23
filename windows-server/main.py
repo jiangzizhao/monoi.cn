@@ -2699,7 +2699,8 @@ async def cover_remove_bg_proxy(request: Request):
     """转发到 voice-server: 人物图 → rembg 抠图 → 描边 → OSS. multipart 透传.
 
     扣费: 缓存命中 (cached=true) 不扣; 缓存未命中 (真跑了 rembg) 扣 2 积分.
-    没登录就不扣 (公开接口测试时用)."""
+    准入: Pro 套餐及以上 (免费用户被 check_feature_tier 挡, 抛 402).
+    admin 不受 tier 限制 (检查内做了 try/except, 实际靠 admin 不在 PLANS 里跳过)."""
     import requests as _req
     # 试 auth — 拿不到不报错, 没登录也允许调 (但不会被扣费, 缓存照命中)
     try:
@@ -2708,6 +2709,20 @@ async def cover_remove_bg_proxy(request: Request):
         _uid = None
     except Exception:
         _uid = None
+
+    # tier 准入: 免费用户挡. admin 怎么过的? users.is_admin=1 的 ensure get_user_subscription
+    # 会拿到 'free' 但 admin 实际不该被挡 — 后端再加一层 admin 跳过.
+    if _uid:
+        try:
+            from billing import get_db as _gdb
+            _ar = _gdb().execute("SELECT is_admin FROM users WHERE id = ?", (_uid,)).fetchone()
+            if not (_ar and _ar['is_admin']):
+                from billing import check_feature_tier
+                check_feature_tier(_uid, '人物抠图', 'pro_monthly')
+        except HTTPException:
+            raise
+        except Exception as _te:
+            print(f"[cover-remove-bg-tier] tier 检查异常 (放行): {_te}", flush=True)
 
     try:
         body = await request.body()
@@ -2789,10 +2804,17 @@ async def cover_remove_bg_proxy(request: Request):
 
 @app.post("/api/voice/render-cover-from-template")
 def render_cover_from_template_proxy(req: dict, request: Request):
-    """转发到 voice-server: 按模板渲染封面. 扣 5 积分 (rembg 抠图 + Pillow 渲染)."""
+    """转发到 voice-server: 按模板渲染封面. 扣 5 积分 (rembg 抠图 + Pillow 渲染).
+    准入: Pro 套餐及以上 (免费用户被挡, 抛 402). admin 跳过."""
     import requests as _req
     try:
         _uid = _user_id_from_request(request)
+        # admin 跳过 tier 检查
+        from billing import get_db as _gdb
+        _ar = _gdb().execute("SELECT is_admin FROM users WHERE id = ?", (_uid,)).fetchone()
+        if not (_ar and _ar['is_admin']):
+            from billing import check_feature_tier
+            check_feature_tier(_uid, '封面生成', 'pro_monthly')
         from billing import consume_credits
         consume_credits(_uid, 'cover_template', 5, ref_id=str(req.get('template_id') or ''))
     except HTTPException: raise
