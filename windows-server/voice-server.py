@@ -2162,10 +2162,23 @@ async def cover_remove_bg(
     try:
         with open(tmp_path, 'wb') as _f:
             _f.write(out_png)
-        oss_upload(out_key, tmp_path, content_type='image/png')
+        # OSS 上传 TLS 经常被 ISP/路由中途砍 (SSLEOFError), 加 3 次重试避免一次失败直接挂
+        _last_err = None
+        for _attempt in range(3):
+            try:
+                oss_upload(out_key, tmp_path, content_type='image/png')
+                _last_err = None
+                break
+            except Exception as _e:
+                _last_err = _e
+                if _attempt < 2:
+                    print(f"[cover-remove-bg] OSS 上传失败重试 {_attempt+1}/3: {str(_e)[:200]}", flush=True)
+                    time.sleep(2)
+        if _last_err:
+            raise _last_err
         signed = oss_sign_get(out_key, expires=24 * 3600)
     except Exception as e:
-        raise HTTPException(502, f'OSS 上传失败: {e}')
+        raise HTTPException(502, f'OSS 上传失败 (重试 3 次): {str(e)[:300]}')
     finally:
         try: os.remove(tmp_path)
         except: pass
