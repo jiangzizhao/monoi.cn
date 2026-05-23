@@ -2728,12 +2728,18 @@ async def cover_remove_bg_proxy(request: Request):
         # 抠图成功 + 有登录用户 → 写入"我的人物" 库 (供前端列表选取)
         # 同 user_id + 同 oss_key 已存在: 更新 last_used_at + use_count +1
         # 不存在: 新插一条 (original_filename / stroke 参数留 NULL, 列表展示不依赖它们)
+        # admin 用户 (is_admin=1) **不受 10 张上限**, 因为 admin 抠图用于绑封面模板的
+        # 示例人物 (sample_person_oss_key), 模板可能很多张, 不能被自动清掉.
         if data.get('success') and _uid and data.get('oss_key'):
             try:
                 import time as _t
                 from billing import get_db as _get_db
                 _oss_key = data['oss_key']
                 _conn = _get_db()
+                # 查 is_admin — admin 走"无上限"分支
+                _admin_row = _conn.execute("SELECT is_admin FROM users WHERE id = ?", (_uid,)).fetchone()
+                _is_admin = bool(_admin_row and _admin_row['is_admin'])
+
                 _row = _conn.execute(
                     "SELECT id FROM user_person_cutout WHERE user_id = ? AND oss_key = ?",
                     (_uid, _oss_key)
@@ -2752,18 +2758,22 @@ async def cover_remove_bg_proxy(request: Request):
                         ) VALUES (?, ?, NULL, 0, NULL, 0, ?, ?, 1)
                     """, (_uid, _oss_key, _now, _now))
                 # 限制每用户最多 10 个 cutout — 超过删最旧的 (按 last_used_at 升序)
-                _MAX_PER_USER = 10
-                _excess = _conn.execute(
-                    "SELECT id FROM user_person_cutout WHERE user_id = ? ORDER BY last_used_at ASC",
-                    (_uid,)
-                ).fetchall()
-                if len(_excess) > _MAX_PER_USER:
-                    _drop_ids = [r['id'] for r in _excess[: len(_excess) - _MAX_PER_USER]]
-                    _conn.executemany(
-                        "DELETE FROM user_person_cutout WHERE id = ?",
-                        [(i,) for i in _drop_ids]
-                    )
-                    print(f"[cutout-cap] 删旧 cutout: user={_uid} drop={_drop_ids}", flush=True)
+                # admin 跳过这一步, 因为 admin 抠图绑封面模板, 不能自动清
+                if not _is_admin:
+                    _MAX_PER_USER = 10
+                    _excess = _conn.execute(
+                        "SELECT id FROM user_person_cutout WHERE user_id = ? ORDER BY last_used_at ASC",
+                        (_uid,)
+                    ).fetchall()
+                    if len(_excess) > _MAX_PER_USER:
+                        _drop_ids = [r['id'] for r in _excess[: len(_excess) - _MAX_PER_USER]]
+                        _conn.executemany(
+                            "DELETE FROM user_person_cutout WHERE id = ?",
+                            [(i,) for i in _drop_ids]
+                        )
+                        print(f"[cutout-cap] 删旧 cutout: user={_uid} drop={_drop_ids}", flush=True)
+                else:
+                    print(f"[cutout-cap] admin user={_uid}, 不受 10 张上限, 永久保留", flush=True)
                 _conn.commit()
                 _conn.close()
             except Exception as _le:
