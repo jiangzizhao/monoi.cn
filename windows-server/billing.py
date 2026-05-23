@@ -166,16 +166,17 @@ CONSUME_RULES = {
 }
 
 
-# 推广分成规则
+# 推广分成规则 (2026-05-23 重做)
+# - 普通用户: 注册推广员 30 积分一次性 (被邀请人 0); 首单 10% 现金; 无续费
+# - 认证 / 合伙人: 现金分成, 升级有两条路 — 自动达条件 或 联系客服申请
 COMMISSION_RULES = {
-    'normal': {                                     # 普通用户 (积分奖励)
-        'register_bonus_credits': 30,               # 推荐注册双方各 30 积分
-        'first_order_credit_pct': 0.30,             # 首单 30% 等值积分
-        'renewal_credit_pct': 0,                    # 续费不给积分 (防止持续被动收入)
-        'flagship_credit_cap': 3000,                # 旗舰版积分奖励上限 3000 (防刷)
-        'invitee_bonus_pct': 0.10,                  # 被推荐人额外 10% 积分
+    'normal': {                                     # 普通用户
+        'register_bonus_credits': 30,               # 仅推广员 +30 积分 (被邀请人 0)
+        'first_order_cash_pct': 0.10,               # 首单 10% 现金 (跟认证 30% / 合伙人 50% 形成阶梯)
+        'renewal_cash_pct': 0,                      # 普通用户无续费分成 (升认证才有)
+        # 注意: 普通用户的首单现金也走 referrer_balance, 跟认证一样, 不另开渠道
     },
-    'certified': {                                  # 认证推广员 (现金, 累计 5 人 / ¥500)
+    'certified': {                                  # 认证推广员 (现金, 累计 5 人 / ¥500 或客服申请)
         'first_order_cash_pct': 0.30,
         'renewal_cash_pct': 0.10,
         'renewal_months': 3,                        # 续费分成只算前 3 个月
@@ -183,7 +184,7 @@ COMMISSION_RULES = {
         'trigger_paying_users': 5,
         'trigger_revenue_yuan': 500,
     },
-    'partner': {                                    # 核心合伙人 (月推 20 人 / ¥3000)
+    'partner': {                                    # 核心合伙人 (月推 20 人 / ¥3000 或客服申请)
         'first_order_cash_pct': 0.50,
         'renewal_cash_pct': 0.15,
         'renewal_months': 3,
@@ -923,7 +924,7 @@ def ensure_referrer_status(user_id: int) -> dict:
 
 def bind_referrer(user_id: int, referral_code: str) -> bool:
     """用户首次注册时绑定推广关系. 已绑定则 no-op (终身不变).
-    双方各 30 积分 (推广员 + 被邀请方), 不依赖付费."""
+    奖励规则 (2026-05-23 重做): **仅推广员 +30 积分**, 被邀请人 0."""
     conn = get_db()
     existing = conn.execute(
         "SELECT 1 FROM referral_binding WHERE user_id = ?", (user_id,)
@@ -950,12 +951,11 @@ def bind_referrer(user_id: int, referral_code: str) -> bool:
     """, (user_id, referrer['user_id'], referral_code, now))
     conn.commit()
     conn.close()
-    # 双方各 30 积分 (注册奖励, 不依赖付费)
+    # 仅推广员 +30 积分 (被邀请人 0, 跟之前规则不同)
     bonus = COMMISSION_RULES['normal']['register_bonus_credits']
     try:
         add_credits(referrer['user_id'], bonus, 'referral', ref_id=f"register_{user_id}", feature='register_referrer')
-        add_credits(user_id, bonus, 'referral', ref_id=f"register_{referrer['user_id']}", feature='register_invitee')
-        print(f"[bind_referrer] OK — referrer={referrer['user_id']} invitee={user_id} 各 +{bonus} 积分", flush=True)
+        print(f"[bind_referrer] OK — referrer={referrer['user_id']} +{bonus} 积分; invitee={user_id} 0 积分", flush=True)
     except Exception as _e:
         print(f"[bind_referrer] 绑定成功但加积分失败: {_e}", flush=True)
     return True
@@ -978,36 +978,20 @@ def write_first_order_commission(order_id: str, referrer_id: int, buyer_id: int,
     now = time.time()
 
     conn = get_db()
-    is_flagship = product_code == 'flagship_yearly'
-
-    if level == 'normal':
-        # 积分奖励: 30% 等值积分 (¥1=10 积分), 旗舰封顶 3000
-        pct = COMMISSION_RULES['normal']['first_order_credit_pct']
-        credits = int(amount_yuan * 10 * pct)
-        if is_flagship:
-            credits = min(credits, COMMISSION_RULES['normal']['flagship_credit_cap'])
-        invitee_bonus = int(amount_yuan * 10 * COMMISSION_RULES['normal']['invitee_bonus_pct'])
-        conn.execute("""
-            INSERT INTO commission_log (order_id, beneficiary_user_id, beneficiary_level,
-                                         commission_type, credits, cash_yuan, status, created_at)
-            VALUES (?, ?, 'normal', 'first_order', ?, 0, 'settled', ?)
-        """, (order_id, referrer_id, credits, now))
-        conn.commit()
-        conn.close()
-        # 真给积分
-        add_credits(referrer_id, credits, 'referral', ref_id=order_id, feature='first_order_referrer')
-        if invitee_bonus > 0:
-            add_credits(buyer_id, invitee_bonus, 'referral', ref_id=order_id, feature='first_order_invitee')
-    else:
-        # certified / partner: 现金奖励
-        rules = COMMISSION_RULES[level]
-        pct = rules['first_order_cash_pct']
-        cash = round(amount_yuan * pct, 2)
-        conn.execute("""
-            INSERT INTO commission_log (order_id, beneficiary_user_id, beneficiary_level,
-                                         commission_type, credits, cash_yuan, status, created_at)
-            VALUES (?, ?, ?, 'first_order', 0, ?, 'pending', ?)
-        """, (order_id, referrer_id, level, cash, now))
+    # 不再区分 normal vs certified/partner 走积分还是现金 —
+    # 所有级别都给现金, 只是 % 不同 (普通 10% / 认证 30% / 合伙人 50%).
+    # 跟 2026-05-23 拍板的新规则对齐.
+    rules = COMMISSION_RULES[level]
+    pct = rules.get('first_order_cash_pct', 0)
+    cash = round(amount_yuan * pct, 2)
+    # status: pending — 等 T+7 退款窗口过后再 settle 给余额
+    # 但普通级历史上是 'settled' 直接到账, 为保守这里也走 pending 跟其他级别一致
+    conn.execute("""
+        INSERT INTO commission_log (order_id, beneficiary_user_id, beneficiary_level,
+                                     commission_type, credits, cash_yuan, status, created_at)
+        VALUES (?, ?, ?, 'first_order', 0, ?, 'pending', ?)
+    """, (order_id, referrer_id, level, cash, now))
+    if cash > 0:
         # 推广员余额涨
         conn.execute("""
             INSERT OR IGNORE INTO referrer_balance (user_id, cash_balance, cash_withdrawn_total, updated_at)
@@ -1016,8 +1000,8 @@ def write_first_order_commission(order_id: str, referrer_id: int, buyer_id: int,
         conn.execute("""
             UPDATE referrer_balance SET cash_balance = cash_balance + ?, updated_at = ? WHERE user_id = ?
         """, (cash, now, referrer_id))
-        conn.commit()
-        conn.close()
+    conn.commit()
+    conn.close()
 
     # 更新 referrer 累计统计
     update_referrer_stats(referrer_id, amount_yuan, is_new_paying_user=True)

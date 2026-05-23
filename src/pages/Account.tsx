@@ -264,7 +264,9 @@ export default function Account() {
       daily_free_grant: '每日赠送',
       daily_free_expire: '每日清零',
       register_referrer: '推广奖励 (你邀请的人注册)',
-      register_invitee: '推广奖励 (你被邀请注册)',
+      register_invitee: '推广奖励 (你被邀请注册, 历史规则)',
+      first_order_referrer: '推广首单分成 (积分, 历史规则)',
+      first_order_invitee: '被邀请首单额外 (积分, 历史规则)',
       first_order_commission: '推广首单奖励',
       referral: '推广奖励',
       admin_grant: '客服赠送',
@@ -940,6 +942,7 @@ function ReferralTab({ refCode, refStatus, refBalance, onShowQr, onReload }: {
   const [copied, setCopied] = useState(false)
   const [records, setRecords] = useState<{ referred_users: ReferredUser[]; commissions: CommissionDetail[] } | null>(null)
   const [guideOpen, setGuideOpen] = useState(false)
+  const [applyOpen, setApplyOpen] = useState(false)
   const [subTab, setSubTab] = useState<'users' | 'commissions'>('users')
   const [upgrading, setUpgrading] = useState(false)
 
@@ -1151,11 +1154,18 @@ function ReferralTab({ refCode, refStatus, refBalance, onShowQr, onReload }: {
 
       {/* 推广规则表 */}
       <div className="p-5 rounded-2xl border border-[var(--border)] bg-[var(--bg-card)]">
-        <div className="text-sm font-medium mb-2">推广规则</div>
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-sm font-medium">推广规则</div>
+          <button onClick={() => setApplyOpen(true)}
+            className="text-[10px] px-2 py-1 rounded-md border border-[var(--border)] text-[var(--text-2)] hover:bg-[var(--bg-hover)] cursor-pointer">
+            联系客服申请升级
+          </button>
+        </div>
         <table className="w-full text-xs">
           <thead>
             <tr className="text-[var(--text-3)] border-b border-[var(--border-subtle)]">
               <th className="text-left py-2">级别</th>
+              <th className="text-center py-2">注册奖励</th>
               <th className="text-center py-2">首单分成</th>
               <th className="text-center py-2">续费分成</th>
               <th className="text-center py-2">触发条件</th>
@@ -1164,21 +1174,24 @@ function ReferralTab({ refCode, refStatus, refBalance, onShowQr, onReload }: {
           <tbody className="text-[var(--text-2)]">
             <tr className="border-b border-[var(--border-subtle)]">
               <td className="py-2">普通用户</td>
-              <td className="text-center">30% 积分</td>
+              <td className="text-center">+30 积分</td>
+              <td className="text-center text-green-500">10% 现金</td>
               <td className="text-center">无</td>
               <td className="text-center text-[10px]">默认</td>
             </tr>
             <tr className="border-b border-[var(--border-subtle)]">
               <td className="py-2">认证推广员</td>
+              <td className="text-center">+30 积分</td>
               <td className="text-center text-green-500">30% 现金</td>
               <td className="text-center">10%×3 月</td>
-              <td className="text-center text-[10px]">5 付费 或 ¥500 流水</td>
+              <td className="text-center text-[10px]">累计 5 付费 / ¥500 流水<br/>或 联系客服申请</td>
             </tr>
             <tr>
               <td className="py-2">核心合伙人</td>
+              <td className="text-center">+30 积分</td>
               <td className="text-center text-green-500">50% 现金</td>
               <td className="text-center">15%×3 月</td>
-              <td className="text-center text-[10px]">月推 20 人 或 ¥3000</td>
+              <td className="text-center text-[10px]">月推 20 人 / ¥3000 流水<br/>或 联系客服申请</td>
             </tr>
           </tbody>
         </table>
@@ -1234,10 +1247,10 @@ function ReferralTab({ refCode, refStatus, refBalance, onShowQr, onReload }: {
               </div>
 
               <div>
-                <div className="font-medium text-[var(--text)] mb-1.5">升级路径</div>
+                <div className="font-medium text-[var(--text)] mb-1.5">升级路径 (两条路, 任一条都行)</div>
                 <ul className="text-xs space-y-1 list-disc ml-5">
-                  <li>普通用户 → 累计带来 <b>5 付费用户</b> 或 <b>¥500 流水</b> → 自动升 <b>认证推广员</b></li>
-                  <li>认证推广员 → 月推 <b>20 人</b> 或 <b>¥3000 流水</b> → 自动升 <b>核心合伙人</b></li>
+                  <li><b>普通 → 认证</b>: 累计带 5 付费 / ¥500 流水 自动升; 或联系客服申请</li>
+                  <li><b>认证 → 合伙人</b>: 月推 20 人 / ¥3000 流水 自动升; 或联系客服申请</li>
                   <li>等级一旦达成不会回退, 持续享有对应分成比例</li>
                 </ul>
               </div>
@@ -1267,6 +1280,31 @@ function ReferralTab({ refCode, refStatus, refBalance, onShowQr, onReload }: {
             </section>
 
             <button onClick={() => setGuideOpen(false)} className="self-end px-4 py-2 rounded-lg bg-[var(--text)] text-[var(--bg)] text-sm hover:opacity-80 cursor-pointer">知道了</button>
+          </div>
+        </div>
+      )}
+
+      {/* 联系客服申请升级 modal */}
+      {applyOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={() => setApplyOpen(false)}>
+          <div onClick={e => e.stopPropagation()} className="relative bg-[var(--bg-card)] border border-[var(--border)] rounded-2xl shadow-ios-lg w-full max-w-sm p-6 flex flex-col gap-4">
+            <button onClick={() => setApplyOpen(false)} className="absolute top-4 right-4 p-1 rounded text-[var(--text-3)] hover:bg-[var(--bg-hover)] cursor-pointer"><X size={14}/></button>
+            <div className="text-base font-semibold">联系客服申请升级</div>
+            <p className="text-xs text-[var(--text-2)] leading-relaxed">
+              不想等条件自动达成? 可以直接联系客服申请<b>认证推广员</b>或<b>核心合伙人</b>等级.
+              客服会评估你的渠道质量 + 推广能力, 通过后立即生效.
+            </p>
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-hover)] p-4 flex flex-col gap-2">
+              <div className="text-xs text-[var(--text-3)]">客服微信</div>
+              <div className="text-base font-mono font-semibold text-[var(--text)] tracking-wide">monoi_kefu</div>
+              <div className="text-[11px] text-[var(--text-3)]">备注: <b>申请推广升级</b> + 你的注册手机号</div>
+            </div>
+            <button onClick={() => {
+              navigator.clipboard.writeText('monoi_kefu').then(() => alert('微信号已复制, 打开微信加好友吧'))
+            }}
+              className="py-2 rounded-lg bg-[var(--text)] text-[var(--bg)] text-sm hover:opacity-80 cursor-pointer">
+              复制微信号
+            </button>
           </div>
         </div>
       )}
