@@ -251,12 +251,23 @@ export default function Account() {
     if (plans?.credit_packs?.[code]) return plans.credit_packs[code].name
     if (plans?.plans?.[code]) return plans.plans[code].name
     if (code === 'free') return '免费版'
-    // 消耗类 feature 友好名
+    // 消耗类 feature 友好名 — 也覆盖所有 source 值, 避免账单里直接露 register_referrer 这种英文 code
     const featureMap: Record<string, string> = {
+      // 扣费 (账单 + 号过滤后看不到, 留着调试用)
       voice_preset: '预设音色配音', voice_clone: '克隆音色配音',
       narration_clean: '口播剪辑导出', compose_no_dh: '一键合成', digital_human: '数字人合成',
       script: '文案生成', footage_match: '素材匹配', cover_generate: '封面生成', publish: '自动发布',
-      free_signup: '注册赠送', subscription_grant: '会员月度积分', purchase: '加购积分包',
+      // 赠送/进账
+      free_signup: '注册赠送',
+      subscription_grant: '会员月度积分',
+      purchase: '加购积分包',
+      daily_free_grant: '每日赠送',
+      daily_free_expire: '每日清零',
+      register_referrer: '推广奖励 (你邀请的人注册)',
+      register_invitee: '推广奖励 (你被邀请注册)',
+      first_order_commission: '推广首单奖励',
+      referral: '推广奖励',
+      admin_grant: '客服赠送',
     }
     return featureMap[code] || code
   }
