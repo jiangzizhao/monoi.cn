@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Claude Code 工作目录 (临时, 不 track)
+.claude/worktrees/
