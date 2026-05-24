@@ -24,9 +24,9 @@ const RATIO_SIZE: Record<OutputRatio, { w: number; h: number; label: string }> =
 }
 
 const RECORD_PRESETS = [
-  { id: 'screen_camera',     label: '屏幕 + 人物 PIP',  desc: '共享电脑窗口作背景, 摄像头圆形 PIP 叠加' },
-  { id: 'whiteboard_camera', label: '白板 + 人物 PIP',  desc: '纯白背景 + 摄像头叠加. 解说没现成 PPT 时用' },
-  { id: 'screen_only',       label: '仅屏幕',          desc: '只录屏幕, 无人物 (纯演示)' },
+  { id: 'screen_camera',     label: '屏幕 + 人物 PIP',  desc: '录 PPT/Word/代码 等 + 人物 PIP. 选屏幕时一定选 PPT 类窗口, 不要选浏览器' },
+  { id: 'whiteboard_camera', label: '白板 + 人物 PIP',  desc: '纯白背景 + 摄像头叠加. 解说没现成 PPT 时用 (推荐)' },
+  { id: 'screen_only',       label: '仅屏幕',          desc: '只录屏幕, 无人物. 选窗口时不能选浏览器' },
   { id: 'camera_only',       label: '仅摄像头',        desc: '只录自己, 没屏幕 (vlog)' },
 ]
 
@@ -510,10 +510,16 @@ export default function RecordTab() {
                   </button>
                 </div>
               )}
-              {phase === 'previewing' && (
-                <p className="text-[11px] text-[var(--text-3)] text-center">
-                  💡 屏幕共享建议选**单个应用窗口** (如 PPT / Keynote / 浏览器某个标签页), 不要选"整个屏幕" — 否则录到 monoi 自己, 画面套娃无限镜子.
-                </p>
+              {phase === 'previewing' && (bgMode === 'screen') && (
+                <div className="rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-300 dark:border-amber-900/50 p-3 text-xs text-amber-800 dark:text-amber-300 leading-relaxed">
+                  <div className="font-medium mb-1.5 flex items-center gap-1.5">💡 避免画面"套娃" 的 3 步操作</div>
+                  <ol className="list-decimal list-inside space-y-1 pl-1">
+                    <li>录之前先打开你要讲的东西 (PPT / Keynote / Word / Notion / VS Code 等), <b>不能是浏览器</b></li>
+                    <li>回 monoi 点底部 🖥️ 屏幕 → 浏览器弹"选择共享" 窗口</li>
+                    <li>选 <b>"应用窗口"</b> tab → 找你刚开的那个 app, <b>千万不要选 Chrome / Edge / monoi</b></li>
+                  </ol>
+                  <p className="mt-2 text-[10px] opacity-80">为啥不能选浏览器: Chrome 里是 monoi, monoi canvas 又显示 Chrome → 无限套娃, 录出来啥也看不清.</p>
+                </div>
               )}
 
               {/* 摄像头源切换 — 多个摄像头时显示下拉 (寻影/iPhone/USB/内置), 单个不显示 */}
