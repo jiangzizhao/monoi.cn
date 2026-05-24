@@ -316,7 +316,11 @@ export default function RecordTab() {
     const stream = canvasRef.current.captureStream(30)
     if (cameraStream) cameraStream.getAudioTracks().forEach(t => stream.addTrack(t))
     if (screenStream) screenStream.getAudioTracks().forEach(t => stream.addTrack(t))
-    const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus') ? 'video/webm;codecs=vp9,opus'
+    // 编码优先级: mp4 (浏览器原生支持时) → webm vp9 → webm vp8 → 默认 webm
+    // Chrome 125+ / Safari 都支持 video/mp4;codecs=avc1, 直接出 mp4 不用后端转
+    const mime = MediaRecorder.isTypeSupported('video/mp4;codecs=avc1,mp4a.40.2') ? 'video/mp4;codecs=avc1,mp4a.40.2'
+      : MediaRecorder.isTypeSupported('video/mp4;codecs=avc1') ? 'video/mp4;codecs=avc1'
+      : MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus') ? 'video/webm;codecs=vp9,opus'
       : MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus') ? 'video/webm;codecs=vp8,opus'
       : 'video/webm'
     chunksRef.current = []
@@ -345,8 +349,12 @@ export default function RecordTab() {
   }
   const downloadVideo = () => {
     if (!recordedBlob) return
+    // 文件扩展名根据实际 mime 决定 (mp4 / webm)
+    const isMp4 = recordedBlob.type.includes('mp4')
+    const ext = isMp4 ? 'mp4' : 'webm'
     const a = document.createElement('a')
-    a.href = recordedUrl; a.download = `monoi-record-${Date.now()}.webm`
+    a.href = recordedUrl
+    a.download = `monoi-record-${Date.now()}.${ext}`
     document.body.appendChild(a); a.click(); document.body.removeChild(a)
   }
 
@@ -450,54 +458,42 @@ export default function RecordTab() {
             </div>
           )}
 
-          {/* === previewing / recording: canvas + 进度 === */}
+          {/* === previewing / recording: canvas + 进度 ===
+              recording 时也显示画面 (用户要看见录的啥). 套娃风险只在选"整个屏幕"
+              录屏才会出现 — 那种情况之前已经在 requestScreen 里检测警告. */}
           {(phase === 'previewing' || phase === 'recording') && (
             <div className="flex flex-col gap-3">
-              {/* 录制中故意藏画布 — 否则 getDisplayMedia 录到浏览器自己 → 套娃无限镜子.
-                  画布仍然在跑 (requestAnimationFrame + captureStream 都要), 只是 visibility hidden 视觉藏掉 */}
-              {phase === 'previewing' ? (
+              {/* 白板模式: 显示 Konva 编辑器 + 隐藏合成 canvas (Konva 自带预览, 合成走幕后) */}
+              {bgMode === 'whiteboard' ? (
                 <>
-                  {/* 白板模式: 只显示 Konva 编辑器 + 摄像头小预览, 不显示合成 canvas
-                      (合成 canvas 仍然在 DOM 里跑, 只是 hidden — captureStream 仍照常工作) */}
-                  {bgMode === 'whiteboard' ? (
-                    <>
-                      <WhiteboardEditor
-                        width={RATIO_SIZE[outputRatio].w}
-                        height={RATIO_SIZE[outputRatio].h}
-                        onStageReady={s => { whiteboardStageRef.current = s }}
-                        cameraStream={cameraStream}
-                        pipPos={pipPos}
-                        pipSizePct={pipSize}
-                        pipShape={pipShape}
-                      />
-                      {/* 摄像头小预览 (右下角缩略, 让用户能确认摄像头工作) */}
-                      {cameraStream && (
-                        <div className="text-[11px] text-[var(--text-3)] text-center">摄像头 PIP 会在录制时叠到白板上 (位置 / 大小 / 形状下方 PIP 设置调)</div>
-                      )}
-                      {/* 隐藏的合成 canvas, captureStream 需要它真在 DOM 里渲染 */}
-                      <canvas ref={canvasRef} style={{ position: 'fixed', left: '-9999px', top: 0, width: 1, height: 1 }}/>
-                    </>
-                  ) : (
-                    <div className="rounded-2xl border border-[var(--border)] bg-black overflow-hidden flex items-center justify-center" style={{ minHeight: '300px' }}>
-                      <canvas ref={canvasRef} className="block max-w-full max-h-[60vh]"/>
-                    </div>
+                  <WhiteboardEditor
+                    width={RATIO_SIZE[outputRatio].w}
+                    height={RATIO_SIZE[outputRatio].h}
+                    onStageReady={s => { whiteboardStageRef.current = s }}
+                    cameraStream={cameraStream}
+                    pipPos={pipPos}
+                    pipSizePct={pipSize}
+                    pipShape={pipShape}
+                  />
+                  {phase === 'previewing' && cameraStream && (
+                    <div className="text-[11px] text-[var(--text-3)] text-center">摄像头 PIP 会在录制时叠到白板上 (位置 / 大小 / 形状下方 PIP 设置调)</div>
                   )}
-                </>
-              ) : (
-                // recording 阶段: canvas 绝对定位藏到屏幕外 (浏览器仍渲染 → captureStream 能 capture)
-                <>
-                  <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] py-12 px-6 flex flex-col items-center justify-center gap-3 min-h-[200px]">
-                    <div className="w-3 h-3 rounded-full bg-red-500 animate-pulse"/>
-                    <div className="text-2xl font-semibold text-[var(--text)]">
-                      {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}
-                    </div>
-                    <div className="text-xs text-[var(--text-3)] text-center max-w-xs">
-                      正在录制. 画面已藏起避免"套娃镜子". 录完点停止即可看回放.
-                    </div>
-                  </div>
-                  {/* 隐藏但仍渲染的 canvas — fixed 到屏幕外但浏览器不会优化掉 (vs display:none 可能停渲染) */}
+                  {/* 隐藏的合成 canvas, captureStream 需要它真在 DOM 里渲染 */}
                   <canvas ref={canvasRef} style={{ position: 'fixed', left: '-9999px', top: 0, width: 1, height: 1 }}/>
                 </>
+              ) : (
+                // 屏幕 / 仅摄像头模式: 显示合成 canvas, 录制时也显示让用户能看见正在录的内容
+                <div className="rounded-2xl border border-[var(--border)] bg-black overflow-hidden flex items-center justify-center" style={{ minHeight: '300px' }}>
+                  <canvas ref={canvasRef} className="block max-w-full max-h-[60vh]"/>
+                </div>
+              )}
+
+              {/* recording 时, 顶部叠 "🔴 录制中 0:23" 浮窗 */}
+              {phase === 'recording' && (
+                <div className="flex items-center justify-center gap-2 text-sm text-red-500 font-medium">
+                  <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"/>
+                  录制中 {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}
+                </div>
               )}
               {phase === 'previewing' && (
                 <p className="text-[11px] text-[var(--text-3)] text-center">
