@@ -70,6 +70,8 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
   const [serverFonts, setServerFonts] = useState<{ label: string; value: string }[]>([])
   const [fontStatus, setFontStatus] = useState<'loading' | 'ok' | 'fail' | 'partial'>('loading')
   const [fontError, setFontError] = useState<string>('')
+  const [failedFontFiles, setFailedFontFiles] = useState<string[]>([])
+  const [showFailDetail, setShowFailDetail] = useState(false)
 
   // 拉服务器字体 → FontFace API 加载到浏览器 → 注入到字体下拉
   useEffect(() => {
@@ -105,6 +107,7 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
           }
         }
         setServerFonts(loaded)
+        setFailedFontFiles(failed)
         setFontStatus(failed.length === 0 ? 'ok' : 'partial')
         if (failed.length > 0) setFontError(`${failed.length} 个字体加载失败 (其他 ${loaded.length} 个 OK)`)
       })
@@ -318,15 +321,15 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
         </button>
 
         {/* 字体加载状态 — 用户知道 monoi 字体库到底拉没拉到 */}
-        <div className="text-[10px] flex items-center gap-1"
+        <button
+          onClick={() => (fontStatus === 'partial' || fontStatus === 'fail') && setShowFailDetail(s => !s)}
+          className="text-[10px] flex items-center gap-1 cursor-pointer hover:bg-[var(--bg-hover)] px-1.5 py-0.5 rounded"
           title={fontError || `加载了 ${serverFonts.length} 个 monoi 字体`}>
           {fontStatus === 'loading' && <span className="text-[var(--text-3)]">字体加载中...</span>}
           {fontStatus === 'ok' && <span className="text-green-500">字体 {serverFonts.length} 个 ✓</span>}
-          {fontStatus === 'partial' && <span className="text-amber-500">字体 {serverFonts.length} 个 (部分失败)</span>}
-          {fontStatus === 'fail' && (
-            <span className="text-red-400 cursor-help">字体未加载 ⚠</span>
-          )}
-        </div>
+          {fontStatus === 'partial' && <span className="text-amber-500">字体 {serverFonts.length} 个 (部分失败, 点查看)</span>}
+          {fontStatus === 'fail' && <span className="text-red-400">字体未加载 ⚠ (点查看)</span>}
+        </button>
 
         {/* 文字属性面板 (选中文字时显示) */}
         {selectedItem?.type === 'text' && (
@@ -351,6 +354,27 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
           </div>
         )}
       </div>
+
+      {/* 字体失败详情 — 用户点状态条展开看哪些字体挂了, 帮判规律 (是不是全 .ttc / 全某文件夹) */}
+      {showFailDetail && (failedFontFiles.length > 0 || fontStatus === 'fail') && (
+        <div className="rounded-xl border border-amber-500/40 bg-amber-50/50 dark:bg-amber-950/20 p-3 text-[11px] text-amber-800 dark:text-amber-400 flex flex-col gap-1.5">
+          <div className="font-medium">{fontError}</div>
+          {failedFontFiles.length > 0 && (
+            <>
+              <div className="text-[10px] opacity-80">失败的字体文件:</div>
+              <div className="max-h-24 overflow-y-auto bg-white/30 dark:bg-black/20 rounded p-1.5 font-mono text-[10px] leading-relaxed">
+                {failedFontFiles.map((f, i) => <div key={i}>· {f}</div>)}
+              </div>
+              <div className="text-[10px] opacity-80 mt-1">
+                常见原因: 1) <b>.ttc</b> 浏览器不支持; 2) <b>CORS 头缺</b> 浏览器拒载; 3) 字体文件路径在 Win 上变了
+              </div>
+            </>
+          )}
+          {fontStatus === 'fail' && (
+            <div className="text-[10px] opacity-80">检查浏览器 F12 → Console 找 <code>[whiteboard]</code> 开头的 log</div>
+          )}
+        </div>
+      )}
 
       {/* Stage container — Konva 内部用原生 1080x1920 (高分辨率), CSS transform scale 缩放显示.
           这样 stage.toCanvas() 总是返回原始分辨率, 主 canvas 合成时不丢精度.
