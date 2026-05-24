@@ -115,13 +115,18 @@ export function WhiteboardEditor({ width, height, onStageReady }: Props) {
     setSelectedId(null)
   }
 
-  // 添加文字
+  // 添加文字 — 点 "+ 文字" 立刻弹输入框让用户输入, 不用再双击
   const addText = () => {
+    const txt = prompt('输入文字内容:', '')
+    if (txt === null || !txt.trim()) return  // 用户取消或空
     const id = `t_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
+    const fontSize = 72  // 默认大字号, 在 1080x1920 画布上不会显得太小
+    // 估算文字宽度居中: 中文约 1 字符宽 = fontSize, 英文约 0.5
+    const estW = txt.length * fontSize * 0.8
     const newItem: WhiteboardItem = {
       id, type: 'text',
-      x: width / 2 - 100, y: height / 2 - 24,
-      text: '双击编辑文字', fontSize: 48, fill: '#000000',
+      x: width / 2 - estW / 2, y: height / 2 - fontSize / 2,
+      text: txt, fontSize, fill: '#000000',
       fontFamily: FONT_FAMILIES[0].value,
       rotation: 0,
     }
@@ -271,14 +276,19 @@ export function WhiteboardEditor({ width, height, onStageReady }: Props) {
         )}
       </div>
 
-      {/* Stage container */}
+      {/* Stage container — Konva 内部用原生 1080x1920 (高分辨率), CSS transform scale 缩放显示.
+          这样 stage.toCanvas() 总是返回原始分辨率, 主 canvas 合成时不丢精度.
+          外层 wrapper 限制可见区域 = 缩放后大小 (避免 overflow 把页面撑爆) */}
       <div onDrop={onDrop} onDragOver={onDragOver}
-        className="rounded-xl border border-[var(--border)] bg-white overflow-hidden flex items-center justify-center mx-auto"
+        className="rounded-xl border border-[var(--border)] bg-white overflow-hidden mx-auto relative"
         style={{ width: displaySize.w, height: displaySize.h }}>
+        <div style={{
+          width: width, height: height,
+          transform: `scale(${scale})`,
+          transformOrigin: 'top left',
+        }}>
         <Stage ref={stageRef} width={width} height={height}
-          scaleX={scale} scaleY={scale}
           onMouseDown={(e) => {
-            // 点击空白处清除选中
             if (e.target === e.target.getStage() || e.target.attrs.id === 'bg-rect') {
               setSelectedId(null)
             }
@@ -331,6 +341,7 @@ export function WhiteboardEditor({ width, height, onStageReady }: Props) {
               }}/>
           </Layer>
         </Stage>
+        </div>
       </div>
 
       <p className="text-[10px] text-[var(--text-3)] text-center">
