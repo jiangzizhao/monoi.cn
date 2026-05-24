@@ -2605,6 +2605,7 @@ async def publish_check_login(platform: str):
 
 _FUNASR_MODEL = None
 _FUNASR_LOCK = None
+_FUNASR_INFER_LOCK = None  # asyncio.Lock — 串行化 model.generate, 防多用户并发推理时模型内部状态冲突
 
 def _get_funasr_model():
     """懒加载 funasr 中文流式模型. 第一次用慢 (要下模型 + load), 之后缓存."""
@@ -2637,13 +2638,14 @@ async def asr_websocket(ws: WebSocket):
     """实时 ASR WebSocket. 前端发 PCM 16kHz int16 mono 音频 chunks (binary),
     后端推送 JSON {type: 'partial'|'final', text: '...'}.
 
-    协议:
-    - client → server: binary frame (Int16Array.buffer), PCM 16kHz mono, 每帧建议 200-600ms 音频
-    - server → client: {type: 'partial', text: '....'} (实时部分识别)
-    - server → client: {type: 'final', text: '....'} (一段说完, 用户停顿)
-    - server → client: {type: 'error', message: '...'} (异常)
-    - client 关闭连接 → server 收尾 + 关闭
+    多用户支持: 每个 WebSocket 连接独立 cache + accumulated_text (function-local 变量).
+    model.generate 调用用 asyncio.Lock 串行化 + run_in_executor 不阻塞事件循环,
+    多个用户能并发连接 + 同时说, 推理一个个跑 (rtf 0.04 = 25x 实时, 5-10 并发也撑得住).
     """
+    import asyncio
+    global _FUNASR_INFER_LOCK
+    if _FUNASR_INFER_LOCK is None:
+        _FUNASR_INFER_LOCK = asyncio.Lock()
     await ws.accept()
     print('[ws/asr] 客户端连上', flush=True)
 
@@ -2685,14 +2687,19 @@ async def asr_websocket(ws: WebSocket):
                 rms = float(np.sqrt(np.mean(infer_chunk ** 2)))
 
                 try:
-                    result = model.generate(
-                        input=infer_chunk,
-                        cache=cache,
-                        is_final=False,
-                        chunk_size=chunk_size,
-                        encoder_chunk_look_back=encoder_chunk_look_back,
-                        decoder_chunk_look_back=decoder_chunk_look_back,
-                    )
+                    # 串行 + 不阻塞事件循环:
+                    # - asyncio.Lock 防多用户并发调 model.generate 时模型内部状态冲突
+                    # - run_in_executor 把同步 PyTorch 调用扔线程池, 别的 WebSocket 还能正常 receive/send
+                    async with _FUNASR_INFER_LOCK:
+                        loop = asyncio.get_event_loop()
+                        result = await loop.run_in_executor(None, lambda: model.generate(
+                            input=infer_chunk,
+                            cache=cache,
+                            is_final=False,
+                            chunk_size=chunk_size,
+                            encoder_chunk_look_back=encoder_chunk_look_back,
+                            decoder_chunk_look_back=decoder_chunk_look_back,
+                        ))
                     text = result[0].get('text', '') if result else ''
                     # 每 5 次推理打一次诊断 log (太频繁会刷屏)
                     if chunk_count % 5 == 1:
@@ -2707,14 +2714,16 @@ async def asr_websocket(ws: WebSocket):
         # 用户断开, 收尾: 把剩余 buffer + is_final=True 一次性识别
         if len(audio_buffer) > 0 or accumulated_text:
             try:
-                result = model.generate(
-                    input=audio_buffer if len(audio_buffer) > 0 else np.zeros(SAMPLES_PER_CHUNK, dtype=np.float32),
-                    cache=cache,
-                    is_final=True,
-                    chunk_size=chunk_size,
-                    encoder_chunk_look_back=encoder_chunk_look_back,
-                    decoder_chunk_look_back=decoder_chunk_look_back,
-                )
+                async with _FUNASR_INFER_LOCK:
+                    loop = asyncio.get_event_loop()
+                    result = await loop.run_in_executor(None, lambda: model.generate(
+                        input=audio_buffer if len(audio_buffer) > 0 else np.zeros(SAMPLES_PER_CHUNK, dtype=np.float32),
+                        cache=cache,
+                        is_final=True,
+                        chunk_size=chunk_size,
+                        encoder_chunk_look_back=encoder_chunk_look_back,
+                        decoder_chunk_look_back=decoder_chunk_look_back,
+                    ))
                 tail = result[0].get('text', '') if result else ''
                 if tail:
                     accumulated_text += tail
