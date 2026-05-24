@@ -68,31 +68,51 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
   const [historyIdx, setHistoryIdx] = useState(0)
   // monoi 服务器字体库 (跟 CoverGeneratorForm 用同一份)
   const [serverFonts, setServerFonts] = useState<{ label: string; value: string }[]>([])
+  const [fontStatus, setFontStatus] = useState<'loading' | 'ok' | 'fail' | 'partial'>('loading')
+  const [fontError, setFontError] = useState<string>('')
 
   // 拉服务器字体 → FontFace API 加载到浏览器 → 注入到字体下拉
   useEffect(() => {
     const directBase = (import.meta as any).env?.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'
-    fetch(directBase + '/api/voice/cover-fonts')
-      .then(r => r.json())
+    const url = directBase + '/api/voice/cover-fonts'
+    console.log('[whiteboard] 拉字体库:', url)
+    fetch(url)
+      .then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        return r.json()
+      })
       .then(async (d: any) => {
         const list: { file: string; label: string }[] = d.fonts || []
-        // 加载每个字体, 用 monoi-wb-* 前缀避免跟封面那边冲突
+        console.log(`[whiteboard] 后端返 ${list.length} 个字体`, list.map(f => f.file))
+        if (list.length === 0) {
+          setFontStatus('fail')
+          setFontError('后端没字体, /api/voice/cover-fonts 返了空 list')
+          return
+        }
         const loaded: { label: string; value: string }[] = []
+        const failed: string[] = []
         for (const f of list) {
           const family = `monoi-wb-${f.file.replace(/[^\w]/g, '')}`
-          const url = `${directBase}/api/voice/cover-font-file/${encodeURIComponent(f.file)}`
+          const fontUrl = `${directBase}/api/voice/cover-font-file/${encodeURIComponent(f.file)}`
           try {
-            const ff = new FontFace(family, `url(${url})`)
+            const ff = new FontFace(family, `url(${fontUrl})`)
             await ff.load()
             ;(document as any).fonts.add(ff)
             loaded.push({ label: f.label || f.file, value: family })
           } catch (e) {
-            console.warn('font load fail', f.file, e)
+            console.warn('[whiteboard] font load fail', f.file, e)
+            failed.push(f.file)
           }
         }
         setServerFonts(loaded)
+        setFontStatus(failed.length === 0 ? 'ok' : 'partial')
+        if (failed.length > 0) setFontError(`${failed.length} 个字体加载失败 (其他 ${loaded.length} 个 OK)`)
       })
-      .catch(() => setServerFonts([]))
+      .catch((e) => {
+        console.error('[whiteboard] 字体库拉取失败:', e)
+        setFontStatus('fail')
+        setFontError(`拉失败: ${e?.message || e}. 检查 voice-server 在 Win 上跑着 + NATAPP 通`)
+      })
   }, [])
 
   const FONT_FAMILIES = [...DEFAULT_FONT_FAMILIES, ...serverFonts]
@@ -296,6 +316,17 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
           className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs text-red-400 hover:bg-red-950/20 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
           <Trash2 size={13}/>
         </button>
+
+        {/* 字体加载状态 — 用户知道 monoi 字体库到底拉没拉到 */}
+        <div className="text-[10px] flex items-center gap-1"
+          title={fontError || `加载了 ${serverFonts.length} 个 monoi 字体`}>
+          {fontStatus === 'loading' && <span className="text-[var(--text-3)]">字体加载中...</span>}
+          {fontStatus === 'ok' && <span className="text-green-500">字体 {serverFonts.length} 个 ✓</span>}
+          {fontStatus === 'partial' && <span className="text-amber-500">字体 {serverFonts.length} 个 (部分失败)</span>}
+          {fontStatus === 'fail' && (
+            <span className="text-red-400 cursor-help">字体未加载 ⚠</span>
+          )}
+        </div>
 
         {/* 文字属性面板 (选中文字时显示) */}
         {selectedItem?.type === 'text' && (
