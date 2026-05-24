@@ -390,45 +390,54 @@ export default function RecordTab() {
         <div className="max-w-3xl mx-auto px-4 py-8 flex flex-col gap-6">
 
           {error && (
-            <div className="text-sm text-red-400 bg-red-950/20 border border-red-900/30 rounded-lg px-3 py-2 flex flex-col gap-2">
-              <div className="flex items-start gap-2">
-                <AlertCircle size={14} className="mt-0.5 flex-shrink-0"/>
-                <span className="leading-relaxed">{error}</span>
-              </div>
-              {/* 调试信息: 显示浏览器看到的摄像头列表, 帮用户判断是不是寻影/iPhone 没被识别 */}
-              {availableCameras.length > 0 && (
-                <div className="text-[11px] text-red-300/80 border-t border-red-900/30 pt-2 mt-1">
-                  浏览器检测到 {availableCameras.length} 个摄像头:
-                  {availableCameras.map((c, i) => (
-                    <div key={i} className="pl-3">· {c.label || `(未授权, 设备 ID ${c.deviceId.slice(0, 8)}...)`}</div>
-                  ))}
+            <>
+              {/* 有多个摄像头时, 直接给"选一个" 卡片列表 (用户点想用的那个), 不要红 error + dropdown 难看 */}
+              {availableCameras.length > 1 ? (
+                <div className="rounded-2xl border border-amber-500/40 bg-amber-50/50 dark:bg-amber-950/20 p-4 flex flex-col gap-3">
+                  <div className="flex items-start gap-2 text-sm text-amber-700 dark:text-amber-400">
+                    <AlertCircle size={16} className="mt-0.5 flex-shrink-0"/>
+                    <span className="leading-relaxed">默认摄像头用不了. 你电脑上有 {availableCameras.length} 个摄像头, 点一个想用的试试:</span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {availableCameras.map(c => {
+                      const isReal = c.label && !/virtual|mate/i.test(c.label)
+                      const displayLabel = c.label || `设备 ${c.deviceId.slice(0, 8)}`
+                      return (
+                        <button key={c.deviceId}
+                          onClick={() => { setError(''); requestCamera(c.deviceId) }}
+                          className={`text-left px-3 py-2.5 rounded-xl border transition-all cursor-pointer ${
+                            isReal
+                              ? 'border-green-500/50 bg-green-50/50 dark:bg-green-950/20 hover:bg-green-100/50 dark:hover:bg-green-950/30'
+                              : 'border-[var(--border)] bg-[var(--bg-card)] hover:bg-[var(--bg-hover)]'
+                          }`}>
+                          <div className="text-sm font-medium text-[var(--text)] flex items-center gap-1.5">
+                            {isReal && <span className="text-[10px] text-green-600 dark:text-green-500 bg-green-100 dark:bg-green-950/50 px-1.5 py-0.5 rounded">推荐</span>}
+                            {displayLabel}
+                          </div>
+                          <div className="text-[10px] text-[var(--text-3)] mt-0.5">
+                            {isReal ? '真实摄像头, 物理插着的设备' : '虚拟摄像头 (要对应的 app 在跑)'}
+                          </div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <p className="text-[10px] text-[var(--text-3)]">提示: 标"推荐"是真实摄像头, 一般直接能用. 虚拟摄像头要对应 app (OBS/寻影/WebcastMate) 在跑才有画面</p>
+                </div>
+              ) : (
+                /* 没有备选源或没检测到摄像头 → 红 error 显示原始错误信息 */
+                <div className="text-sm text-red-400 bg-red-950/20 border border-red-900/30 rounded-lg px-3 py-2 flex flex-col gap-2">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle size={14} className="mt-0.5 flex-shrink-0"/>
+                    <span className="leading-relaxed">{error}</span>
+                  </div>
+                  {availableCameras.length === 0 && (
+                    <div className="text-[11px] text-red-300/80 border-t border-red-900/30 pt-2 mt-1">
+                      浏览器一个摄像头都检测不到. 检查 USB 是否插好 / 系统隐私是否允许浏览器
+                    </div>
+                  )}
                 </div>
               )}
-              {availableCameras.length === 0 && (
-                <div className="text-[11px] text-red-300/80 border-t border-red-900/30 pt-2 mt-1">
-                  浏览器一个摄像头都检测不到. 寻影 / 外接 / 内置都没看见.
-                </div>
-              )}
-              {/* 错误状态下提供下拉直接选其他源, 不用回 setup 重来 */}
-              {availableCameras.length > 1 && (
-                <div className="flex items-center gap-2 border-t border-red-900/30 pt-2 mt-1">
-                  <span className="text-[11px] text-red-300/80 flex-shrink-0">换一个源试:</span>
-                  <select
-                    onChange={e => { setError(''); requestCamera(e.target.value) }}
-                    defaultValue=""
-                    className="flex-1 bg-[var(--bg-input)] border border-[var(--border)] rounded-lg px-2 py-1 text-xs text-[var(--text)] cursor-pointer">
-                    <option value="" disabled>选一个摄像头...</option>
-                    {availableCameras.map(c => (
-                      <option key={c.deviceId} value={c.deviceId}>
-                        {c.label || `设备 ${c.deviceId.slice(0, 8)}`}
-                        {/* 提示哪个是真摄像头 vs 虚拟 */}
-                        {c.label && !/virtual|mate/i.test(c.label) ? ' (真实摄像头, 推荐)' : ''}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-            </div>
+            </>
           )}
 
           {/* === setup 阶段: 跟 WelcomeMessage 一模一样的布局: 头像 + 介绍 + 选项 grid === */}
