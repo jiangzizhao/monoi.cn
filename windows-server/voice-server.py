@@ -20,7 +20,7 @@ import torchaudio
 import soundfile as sf
 import numpy as np
 import torchaudio.transforms as TAT
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
@@ -2596,6 +2596,125 @@ async def publish_check_login(platform: str):
             "platform": platform,
             "detail": "发布功能正在升级中, 暂时不可用. 加客服微信 XXXXX 申请优先使用.",
         }
+
+
+# ============================== funasr 实时 ASR (闪说) ==============================
+# Phase 2 闪说: 浏览器 → WebSocket → funasr 流式中文 ASR → 实时返文字
+# 模型 lazy-load: 第一次有用户连 /ws/asr 时才加载, 不影响启动速度
+# 模型 ~500MB, 跑在 5060 Ti GPU 上, 单用户实时 < 500ms 延迟
+
+_FUNASR_MODEL = None
+_FUNASR_LOCK = None
+
+def _get_funasr_model():
+    """懒加载 funasr 中文流式模型. 第一次用慢 (要下模型 + load), 之后缓存."""
+    global _FUNASR_MODEL, _FUNASR_LOCK
+    if _FUNASR_MODEL is not None:
+        return _FUNASR_MODEL
+    if _FUNASR_LOCK is None:
+        import threading
+        _FUNASR_LOCK = threading.Lock()
+    with _FUNASR_LOCK:
+        if _FUNASR_MODEL is not None:
+            return _FUNASR_MODEL
+        print('[funasr] 第一次用, 加载 paraformer-zh-streaming 模型 (首次下载约 500MB, 后续秒载)...', flush=True)
+        try:
+            from funasr import AutoModel
+            _FUNASR_MODEL = AutoModel(
+                model="paraformer-zh-streaming",
+                # 用 GPU 加速 (你 5060 Ti). cpu fallback 也能跑就是慢
+                device="cuda" if torch.cuda.is_available() else "cpu",
+            )
+            print('[funasr] 模型加载完成, 准备 ASR', flush=True)
+        except Exception as e:
+            print(f'[funasr] 模型加载失败: {e}', flush=True)
+            raise
+    return _FUNASR_MODEL
+
+
+@app.websocket("/ws/asr")
+async def asr_websocket(ws: WebSocket):
+    """实时 ASR WebSocket. 前端发 PCM 16kHz int16 mono 音频 chunks (binary),
+    后端推送 JSON {type: 'partial'|'final', text: '...'}.
+
+    协议:
+    - client → server: binary frame (Int16Array.buffer), PCM 16kHz mono, 每帧建议 200-600ms 音频
+    - server → client: {type: 'partial', text: '....'} (实时部分识别)
+    - server → client: {type: 'final', text: '....'} (一段说完, 用户停顿)
+    - server → client: {type: 'error', message: '...'} (异常)
+    - client 关闭连接 → server 收尾 + 关闭
+    """
+    await ws.accept()
+    print('[ws/asr] 客户端连上', flush=True)
+
+    # 懒加载模型
+    try:
+        model = _get_funasr_model()
+    except Exception as e:
+        await ws.send_json({'type': 'error', 'message': f'模型加载失败: {e}'})
+        await ws.close()
+        return
+
+    # funasr 流式 chunk 配置 (官方推荐): 当前 chunk 600ms = 10 帧 60ms
+    chunk_size = [0, 10, 5]  # [left, current, right] in 60ms units
+    encoder_chunk_look_back = 4
+    decoder_chunk_look_back = 1
+    cache = {}  # funasr 用 cache 在多次 generate 间传递状态
+
+    # 音频累积 buffer: 收到的 PCM 凑够 600ms (9600 samples @16kHz) 才喂给模型
+    SAMPLES_PER_CHUNK = 16000 * 600 // 1000  # 9600
+    audio_buffer = np.array([], dtype=np.float32)
+
+    accumulated_text = ''  # 当前 final 段已识别的文字 (用于 partial 区分)
+
+    try:
+        while True:
+            data = await ws.receive_bytes()
+            # bytes → int16 → float32 (-1 to 1)
+            chunk = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
+            audio_buffer = np.concatenate([audio_buffer, chunk])
+
+            # 凑够一个 chunk 就推理
+            while len(audio_buffer) >= SAMPLES_PER_CHUNK:
+                infer_chunk = audio_buffer[:SAMPLES_PER_CHUNK]
+                audio_buffer = audio_buffer[SAMPLES_PER_CHUNK:]
+
+                try:
+                    result = model.generate(
+                        input=infer_chunk,
+                        cache=cache,
+                        is_final=False,
+                        chunk_size=chunk_size,
+                        encoder_chunk_look_back=encoder_chunk_look_back,
+                        decoder_chunk_look_back=decoder_chunk_look_back,
+                    )
+                    text = result[0].get('text', '') if result else ''
+                    if text:
+                        accumulated_text += text
+                        await ws.send_json({'type': 'partial', 'text': accumulated_text})
+                except Exception as e:
+                    print(f'[ws/asr] 推理失败: {e}', flush=True)
+                    await ws.send_json({'type': 'error', 'message': f'推理失败: {e}'})
+    except WebSocketDisconnect:
+        # 用户断开, 收尾: 把剩余 buffer + is_final=True 一次性识别
+        if len(audio_buffer) > 0 or accumulated_text:
+            try:
+                result = model.generate(
+                    input=audio_buffer if len(audio_buffer) > 0 else np.zeros(SAMPLES_PER_CHUNK, dtype=np.float32),
+                    cache=cache,
+                    is_final=True,
+                    chunk_size=chunk_size,
+                    encoder_chunk_look_back=encoder_chunk_look_back,
+                    decoder_chunk_look_back=decoder_chunk_look_back,
+                )
+                tail = result[0].get('text', '') if result else ''
+                if tail:
+                    accumulated_text += tail
+            except Exception as e:
+                print(f'[ws/asr] 收尾推理失败: {e}', flush=True)
+        print(f'[ws/asr] 客户端断开, 最终文字: {accumulated_text[:80]}{"..." if len(accumulated_text) > 80 else ""}', flush=True)
+    except Exception as e:
+        print(f'[ws/asr] 异常: {e}', flush=True)
 
 
 if __name__ == "__main__":

@@ -1,52 +1,29 @@
-// 闪说 tab — 语音口述写文案. Phase 2 MVP 用浏览器 Web Speech API (中文 ASR 免费立即可用).
-// 后续升级 funasr 走 WebSocket (准确度更高, 自部署免费).
-//
-// 用 chat-style 布局跟创作 tab 对齐: 头部 monoi 头像 + 引导, 主区域显示转写文字, 底部录音控制.
+// 闪说 tab — 语音口述写文案 (Phase 2 funasr 真实时).
+// 浏览器麦克风 → AudioContext + ScriptProcessor 抓 PCM → 降采样 16kHz int16
+// → WebSocket 推 voice-server 的 /ws/asr → funasr 推 partial/final 文字回来.
 
 import { useEffect, useRef, useState } from 'react'
 import { Mic, Square, Trash2, Languages, Type, AlertCircle, Copy, Check } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 
-// Web Speech API 在 Chrome 是 webkitSpeechRecognition, Safari/Edge 也类似
-type SpeechRecognitionResult = {
-  isFinal: boolean
-  [index: number]: { transcript: string; confidence: number }
-}
-type SpeechRecognitionEvent = {
-  resultIndex: number
-  results: { [index: number]: SpeechRecognitionResult; length: number }
-}
-type SpeechRecognitionInstance = {
-  lang: string
-  continuous: boolean
-  interimResults: boolean
-  onresult: ((e: SpeechRecognitionEvent) => void) | null
-  onerror: ((e: any) => void) | null
-  onend: (() => void) | null
-  start: () => void
-  stop: () => void
-}
-
 export default function VoiceTab() {
   const nav = useNavigate()
   const [isListening, setIsListening] = useState(false)
-  const [finalText, setFinalText] = useState('')      // 已确定的文字 (final results 拼接)
-  const [interimText, setInterimText] = useState('')  // 实时部分结果 (灰色显示, 说话时变化)
+  const [finalText, setFinalText] = useState('')      // 已确定的文字
   const [error, setError] = useState('')
   const [elapsed, setElapsed] = useState(0)
   const [copied, setCopied] = useState(false)
+  const [connectionStatus, setConnectionStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle')
   // 翻译状态
   const [translatedText, setTranslatedText] = useState('')
   const [translating, setTranslating] = useState(false)
 
-  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null)
-  const wasListeningRef = useRef(false)  // 标记是不是用户主动停 (区分自动断 → 重连)
-
-  // 检测浏览器支持
-  const SpeechRecognition = typeof window !== 'undefined'
-    ? ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition)
-    : null
-  const isSupported = !!SpeechRecognition
+  // 录音 + ASR 资源 refs (用户停止时全部释放)
+  const wsRef = useRef<WebSocket | null>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const processorRef = useRef<ScriptProcessorNode | null>(null)
+  const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null)
 
   // elapsed 计时
   useEffect(() => {
@@ -56,78 +33,119 @@ export default function VoiceTab() {
     return () => clearInterval(id)
   }, [isListening])
 
-  const startListening = () => {
+  /** 启动录音 + WebSocket 流式 ASR. */
+  const startListening = async () => {
     setError('')
-    if (!SpeechRecognition) {
-      setError('你的浏览器不支持语音识别. 请用 PC 的 Chrome / Edge, 或 Mac 的 Safari')
+    setConnectionStatus('connecting')
+
+    // 1. 拿麦克风
+    let stream: MediaStream
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 16000 },
+      })
+      streamRef.current = stream
+    } catch (e: any) {
+      setError(`麦克风获取失败: ${e?.name === 'NotAllowedError' ? '你拒绝了麦克风权限' : e?.message || e}`)
+      setConnectionStatus('error')
       return
     }
-    try {
-      const rec: SpeechRecognitionInstance = new SpeechRecognition()
-      rec.lang = 'zh-CN'
-      rec.continuous = true      // 不打断, 持续听
-      rec.interimResults = true  // 边说边出 partial 文字
 
-      rec.onresult = (event) => {
-        let interim = ''
-        let finalAdd = ''
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const result = event.results[i]
-          const transcript = result[0].transcript
-          if (result.isFinal) finalAdd += transcript
-          else interim += transcript
-        }
-        if (finalAdd) {
-          setFinalText(prev => prev + finalAdd)
-        }
-        setInterimText(interim)
-      }
+    // 2. 连 WebSocket — voice-server /ws/asr
+    const directBase = (import.meta as any).env?.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'
+    const wsUrl = directBase.replace(/^https/, 'wss').replace(/^http/, 'ws') + '/ws/asr'
+    const ws = new WebSocket(wsUrl)
+    ws.binaryType = 'arraybuffer'
+    wsRef.current = ws
 
-      rec.onerror = (e: any) => {
-        const err = e?.error || 'unknown'
-        if (err === 'no-speech') return  // 静音, 不报错
-        if (err === 'not-allowed') {
-          setError('麦克风权限被拒. 浏览器地址栏锁图标 → 麦克风 → 允许')
-          wasListeningRef.current = false
-          setIsListening(false)
-          return
-        }
-        if (err === 'aborted') return  // 用户主动停
-        console.warn('[asr] error', err, e)
-        setError(`识别出错: ${err}. 可以点重新开始`)
-      }
-
-      rec.onend = () => {
-        // Web Speech API 经常自动断 (没说话几秒), 如果用户没主动停, 自动重连保持持续
-        if (wasListeningRef.current) {
-          try { rec.start() } catch {
-            setIsListening(false)
-            wasListeningRef.current = false
-          }
-        } else {
-          setIsListening(false)
-        }
-      }
-
-      recognitionRef.current = rec
-      wasListeningRef.current = true
+    ws.onopen = () => {
+      setConnectionStatus('connected')
+      // 启动音频管道
+      startAudioPipeline(stream)
       setIsListening(true)
-      rec.start()
-    } catch (e: any) {
-      setError(`启动失败: ${e?.message || e}`)
+    }
+
+    ws.onmessage = (evt) => {
+      try {
+        const msg = JSON.parse(evt.data)
+        if (msg.type === 'partial' || msg.type === 'final') {
+          // funasr 返的是累积全文 (因为 cache 共享), 直接覆盖 finalText
+          setFinalText(msg.text || '')
+        } else if (msg.type === 'error') {
+          setError(`ASR 错误: ${msg.message}`)
+        }
+      } catch (e) { console.warn('[asr ws] parse fail', e) }
+    }
+
+    ws.onerror = (e) => {
+      console.error('[asr ws] error', e)
+      setError('WebSocket 连接失败. 检查后端 voice-server 跑着 + NATAPP 通')
+      setConnectionStatus('error')
+      stopListening()
+    }
+
+    ws.onclose = () => {
+      setConnectionStatus('idle')
     }
   }
 
+  /** 启动音频 pipeline: AudioContext → MediaStreamSource → ScriptProcessor → 抓 PCM → 降采样 → WS */
+  const startAudioPipeline = (stream: MediaStream) => {
+    // 浏览器原生采样率一般 48000, 这里我们让 AudioContext 用默认值, 抓完手动降采样到 16000
+    const audioContext = new AudioContext()
+    audioContextRef.current = audioContext
+    const sourceRate = audioContext.sampleRate  // 一般 48000
+    const targetRate = 16000
+    const downsampleRatio = sourceRate / targetRate
+
+    const source = audioContext.createMediaStreamSource(stream)
+    sourceRef.current = source
+    // 4096 samples per processing chunk (~85ms @ 48000)
+    const processor = audioContext.createScriptProcessor(4096, 1, 1)
+    processorRef.current = processor
+
+    processor.onaudioprocess = (e) => {
+      const ws = wsRef.current
+      if (!ws || ws.readyState !== WebSocket.OPEN) return
+      const input = e.inputBuffer.getChannelData(0)  // Float32 [-1, 1]
+      // 降采样 sourceRate → 16000 (简单丢点, 语音用足够)
+      const outLen = Math.floor(input.length / downsampleRatio)
+      const out = new Int16Array(outLen)
+      for (let i = 0; i < outLen; i++) {
+        const v = input[Math.floor(i * downsampleRatio)]
+        out[i] = Math.max(-32768, Math.min(32767, Math.round(v * 32768)))
+      }
+      ws.send(out.buffer)
+    }
+
+    source.connect(processor)
+    processor.connect(audioContext.destination)  // 必须 connect 才会触发 onaudioprocess
+  }
+
+  /** 停止录音 + 关连接 + 释放所有资源 */
   const stopListening = () => {
-    wasListeningRef.current = false
-    recognitionRef.current?.stop()
     setIsListening(false)
-    setInterimText('')
+    setConnectionStatus('idle')
+
+    // 关音频管道
+    try { processorRef.current?.disconnect() } catch {}
+    try { sourceRef.current?.disconnect() } catch {}
+    try { audioContextRef.current?.close() } catch {}
+    processorRef.current = null
+    sourceRef.current = null
+    audioContextRef.current = null
+
+    // 关麦克风
+    streamRef.current?.getTracks().forEach(t => t.stop())
+    streamRef.current = null
+
+    // 关 WebSocket (服务器收到 disconnect 后会做最终推理)
+    try { wsRef.current?.close() } catch {}
+    wsRef.current = null
   }
 
   const clearAll = () => {
     setFinalText('')
-    setInterimText('')
     setTranslatedText('')
   }
 
@@ -173,10 +191,13 @@ export default function VoiceTab() {
     nav('/app/chat')
   }
 
-  // 卸载停掉 recognition
+  // 卸载停掉所有 (麦克风 / WebSocket / 音频管道)
   useEffect(() => () => {
-    wasListeningRef.current = false
-    try { recognitionRef.current?.stop() } catch {}
+    try { processorRef.current?.disconnect() } catch {}
+    try { sourceRef.current?.disconnect() } catch {}
+    try { audioContextRef.current?.close() } catch {}
+    streamRef.current?.getTracks().forEach(t => t.stop())
+    try { wsRef.current?.close() } catch {}
   }, [])
 
   return (
@@ -205,10 +226,9 @@ export default function VoiceTab() {
               <span className="leading-relaxed">{error}</span>
             </div>
           )}
-          {!isSupported && (
-            <div className="text-sm text-amber-500 bg-amber-50 dark:bg-amber-950/20 border border-amber-300 dark:border-amber-900/50 rounded-lg px-3 py-2 flex items-start gap-2">
-              <AlertCircle size={14} className="mt-0.5 flex-shrink-0"/>
-              <span className="leading-relaxed">你的浏览器不支持 Web Speech API. 请用 PC Chrome / Edge / Mac Safari. (后续 funasr 上线后所有浏览器都能用)</span>
+          {connectionStatus === 'connecting' && (
+            <div className="text-sm text-[var(--text-3)] bg-[var(--bg-card)] border border-[var(--border)] rounded-lg px-3 py-2">
+              连接 funasr 服务... (第一次用 voice-server 要加载 ~500MB 模型, 等 30 秒)
             </div>
           )}
 
@@ -232,8 +252,8 @@ export default function VoiceTab() {
               )}
             </div>
             <textarea
-              value={finalText + (interimText ? `​${interimText}` : '')}  // ZWSP 区分但不影响视觉
-              onChange={(e) => setFinalText(e.target.value.replace(/​.*$/, ''))}
+              value={finalText}
+              onChange={(e) => setFinalText(e.target.value)}
               placeholder={isListening ? '正在听...说点啥' : '点下面麦克风开始录, 或直接打字'}
               className="flex-1 bg-[var(--bg-input)] border border-[var(--border)] rounded-lg p-3 text-sm text-[var(--text)] placeholder:text-[var(--text-3)] focus:outline-none focus:border-[var(--text-3)] resize-none leading-relaxed"
               style={{ minHeight: '160px' }}
@@ -277,9 +297,9 @@ export default function VoiceTab() {
       <div className="border-t border-[var(--border)] bg-[var(--bg-chat)] px-4 pt-3 pb-4">
         <div className="max-w-3xl mx-auto flex items-center justify-center">
           {!isListening ? (
-            <button onClick={startListening} disabled={!isSupported}
+            <button onClick={startListening} disabled={connectionStatus === 'connecting'}
               className="flex items-center gap-2 px-6 py-3 rounded-full bg-red-500 hover:bg-red-600 text-white font-medium text-base cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-lg transition-colors">
-              <Mic size={18}/> 开始说
+              <Mic size={18}/> {connectionStatus === 'connecting' ? '连接中...' : '开始说'}
             </button>
           ) : (
             <div className="flex items-center gap-3">
