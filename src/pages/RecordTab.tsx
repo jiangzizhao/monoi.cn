@@ -488,11 +488,17 @@ export default function RecordTab() {
                 </div>
               )}
 
-              {/* recording 时, 顶部叠 "🔴 录制中 0:23" 浮窗 */}
+              {/* recording 时, 一个超大显眼的浮动停止按钮 + 计时 (用户找不到底部 toolbar 也能直接停) */}
               {phase === 'recording' && (
-                <div className="flex items-center justify-center gap-2 text-sm text-red-500 font-medium">
-                  <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"/>
-                  录制中 {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}
+                <div className="flex items-center justify-center gap-3 sticky bottom-4 z-50">
+                  <div className="flex items-center gap-2 bg-red-500 text-white px-4 py-2 rounded-full font-medium text-sm shadow-lg">
+                    <span className="w-2 h-2 rounded-full bg-white animate-pulse"/>
+                    录制中 {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}
+                  </div>
+                  <button onClick={stopRecording}
+                    className="flex items-center gap-2 bg-[var(--text)] text-[var(--bg)] px-5 py-2 rounded-full font-medium text-sm hover:opacity-80 cursor-pointer shadow-lg">
+                    <Square size={14} fill="currentColor"/> 停止录制
+                  </button>
                 </div>
               )}
               {phase === 'previewing' && (
