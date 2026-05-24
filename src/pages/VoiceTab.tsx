@@ -314,9 +314,6 @@ export default function VoiceTab() {
             </div>
           )}
         </div>
-        <p className="text-[10px] text-[var(--text-3)] text-center mt-2">
-          浏览器原生中文识别 (Web Speech API). 边说边出字, 错别字可以在上方文字框直接改.
-        </p>
       </div>
     </div>
   )
