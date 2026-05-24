@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Optional
-from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, UploadFile, File, Form, Request
+from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, UploadFile, File, Form, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from jose import jwt, JWTError
@@ -3499,6 +3499,57 @@ def serve_digital_human_video(name: str):
     if not os.path.exists(file_path):
         raise HTTPException(404, "视频未找到")
     return FileResponse(file_path, media_type="video/mp4")
+
+
+# ============================== /ws/asr WebSocket 透传 → voice-server ==============================
+# NATAPP 只转发 main.py (18765), voice-server (9001) 在内网. 闪说 funasr 端点写在 voice-server,
+# 所以这里 main.py 加 WebSocket proxy: 客户端连 wss://monoi.nat100.top/ws/asr → main.py 转给
+# ws://127.0.0.1:9001/ws/asr → funasr 处理. 双向异步透传所有 frame.
+
+@app.websocket("/ws/asr")
+async def asr_ws_proxy(client_ws: WebSocket):
+    """WebSocket 透传到 voice-server. 需要 pip install websockets."""
+    await client_ws.accept()
+    try:
+        import websockets  # type: ignore
+    except ImportError:
+        await client_ws.send_json({'type': 'error', 'message': '后端缺 websockets 包: pip install websockets'})
+        await client_ws.close()
+        return
+    import asyncio
+    backend_url = "ws://127.0.0.1:9001/ws/asr"
+    try:
+        async with websockets.connect(backend_url, max_size=None) as backend_ws:
+            async def fwd_client_to_backend():
+                try:
+                    while True:
+                        msg = await client_ws.receive()
+                        if msg.get('type') == 'websocket.disconnect': break
+                        if 'bytes' in msg and msg['bytes'] is not None:
+                            await backend_ws.send(msg['bytes'])
+                        elif 'text' in msg and msg['text'] is not None:
+                            await backend_ws.send(msg['text'])
+                except Exception as e:
+                    print(f'[ws/asr proxy] client→backend 异常: {e}', flush=True)
+            async def fwd_backend_to_client():
+                try:
+                    async for msg in backend_ws:
+                        if isinstance(msg, bytes):
+                            await client_ws.send_bytes(msg)
+                        else:
+                            await client_ws.send_text(msg)
+                except Exception as e:
+                    print(f'[ws/asr proxy] backend→client 异常: {e}', flush=True)
+            await asyncio.gather(fwd_client_to_backend(), fwd_backend_to_client())
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        print(f'[ws/asr proxy] 连 voice-server 失败: {e}', flush=True)
+        try: await client_ws.send_json({'type': 'error', 'message': f'voice-server 连不上 (9001 未启动?): {e}'})
+        except: pass
+    finally:
+        try: await client_ws.close()
+        except: pass
 
 
 if __name__ == "__main__":
