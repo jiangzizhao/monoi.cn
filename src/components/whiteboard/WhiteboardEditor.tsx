@@ -37,6 +37,11 @@ interface Props {
   height: number
   /** 父组件拿 stage ref, 在 canvas loop 里画到主 canvas */
   onStageReady?: (stage: Konva.Stage | null) => void
+  /** 摄像头流 — 在白板里以 PIP 形式预览 (纯 UI, 录制走另一路) */
+  cameraStream?: MediaStream | null
+  pipPos?: string  // tl/tc/tr/cl/cc/cr/bl/bc/br
+  pipSizePct?: number  // 10-45
+  pipShape?: 'circle' | 'rounded' | 'square'
 }
 
 const TEXT_COLORS = ['#000000', '#FFFFFF', '#EF4444', '#3B82F6', '#10B981', '#F59E0B']
@@ -48,16 +53,26 @@ const FONT_FAMILIES = [
   { label: '隶书', value: '"LiSu", "STLiti", serif' },
 ]
 
-export function WhiteboardEditor({ width, height, onStageReady }: Props) {
+export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pipPos = 'br', pipSizePct = 25, pipShape = 'circle' }: Props) {
   const stageRef = useRef<Konva.Stage>(null)
   const transformerRef = useRef<Konva.Transformer>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const videoRef = useRef<HTMLVideoElement>(null)
 
   // 元素列表 + 选中 + 历史
   const [items, setItems] = useState<WhiteboardItem[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [editingId, setEditingId] = useState<string | null>(null)  // 当前内嵌编辑的 text id
   const [history, setHistory] = useState<WhiteboardItem[][]>([[]])
   const [historyIdx, setHistoryIdx] = useState(0)
+
+  // 摄像头预览 → off-screen video
+  useEffect(() => {
+    if (cameraStream && videoRef.current) {
+      videoRef.current.srcObject = cameraStream
+      videoRef.current.play().catch(() => {})
+    }
+  }, [cameraStream])
 
   // 显示尺寸 (canvas 内部分辨率 vs 显示尺寸: 用 scale 缩放, 保持高分辨率渲染)
   const [displaySize, setDisplaySize] = useState({ w: 0, h: 0 })
@@ -307,14 +322,9 @@ export function WhiteboardEditor({ width, height, onStageReady }: Props) {
                     draggable
                     onClick={() => setSelectedId(it.id)}
                     onTap={() => setSelectedId(it.id)}
-                    onDblClick={() => {
-                      const t = prompt('编辑文字:', it.text)
-                      if (t !== null) handleTransform(it.id, { text: t })
-                    }}
-                    onDblTap={() => {
-                      const t = prompt('编辑文字:', it.text)
-                      if (t !== null) handleTransform(it.id, { text: t })
-                    }}
+                    onDblClick={() => setEditingId(it.id)}
+                    onDblTap={() => setEditingId(it.id)}
+                    visible={editingId !== it.id}  // 编辑时隐藏 Konva 文字, 让 HTML input 接管显示
                     onDragEnd={(e) => handleTransform(it.id, { x: e.target.x(), y: e.target.y() })}
                     onTransformEnd={(e) => {
                       const node = e.target
@@ -340,6 +350,72 @@ export function WhiteboardEditor({ width, height, onStageReady }: Props) {
           </Layer>
         </Stage>
         </div>
+
+        {/* 内嵌文字编辑器 — 双击文字激活, 直接在白板上输入 (取代 prompt 弹窗) */}
+        {editingId && (() => {
+          const it = items.find(x => x.id === editingId)
+          if (!it || it.type !== 'text') return null
+          const inputX = it.x * scale
+          const inputY = it.y * scale
+          const inputW = Math.max(200, displaySize.w - inputX - 10) * 0.6
+          const inputH = (it.fontSize * scale) * 1.4
+          return (
+            <textarea
+              autoFocus
+              defaultValue={it.text}
+              onBlur={(e) => {
+                handleTransform(editingId, { text: e.target.value || '双击输入文字' })
+                setEditingId(null)
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') { setEditingId(null); return }
+                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); (e.target as HTMLTextAreaElement).blur() }
+              }}
+              style={{
+                position: 'absolute',
+                left: inputX, top: inputY,
+                width: inputW, minHeight: inputH,
+                fontSize: it.fontSize * scale,
+                fontFamily: it.fontFamily,
+                color: it.fill,
+                background: 'rgba(255,255,0,0.15)',
+                border: '1.5px dashed #3B82F6',
+                outline: 'none',
+                padding: '0',
+                margin: '0',
+                lineHeight: 1,
+                resize: 'none',
+                overflow: 'hidden',
+                whiteSpace: 'pre',
+              }}
+            />
+          )
+        })()}
+
+        {/* 摄像头 PIP 预览 — HTML video 叠在 Konva 上, 让用户看到人物会出现在哪 (纯 UI, 录制走主 canvas 那条路) */}
+        {cameraStream && (() => {
+          const pipDh = displaySize.h * pipSizePct / 100
+          const aspect = videoRef.current?.videoWidth && videoRef.current.videoHeight
+            ? videoRef.current.videoWidth / videoRef.current.videoHeight : 16/9
+          const pipW = pipShape === 'circle' ? pipDh : pipDh * aspect
+          const pipH = pipDh
+          const pad = displaySize.w * 0.02
+          let left = pad, top = pad
+          if (pipPos[1] === 'c') left = (displaySize.w - pipW) / 2
+          else if (pipPos[1] === 'r') left = displaySize.w - pipW - pad
+          if (pipPos[0] === 'c') top = (displaySize.h - pipH) / 2
+          else if (pipPos[0] === 'b') top = displaySize.h - pipH - pad
+          const radius = pipShape === 'circle' ? '50%' : pipShape === 'rounded' ? '15%' : '0'
+          return (
+            <video ref={videoRef} muted playsInline autoPlay
+              style={{
+                position: 'absolute', left, top, width: pipW, height: pipH,
+                borderRadius: radius, objectFit: 'cover',
+                border: '2px solid rgba(255,255,255,0.9)',
+                pointerEvents: 'none',
+              }}/>
+          )
+        })()}
       </div>
 
       <p className="text-[10px] text-[var(--text-3)] text-center">

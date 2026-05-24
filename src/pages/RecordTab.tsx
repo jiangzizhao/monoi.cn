@@ -465,6 +465,10 @@ export default function RecordTab() {
                         width={RATIO_SIZE[outputRatio].w}
                         height={RATIO_SIZE[outputRatio].h}
                         onStageReady={s => { whiteboardStageRef.current = s }}
+                        cameraStream={cameraStream}
+                        pipPos={pipPos}
+                        pipSizePct={pipSize}
+                        pipShape={pipShape}
                       />
                       {/* 摄像头小预览 (右下角缩略, 让用户能确认摄像头工作) */}
                       {cameraStream && (
