@@ -2675,9 +2675,14 @@ async def asr_websocket(ws: WebSocket):
             audio_buffer = np.concatenate([audio_buffer, chunk])
 
             # 凑够一个 chunk 就推理
+            chunk_count = 0
             while len(audio_buffer) >= SAMPLES_PER_CHUNK:
                 infer_chunk = audio_buffer[:SAMPLES_PER_CHUNK]
                 audio_buffer = audio_buffer[SAMPLES_PER_CHUNK:]
+                chunk_count += 1
+
+                # 音频音量诊断 — RMS < 0.01 是几乎静音, > 0.05 是正常说话
+                rms = float(np.sqrt(np.mean(infer_chunk ** 2)))
 
                 try:
                     result = model.generate(
@@ -2689,6 +2694,9 @@ async def asr_websocket(ws: WebSocket):
                         decoder_chunk_look_back=decoder_chunk_look_back,
                     )
                     text = result[0].get('text', '') if result else ''
+                    # 每 5 次推理打一次诊断 log (太频繁会刷屏)
+                    if chunk_count % 5 == 1:
+                        print(f'[asr debug] rms={rms:.4f} text="{text}" result_keys={list(result[0].keys()) if result else None}', flush=True)
                     if text:
                         accumulated_text += text
                         await ws.send_json({'type': 'partial', 'text': accumulated_text})
