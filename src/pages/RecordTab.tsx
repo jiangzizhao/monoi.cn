@@ -180,47 +180,63 @@ export default function RecordTab() {
     } catch { return [] }
   }
 
-  /** 获取摄像头. deviceId 可选 (从下拉切换源用). 没传就自动优先真实摄像头. */
+  /** 获取摄像头. deviceId 可选 (从下拉切换源用). 没传就自动优先真实摄像头.
+   * 关键: 视频跟麦克风分开请求 — 虚拟摄像头 (OBS / 寻影 等) 多半不带音轨,
+   * 必须从系统默认 mic 单独取, 然后合并到同一 stream. */
   const requestCamera = async (deviceId?: string) => {
     setError('')
-    // 切换源: 关掉旧 stream 再请求新的
     if (deviceId && cameraStream) {
       cameraStream.getTracks().forEach(t => t.stop())
       setCameraStream(null)
     }
     const tryGet = (constraints: MediaStreamConstraints) =>
       navigator.mediaDevices.getUserMedia(constraints)
-    const baseAudio = { echoCancellation: true, noiseSuppression: true }
 
-    // 没指定 deviceId 时, 先 enumerateDevices 找真实摄像头 (label 不含 virtual/mate)
-    // 避免浏览器默认挑了虚拟摄像头 → 那虚拟摄像头宿主 app 没跑 → NotReadableError
     let pickedDeviceId = deviceId
     if (!deviceId) {
-      // 必须先请求一次权限才能拿到 label, 第一次直接 video:true
-      // 之后如果有多个源且能识别 label, 重新挑真实的
       const cams = await refreshCameras()
       if (cams.length > 1 && cams.some(c => c.label)) {
-        // 已有 label = 之前授权过, 这次智能选: 优先真实摄像头
         const real = cams.find(c => c.label && !/virtual|mate|virtualcam/i.test(c.label))
         if (real) pickedDeviceId = real.deviceId
       }
     }
 
     try {
-      let s: MediaStream
+      // 1. 视频: 从指定摄像头拿 (不含 audio, 避免虚拟摄像头无音轨整个调用失败)
+      let videoStream: MediaStream
       if (pickedDeviceId) {
-        s = await tryGet({ video: { deviceId: { exact: pickedDeviceId } }, audio: baseAudio })
+        videoStream = await tryGet({ video: { deviceId: { exact: pickedDeviceId } }, audio: false })
       } else {
         try {
-          s = await tryGet({ video: true, audio: baseAudio })
+          videoStream = await tryGet({ video: true, audio: false })
         } catch {
-          s = await tryGet({ video: { width: { ideal: 640 }, height: { ideal: 480 } }, audio: baseAudio })
+          videoStream = await tryGet({ video: { width: { ideal: 640 }, height: { ideal: 480 } }, audio: false })
         }
       }
-      setCameraStream(s)
-      setSelectedCameraId(s.getVideoTracks()[0]?.getSettings().deviceId || '')
-      await refreshCameras()  // 授权后 label 才有内容
+
+      // 2. 麦克风: 单独从系统默认设备拿 (失败不致命, 没声音也能录无声视频)
+      let micStream: MediaStream | null = null
+      try {
+        micStream = await tryGet({ video: false, audio: { echoCancellation: true, noiseSuppression: true } })
+      } catch (micErr: any) {
+        console.warn('[record] mic request failed:', micErr)
+        // 不抛错 — 用户摄像头有了, 麦克风不行就先无声, 后面提示
+      }
+
+      // 3. 合并视频 + 音频成一个 stream
+      const combined = new MediaStream()
+      videoStream.getVideoTracks().forEach(t => combined.addTrack(t))
+      micStream?.getAudioTracks().forEach(t => combined.addTrack(t))
+
+      setCameraStream(combined)
+      setSelectedCameraId(videoStream.getVideoTracks()[0]?.getSettings().deviceId || '')
+      await refreshCameras()
       if (screenStream || phase === 'setup') setPhase('previewing')
+
+      // 麦克风没拿到 → 提示用户
+      if (!micStream || micStream.getAudioTracks().length === 0) {
+        setError('视频 OK 但麦克风没接到, 录出来会无声. 检查系统隐私 → 麦克风权限, 或浏览器地址栏锁图标里麦克风权限')
+      }
     } catch (e: any) {
       const cams = await refreshCameras()
       handleCameraError(e, cams)
@@ -606,8 +622,8 @@ export default function RecordTab() {
               title="选择屏幕 / 窗口">
               <Monitor size={14}/> 屏幕
             </button>
-            <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs ${cameraStream ? 'text-green-500' : 'text-[var(--text-3)]'}`} title="麦克风跟摄像头一起授权">
-              <Mic size={14}/> 麦克风
+            <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs ${cameraStream && cameraStream.getAudioTracks().length > 0 ? 'text-green-500' : 'text-[var(--text-3)]'}`} title="麦克风从系统默认设备取, 跟摄像头分开">
+              <Mic size={14}/> 麦克风{cameraStream && cameraStream.getAudioTracks().length === 0 ? ' (无)' : ''}
             </div>
             {(phase === 'previewing' || phase === 'recording') && (
               <button onClick={() => setShowPipSettings(s => !s)}
