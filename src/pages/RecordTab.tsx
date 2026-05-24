@@ -6,6 +6,8 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { Camera, Monitor, Mic, Square, Download, AlertCircle, RotateCcw, Settings, Video } from 'lucide-react'
+import type Konva from 'konva'
+import { WhiteboardEditor } from '../components/whiteboard/WhiteboardEditor'
 
 type Phase = 'setup' | 'previewing' | 'recording' | 'done'
 type PipShape = 'circle' | 'rounded' | 'square'
@@ -53,6 +55,8 @@ export default function RecordTab() {
   const rafRef = useRef<number>(0)
   const recorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
+  // 白板模式: Konva stage ref, canvas loop 里画到主 canvas
+  const whiteboardStageRef = useRef<Konva.Stage | null>(null)
 
   const isUnsupported = typeof navigator !== 'undefined'
     && !(navigator.mediaDevices?.getDisplayMedia)
@@ -103,9 +107,17 @@ export default function RecordTab() {
 
       // 1. 画背景 (3 种模式)
       if (bgMode === 'whiteboard') {
-        // 白板: 纯白
+        // 白板: Konva stage 渲染的画面 (text/image 元素) 画到主 canvas
         ctx.fillStyle = '#FFFFFF'
         ctx.fillRect(0, 0, canvas.width, canvas.height)
+        const stage = whiteboardStageRef.current
+        if (stage) {
+          try {
+            // toCanvas 返回 HTMLCanvasElement, 直接 drawImage 上去
+            const stageCanvas = stage.toCanvas({ pixelRatio: 1 })
+            ctx.drawImage(stageCanvas, 0, 0, canvas.width, canvas.height)
+          } catch { /* Konva 还没 ready 就用纯白兜底 */ }
+        }
       } else if (bgMode === 'camera_only' && cameraV && cameraV.videoWidth > 0) {
         // 仅摄像头: 摄像头铺满整个 canvas (contain 不裁切, 上下/左右黑边)
         ctx.fillStyle = '#000000'
@@ -428,11 +440,20 @@ export default function RecordTab() {
               {/* 录制中故意藏画布 — 否则 getDisplayMedia 录到浏览器自己 → 套娃无限镜子.
                   画布仍然在跑 (requestAnimationFrame + captureStream 都要), 只是 visibility hidden 视觉藏掉 */}
               {phase === 'previewing' ? (
-                // flex 居中 + canvas 用 max-w/max-h 自动保持比例 (而不是 w-full 强拉)
-                // 这样选 9:16 竖屏时, canvas 真的显示成竖的而不是被压成横向 letterbox
-                <div className="rounded-2xl border border-[var(--border)] bg-black overflow-hidden flex items-center justify-center" style={{ minHeight: '300px' }}>
-                  <canvas ref={canvasRef} className="block max-w-full max-h-[60vh]"/>
-                </div>
+                <>
+                  {/* 白板模式: 顶部显示 Konva 编辑器, 用户编辑文字/图片, 内容自动同步到 canvas */}
+                  {bgMode === 'whiteboard' && (
+                    <WhiteboardEditor
+                      width={RATIO_SIZE[outputRatio].w}
+                      height={RATIO_SIZE[outputRatio].h}
+                      onStageReady={s => { whiteboardStageRef.current = s }}
+                    />
+                  )}
+                  {/* 主合成预览 canvas (白板模式下, 这个显示的是白板 + PIP 摄像头合成结果) */}
+                  <div className="rounded-2xl border border-[var(--border)] bg-black overflow-hidden flex items-center justify-center" style={{ minHeight: '300px' }}>
+                    <canvas ref={canvasRef} className="block max-w-full max-h-[60vh]"/>
+                  </div>
+                </>
               ) : (
                 // recording 阶段: canvas 绝对定位藏到屏幕外 (浏览器仍渲染 → captureStream 能 capture)
                 <>
