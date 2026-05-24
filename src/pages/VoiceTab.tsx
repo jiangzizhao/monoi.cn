@@ -14,6 +14,8 @@ export default function VoiceTab() {
   const [elapsed, setElapsed] = useState(0)
   const [copied, setCopied] = useState(false)
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle')
+  const [micLabel, setMicLabel] = useState<string>('')  // 实际用的麦克风名字
+  const [audioLevel, setAudioLevel] = useState<number>(0)  // 0-100 实时音量 (调试用, 让用户能看到麦克风有没有进音)
   // 翻译状态
   const [translatedText, setTranslatedText] = useState('')
   const [translating, setTranslating] = useState(false)
@@ -38,13 +40,26 @@ export default function VoiceTab() {
     setError('')
     setConnectionStatus('connecting')
 
-    // 1. 拿麦克风
+    // 1. 拿麦克风 — 不写死 sampleRate, 让浏览器选 (一般 48000), 客户端再降采样到 16k
     let stream: MediaStream
     try {
       stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 16000 },
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       })
       streamRef.current = stream
+      // 诊断: 列出实际拿到的音轨 + label
+      const audioTracks = stream.getAudioTracks()
+      console.log('[voicetab] 拿到音轨', audioTracks.length, '个:',
+        audioTracks.map(t => ({ label: t.label, enabled: t.enabled, muted: t.muted, settings: t.getSettings() })))
+      if (audioTracks.length === 0) {
+        setError('系统没给出音频轨道. 检查麦克风设备是否正常 + 浏览器是否选了正确的输入')
+        setConnectionStatus('error')
+        return
+      }
+      setMicLabel(audioTracks[0].label || '默认麦克风')
+      if (audioTracks[0].muted) {
+        setError(`麦克风被静音了 (${audioTracks[0].label}). 物理静音按钮 / 系统静音都查一下`)
+      }
     } catch (e: any) {
       setError(`麦克风获取失败: ${e?.name === 'NotAllowedError' ? '你拒绝了麦克风权限' : e?.message || e}`)
       setConnectionStatus('error')
@@ -108,6 +123,12 @@ export default function VoiceTab() {
       const ws = wsRef.current
       if (!ws || ws.readyState !== WebSocket.OPEN) return
       const input = e.inputBuffer.getChannelData(0)  // Float32 [-1, 1]
+      // 算 RMS 显示音量条 (帮用户判断麦克风有没有进音)
+      let sumSq = 0
+      for (let i = 0; i < input.length; i++) sumSq += input[i] * input[i]
+      const rms = Math.sqrt(sumSq / input.length)
+      // RMS 0.01 = 安静背景, 0.1 = 普通说话, 0.3 = 大声
+      setAudioLevel(Math.min(100, Math.round(rms * 500)))
       // 降采样 sourceRate → 16000 (简单丢点, 语音用足够)
       const outLen = Math.floor(input.length / downsampleRatio)
       const out = new Int16Array(outLen)
@@ -126,6 +147,8 @@ export default function VoiceTab() {
   const stopListening = () => {
     setIsListening(false)
     setConnectionStatus('idle')
+    setAudioLevel(0)
+    setMicLabel('')
 
     // 关音频管道
     try { processorRef.current?.disconnect() } catch {}
@@ -258,6 +281,24 @@ export default function VoiceTab() {
               className="flex-1 bg-[var(--bg-input)] border border-[var(--border)] rounded-lg p-3 text-sm text-[var(--text)] placeholder:text-[var(--text-3)] focus:outline-none focus:border-[var(--text-3)] resize-none leading-relaxed"
               style={{ minHeight: '160px' }}
             />
+            {/* 录音时显示用的哪个麦 + 实时音量条 (帮排查麦克风没进音问题) */}
+            {isListening && (
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center gap-2 text-[11px] text-[var(--text-3)]">
+                  <Mic size={11}/>
+                  <span className="truncate flex-1" title={micLabel}>{micLabel || '默认麦克风'}</span>
+                  <span className={`font-mono ${audioLevel > 10 ? 'text-green-500' : 'text-amber-500'}`}>
+                    {audioLevel > 10 ? '有声音 ✓' : audioLevel > 2 ? '声音小' : '静音 / 没采到'}
+                  </span>
+                </div>
+                {/* 音量条: 绿色填充, 越多越响. 完全空 = 麦克风没进音 */}
+                <div className="h-1.5 rounded-full bg-[var(--bg-hover)] overflow-hidden">
+                  <div
+                    className={`h-full transition-all ${audioLevel > 10 ? 'bg-green-500' : 'bg-amber-500'}`}
+                    style={{ width: `${audioLevel}%` }}/>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* 翻译结果 */}
