@@ -115,18 +115,16 @@ export function WhiteboardEditor({ width, height, onStageReady }: Props) {
     setSelectedId(null)
   }
 
-  // 添加文字 — 点 "+ 文字" 立刻弹输入框让用户输入, 不用再双击
+  // 添加文字 — 点 "+ 文字" 立刻在白板中心加占位 "双击输入文字", 用户双击改内容
   const addText = () => {
-    const txt = prompt('输入文字内容:', '')
-    if (txt === null || !txt.trim()) return  // 用户取消或空
     const id = `t_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
-    const fontSize = 72  // 默认大字号, 在 1080x1920 画布上不会显得太小
-    // 估算文字宽度居中: 中文约 1 字符宽 = fontSize, 英文约 0.5
-    const estW = txt.length * fontSize * 0.8
+    const fontSize = 72
+    const placeholder = '双击输入文字'
+    const estW = placeholder.length * fontSize * 0.8
     const newItem: WhiteboardItem = {
       id, type: 'text',
       x: width / 2 - estW / 2, y: height / 2 - fontSize / 2,
-      text: txt, fontSize, fill: '#000000',
+      text: placeholder, fontSize, fill: '#000000',
       fontFamily: FONT_FAMILIES[0].value,
       rotation: 0,
     }

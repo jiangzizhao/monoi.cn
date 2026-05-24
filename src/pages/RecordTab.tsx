@@ -457,18 +457,27 @@ export default function RecordTab() {
                   画布仍然在跑 (requestAnimationFrame + captureStream 都要), 只是 visibility hidden 视觉藏掉 */}
               {phase === 'previewing' ? (
                 <>
-                  {/* 白板模式: 顶部显示 Konva 编辑器, 用户编辑文字/图片, 内容自动同步到 canvas */}
-                  {bgMode === 'whiteboard' && (
-                    <WhiteboardEditor
-                      width={RATIO_SIZE[outputRatio].w}
-                      height={RATIO_SIZE[outputRatio].h}
-                      onStageReady={s => { whiteboardStageRef.current = s }}
-                    />
+                  {/* 白板模式: 只显示 Konva 编辑器 + 摄像头小预览, 不显示合成 canvas
+                      (合成 canvas 仍然在 DOM 里跑, 只是 hidden — captureStream 仍照常工作) */}
+                  {bgMode === 'whiteboard' ? (
+                    <>
+                      <WhiteboardEditor
+                        width={RATIO_SIZE[outputRatio].w}
+                        height={RATIO_SIZE[outputRatio].h}
+                        onStageReady={s => { whiteboardStageRef.current = s }}
+                      />
+                      {/* 摄像头小预览 (右下角缩略, 让用户能确认摄像头工作) */}
+                      {cameraStream && (
+                        <div className="text-[11px] text-[var(--text-3)] text-center">摄像头 PIP 会在录制时叠到白板上 (位置 / 大小 / 形状下方 PIP 设置调)</div>
+                      )}
+                      {/* 隐藏的合成 canvas, captureStream 需要它真在 DOM 里渲染 */}
+                      <canvas ref={canvasRef} style={{ position: 'fixed', left: '-9999px', top: 0, width: 1, height: 1 }}/>
+                    </>
+                  ) : (
+                    <div className="rounded-2xl border border-[var(--border)] bg-black overflow-hidden flex items-center justify-center" style={{ minHeight: '300px' }}>
+                      <canvas ref={canvasRef} className="block max-w-full max-h-[60vh]"/>
+                    </div>
                   )}
-                  {/* 主合成预览 canvas (白板模式下, 这个显示的是白板 + PIP 摄像头合成结果) */}
-                  <div className="rounded-2xl border border-[var(--border)] bg-black overflow-hidden flex items-center justify-center" style={{ minHeight: '300px' }}>
-                    <canvas ref={canvasRef} className="block max-w-full max-h-[60vh]"/>
-                  </div>
                 </>
               ) : (
                 // recording 阶段: canvas 绝对定位藏到屏幕外 (浏览器仍渲染 → captureStream 能 capture)
