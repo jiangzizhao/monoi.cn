@@ -131,7 +131,7 @@ export default function RecordTab() {
     } catch { return [] }
   }
 
-  /** 获取摄像头. deviceId 可选 (从下拉切换源用). 没传就让浏览器自选. */
+  /** 获取摄像头. deviceId 可选 (从下拉切换源用). 没传就自动优先真实摄像头. */
   const requestCamera = async (deviceId?: string) => {
     setError('')
     // 切换源: 关掉旧 stream 再请求新的
@@ -141,14 +141,27 @@ export default function RecordTab() {
     }
     const tryGet = (constraints: MediaStreamConstraints) =>
       navigator.mediaDevices.getUserMedia(constraints)
+    const baseAudio = { echoCancellation: true, noiseSuppression: true }
+
+    // 没指定 deviceId 时, 先 enumerateDevices 找真实摄像头 (label 不含 virtual/mate)
+    // 避免浏览器默认挑了虚拟摄像头 → 那虚拟摄像头宿主 app 没跑 → NotReadableError
+    let pickedDeviceId = deviceId
+    if (!deviceId) {
+      // 必须先请求一次权限才能拿到 label, 第一次直接 video:true
+      // 之后如果有多个源且能识别 label, 重新挑真实的
+      const cams = await refreshCameras()
+      if (cams.length > 1 && cams.some(c => c.label)) {
+        // 已有 label = 之前授权过, 这次智能选: 优先真实摄像头
+        const real = cams.find(c => c.label && !/virtual|mate|virtualcam/i.test(c.label))
+        if (real) pickedDeviceId = real.deviceId
+      }
+    }
+
     try {
       let s: MediaStream
-      const baseAudio = { echoCancellation: true, noiseSuppression: true }
-      if (deviceId) {
-        // 用户指定了源 → exact deviceId
-        s = await tryGet({ video: { deviceId: { exact: deviceId } }, audio: baseAudio })
+      if (pickedDeviceId) {
+        s = await tryGet({ video: { deviceId: { exact: pickedDeviceId } }, audio: baseAudio })
       } else {
-        // 没指定 → 软约束让浏览器选 (寻影虚拟摄像头如果是默认源会被选中)
         try {
           s = await tryGet({ video: true, audio: baseAudio })
         } catch {
@@ -157,7 +170,7 @@ export default function RecordTab() {
       }
       setCameraStream(s)
       setSelectedCameraId(s.getVideoTracks()[0]?.getSettings().deviceId || '')
-      await refreshCameras()  // 授权后 label 才有内容 (浏览器隐私规则)
+      await refreshCameras()  // 授权后 label 才有内容
       if (screenStream || phase === 'setup') setPhase('previewing')
     } catch (e: any) {
       const cams = await refreshCameras()
@@ -312,6 +325,25 @@ export default function RecordTab() {
               {availableCameras.length === 0 && (
                 <div className="text-[11px] text-red-300/80 border-t border-red-900/30 pt-2 mt-1">
                   浏览器一个摄像头都检测不到. 寻影 / 外接 / 内置都没看见.
+                </div>
+              )}
+              {/* 错误状态下提供下拉直接选其他源, 不用回 setup 重来 */}
+              {availableCameras.length > 1 && (
+                <div className="flex items-center gap-2 border-t border-red-900/30 pt-2 mt-1">
+                  <span className="text-[11px] text-red-300/80 flex-shrink-0">换一个源试:</span>
+                  <select
+                    onChange={e => { setError(''); requestCamera(e.target.value) }}
+                    defaultValue=""
+                    className="flex-1 bg-[var(--bg-input)] border border-[var(--border)] rounded-lg px-2 py-1 text-xs text-[var(--text)] cursor-pointer">
+                    <option value="" disabled>选一个摄像头...</option>
+                    {availableCameras.map(c => (
+                      <option key={c.deviceId} value={c.deviceId}>
+                        {c.label || `设备 ${c.deviceId.slice(0, 8)}`}
+                        {/* 提示哪个是真摄像头 vs 虚拟 */}
+                        {c.label && !/virtual|mate/i.test(c.label) ? ' (真实摄像头, 推荐)' : ''}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               )}
             </div>
