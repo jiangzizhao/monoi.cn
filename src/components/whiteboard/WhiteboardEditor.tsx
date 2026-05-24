@@ -165,11 +165,13 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
   const addText = () => {
     const id = `t_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
     const fontSize = 72
+    // 默认字体优先用 monoi 服务器字体的第一个 (思源黑等), 没加载到 fallback 系统默认
+    const defaultFont = serverFonts.length > 0 ? serverFonts[0].value : FONT_FAMILIES[0].value
     const newItem: WhiteboardItem = {
       id, type: 'text',
       x: width / 2 - 200, y: height / 2 - fontSize / 2,
       text: '', fontSize, fill: '#000000',
-      fontFamily: FONT_FAMILIES[0].value,
+      fontFamily: defaultFont,
       rotation: 0,
     }
     const next = [...items, newItem]
@@ -415,9 +417,10 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
                 fontSize: it.fontSize * scale,
                 fontFamily: it.fontFamily,
                 color: it.fill,
-                background: 'rgba(255,255,0,0.15)',
-                border: '1.5px dashed #3B82F6',
+                background: 'transparent',  // 无背景, 像直接在白板上打字
+                border: 'none',              // 无边框
                 outline: 'none',
+                caretColor: '#3B82F6',       // 蓝色光标更显眼, 提示用户在编辑
                 padding: '0',
                 margin: '0',
                 lineHeight: 1,
