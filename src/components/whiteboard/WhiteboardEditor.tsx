@@ -46,7 +46,8 @@ interface Props {
 
 const TEXT_COLORS = ['#000000', '#FFFFFF', '#EF4444', '#3B82F6', '#10B981', '#F59E0B']
 const FONT_SIZES = [24, 36, 48, 72, 96, 128]
-const FONT_FAMILIES = [
+// 默认字体: 系统默认 + 浏览器自带. monoi 服务器字体库在 mount 时拉, append 到这里
+const DEFAULT_FONT_FAMILIES = [
   { label: '默认', value: 'Arial, sans-serif' },
   { label: '思源黑', value: '"Source Han Sans CN", "Noto Sans SC", sans-serif' },
   { label: '楷体', value: '"Kaiti SC", "KaiTi", serif' },
@@ -65,6 +66,36 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
   const [editingId, setEditingId] = useState<string | null>(null)  // 当前内嵌编辑的 text id
   const [history, setHistory] = useState<WhiteboardItem[][]>([[]])
   const [historyIdx, setHistoryIdx] = useState(0)
+  // monoi 服务器字体库 (跟 CoverGeneratorForm 用同一份)
+  const [serverFonts, setServerFonts] = useState<{ label: string; value: string }[]>([])
+
+  // 拉服务器字体 → FontFace API 加载到浏览器 → 注入到字体下拉
+  useEffect(() => {
+    const directBase = (import.meta as any).env?.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'
+    fetch(directBase + '/api/voice/cover-fonts')
+      .then(r => r.json())
+      .then(async (d: any) => {
+        const list: { file: string; label: string }[] = d.fonts || []
+        // 加载每个字体, 用 monoi-wb-* 前缀避免跟封面那边冲突
+        const loaded: { label: string; value: string }[] = []
+        for (const f of list) {
+          const family = `monoi-wb-${f.file.replace(/[^\w]/g, '')}`
+          const url = `${directBase}/api/voice/cover-font-file/${encodeURIComponent(f.file)}`
+          try {
+            const ff = new FontFace(family, `url(${url})`)
+            await ff.load()
+            ;(document as any).fonts.add(ff)
+            loaded.push({ label: f.label || f.file, value: family })
+          } catch (e) {
+            console.warn('font load fail', f.file, e)
+          }
+        }
+        setServerFonts(loaded)
+      })
+      .catch(() => setServerFonts([]))
+  }, [])
+
+  const FONT_FAMILIES = [...DEFAULT_FONT_FAMILIES, ...serverFonts]
 
   // 摄像头预览 → off-screen video
   useEffect(() => {
@@ -130,22 +161,21 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
     setSelectedId(null)
   }
 
-  // 添加文字 — 点 "+ 文字" 立刻在白板中心加占位 "双击输入文字", 用户双击改内容
+  // 添加文字 — 点 "+ 文字" 立刻在白板中心加空文字 + 进入编辑模式 (光标蹦, 直接打字)
   const addText = () => {
     const id = `t_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
     const fontSize = 72
-    const placeholder = '双击输入文字'
-    const estW = placeholder.length * fontSize * 0.8
     const newItem: WhiteboardItem = {
       id, type: 'text',
-      x: width / 2 - estW / 2, y: height / 2 - fontSize / 2,
-      text: placeholder, fontSize, fill: '#000000',
+      x: width / 2 - 200, y: height / 2 - fontSize / 2,
+      text: '', fontSize, fill: '#000000',
       fontFamily: FONT_FAMILIES[0].value,
       rotation: 0,
     }
     const next = [...items, newItem]
     updateItems(next)
     setSelectedId(id)
+    setEditingId(id)  // 立刻进入编辑模式, textarea 自动聚焦
   }
 
   // 添加图片 (file 或 base64 dataURL)
@@ -364,7 +394,14 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
               autoFocus
               defaultValue={it.text}
               onBlur={(e) => {
-                handleTransform(editingId, { text: e.target.value || '双击输入文字' })
+                const v = e.target.value
+                if (!v.trim()) {
+                  // 空文字 → 删掉这个 item (用户加了又没填, 或全删空了)
+                  updateItems(items.filter(x => x.id !== editingId))
+                  setSelectedId(null)
+                } else {
+                  handleTransform(editingId, { text: v })
+                }
                 setEditingId(null)
               }}
               onKeyDown={(e) => {
