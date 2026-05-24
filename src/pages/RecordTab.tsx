@@ -10,18 +10,30 @@ import { Camera, Monitor, Mic, Square, Download, AlertCircle, RotateCcw, Setting
 type Phase = 'setup' | 'previewing' | 'recording' | 'done'
 type PipShape = 'circle' | 'rounded' | 'square'
 type PipPos = 'tl' | 'tc' | 'tr' | 'cl' | 'cc' | 'cr' | 'bl' | 'bc' | 'br'
+type OutputRatio = '16:9' | '9:16' | '1:1' | '3:4'
+type BgMode = 'screen' | 'whiteboard' | 'camera_only'
+
+// 输出像素尺寸 (高度 1080 基准, 各比例都给具体宽高)
+const RATIO_SIZE: Record<OutputRatio, { w: number; h: number; label: string }> = {
+  '16:9': { w: 1920, h: 1080, label: '横屏 16:9' },
+  '9:16': { w: 1080, h: 1920, label: '竖屏 9:16' },
+  '1:1':  { w: 1080, h: 1080, label: '方形 1:1' },
+  '3:4':  { w: 1080, h: 1440, label: '3:4' },
+}
 
 const RECORD_PRESETS = [
-  { id: 'screen_camera', label: '屏幕 + 人物 PIP', desc: '主流方案. 屏幕作背景, 摄像头圆形 PIP 叠加' },
-  { id: 'screen_only',   label: '仅屏幕',         desc: '只录屏幕, 无人物 (适合纯演示)' },
-  { id: 'camera_only',   label: '仅摄像头',       desc: '只录自己, 没屏幕 (适合 vlog)' },
-  { id: 'window_camera', label: '单窗口 + PIP',    desc: '只录一个窗口 (如 PPT), 摄像头 PIP' },
+  { id: 'screen_camera',     label: '屏幕 + 人物 PIP',  desc: '共享电脑窗口作背景, 摄像头圆形 PIP 叠加' },
+  { id: 'whiteboard_camera', label: '白板 + 人物 PIP',  desc: '纯白背景 + 摄像头叠加. 解说没现成 PPT 时用' },
+  { id: 'screen_only',       label: '仅屏幕',          desc: '只录屏幕, 无人物 (纯演示)' },
+  { id: 'camera_only',       label: '仅摄像头',        desc: '只录自己, 没屏幕 (vlog)' },
 ]
 
 export default function RecordTab() {
   const [phase, setPhase] = useState<Phase>('setup')
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null)
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null)
+  const [bgMode, setBgMode] = useState<BgMode>('screen')   // 背景模式: 屏幕 / 白板 / 仅摄像头
+  const [outputRatio, setOutputRatio] = useState<OutputRatio>('16:9')
   const [pipShape, setPipShape] = useState<PipShape>('circle')
   const [pipPos, setPipPos] = useState<PipPos>('br')
   const [pipSize, setPipSize] = useState(25)
@@ -73,33 +85,53 @@ export default function RecordTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screenStream])
 
-  // canvas composit 循环
+  // canvas composit 循环 — 输出尺寸固定为 RATIO_SIZE[outputRatio], 背景 contain 进画布
   useEffect(() => {
     if (phase !== 'previewing' && phase !== 'recording') return
     if (!canvasRef.current) return
     const canvas = canvasRef.current
     const ctx = canvas.getContext('2d')
     if (!ctx) return
+    // 固定输出尺寸 (跟用户选的比例对齐, 不跟屏幕走)
+    const target = RATIO_SIZE[outputRatio]
+    if (canvas.width !== target.w) canvas.width = target.w
+    if (canvas.height !== target.h) canvas.height = target.h
+
     const draw = () => {
       const screenV = screenVideoRef.current
       const cameraV = cameraVideoRef.current
-      // 屏幕 + 摄像头 都没 → 仅摄像头模式
-      if (screenV && screenV.videoWidth > 0) {
-        if (canvas.width !== screenV.videoWidth) canvas.width = screenV.videoWidth
-        if (canvas.height !== screenV.videoHeight) canvas.height = screenV.videoHeight
-        ctx.drawImage(screenV, 0, 0, canvas.width, canvas.height)
-        if (cameraV && cameraV.videoWidth > 0) drawPip(ctx, canvas, cameraV, pipShape, pipPos, pipSize)
-      } else if (cameraV && cameraV.videoWidth > 0) {
-        // 仅摄像头模式
-        if (canvas.width !== cameraV.videoWidth) canvas.width = cameraV.videoWidth
-        if (canvas.height !== cameraV.videoHeight) canvas.height = cameraV.videoHeight
-        ctx.drawImage(cameraV, 0, 0, canvas.width, canvas.height)
+
+      // 1. 画背景 (3 种模式)
+      if (bgMode === 'whiteboard') {
+        // 白板: 纯白
+        ctx.fillStyle = '#FFFFFF'
+        ctx.fillRect(0, 0, canvas.width, canvas.height)
+      } else if (bgMode === 'camera_only' && cameraV && cameraV.videoWidth > 0) {
+        // 仅摄像头: 摄像头铺满整个 canvas (contain 不裁切, 上下/左右黑边)
+        ctx.fillStyle = '#000000'
+        ctx.fillRect(0, 0, canvas.width, canvas.height)
+        drawContain(ctx, cameraV, canvas.width, canvas.height)
+      } else if (screenV && screenV.videoWidth > 0) {
+        // 屏幕: contain 模式 (源 16:9 输出 9:16 时上下黑边, 不裁切丢内容)
+        ctx.fillStyle = '#000000'
+        ctx.fillRect(0, 0, canvas.width, canvas.height)
+        drawContain(ctx, screenV, canvas.width, canvas.height)
+      } else {
+        // 没源时全黑
+        ctx.fillStyle = '#000000'
+        ctx.fillRect(0, 0, canvas.width, canvas.height)
       }
+
+      // 2. PIP 摄像头 (除非已经是"仅摄像头"模式 — 那种情况摄像头本身就是背景, 不再叠 PIP)
+      if (bgMode !== 'camera_only' && cameraV && cameraV.videoWidth > 0) {
+        drawPip(ctx, canvas, cameraV, pipShape, pipPos, pipSize)
+      }
+
       rafRef.current = requestAnimationFrame(draw)
     }
     rafRef.current = requestAnimationFrame(draw)
     return () => cancelAnimationFrame(rafRef.current)
-  }, [phase, pipShape, pipPos, pipSize])
+  }, [phase, pipShape, pipPos, pipSize, bgMode, outputRatio])
 
   useEffect(() => {
     if (phase !== 'recording') { setElapsed(0); return }
@@ -114,6 +146,11 @@ export default function RecordTab() {
     setError('')
     try {
       const s = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: true })
+      // 检测套娃: 用户选了 Chrome / monoi 自己 → 警告
+      const label = s.getVideoTracks()[0]?.label?.toLowerCase() || ''
+      if (label.includes('chrome') || label.includes('monoi') || label.includes('vercel')) {
+        setError('警告: 你选的是 Chrome / monoi 自己, 录出来会无限套娃 (画中画中画...). 建议点 "重选" 改选 PPT / Keynote / 其他应用窗口')
+      }
       setScreenStream(s)
       if (cameraStream || (!cameraStream && phase === 'setup')) setPhase('previewing')
     } catch (e: any) {
@@ -227,12 +264,21 @@ export default function RecordTab() {
   }, [])
   const onPresetPick = async (preset: string) => {
     setError('')
-    if (preset === 'screen_camera' || preset === 'window_camera') {
+    if (preset === 'screen_camera') {
+      setBgMode('screen')
       await requestCamera()
       await requestScreen()
+    } else if (preset === 'whiteboard_camera') {
+      // 白板: 不要屏幕, 用 canvas 自己画白色背景 + 摄像头叠加
+      setBgMode('whiteboard')
+      await requestCamera()
+      // 没屏幕也要进 previewing
+      setTimeout(() => { if (cameraStream || screenStream) setPhase('previewing') }, 100)
     } else if (preset === 'screen_only') {
+      setBgMode('screen')
       await requestScreen()
     } else if (preset === 'camera_only') {
+      setBgMode('camera_only')
       await requestCamera()
     }
   }
@@ -422,7 +468,18 @@ export default function RecordTab() {
 
               {showPipSettings && (
                 <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] p-4 flex flex-col gap-3 msg-enter">
-                  <div className="text-xs font-medium text-[var(--text-2)]">PIP 设置</div>
+                  <div className="text-xs font-medium text-[var(--text-2)]">输出尺寸</div>
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    {(['16:9', '9:16', '1:1', '3:4'] as OutputRatio[]).map(r => (
+                      <button key={r} onClick={() => setOutputRatio(r)}
+                        className={`px-3 py-1 rounded-lg border text-xs cursor-pointer transition-colors ${outputRatio === r ? 'border-[var(--text)] bg-[var(--text)] text-[var(--bg)]' : 'border-[var(--border)] text-[var(--text-2)]'}`}>
+                        {RATIO_SIZE[r].label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="text-[10px] text-[var(--text-3)] -mt-1">9:16 适合抖音/小红书, 16:9 适合 B 站/YouTube, 1:1 适合 IG, 3:4 适合视频号</div>
+
+                  <div className="border-t border-[var(--border-subtle)] pt-2 text-xs font-medium text-[var(--text-2)]">PIP 设置</div>
                   <div className="flex flex-wrap items-center gap-2 text-xs">
                     <span className="text-[var(--text-3)] mr-1">形状:</span>
                     {(['circle', 'rounded', 'square'] as PipShape[]).map(s => (
@@ -548,37 +605,62 @@ export default function RecordTab() {
   )
 }
 
-/** 在 canvas 上画 PIP 摄像头 — 形状 clip + 边框 */
+/** contain 模式画 video — 保持源宽高比塞进目标矩形, 不裁切 (上下/左右黑边) */
+function drawContain(ctx: CanvasRenderingContext2D, v: HTMLVideoElement, dw: number, dh: number) {
+  const sw = v.videoWidth, sh = v.videoHeight
+  if (!sw || !sh) return
+  const scale = Math.min(dw / sw, dh / sh)
+  const w = sw * scale, h = sh * scale
+  const x = (dw - w) / 2, y = (dh - h) / 2
+  ctx.drawImage(v, x, y, w, h)
+}
+
+/** 在 canvas 上画 PIP 摄像头 — 形状 clip + 边框. circle 用方形 (1:1) 才是真圆. */
 function drawPip(
   ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, cameraV: HTMLVideoElement,
   shape: PipShape, pos: PipPos, sizePct: number,
 ) {
-  const pipH = (canvas.height * sizePct) / 100
-  const pipW = (pipH * cameraV.videoWidth) / cameraV.videoHeight
+  // circle 形状: 强制 1:1 方形 (短边为准), 才是真圆而不是椭圆
+  // rounded / square: 保持摄像头自然宽高比
+  let pipW: number, pipH: number
+  if (shape === 'circle') {
+    const side = (Math.min(canvas.width, canvas.height) * sizePct) / 100
+    pipW = side; pipH = side
+  } else {
+    pipH = (canvas.height * sizePct) / 100
+    pipW = (pipH * cameraV.videoWidth) / cameraV.videoHeight
+  }
+
   const padding = canvas.width * 0.02
   let x = padding, y = padding
   if (pos[1] === 'c') x = (canvas.width - pipW) / 2
   else if (pos[1] === 'r') x = canvas.width - pipW - padding
   if (pos[0] === 'c') y = (canvas.height - pipH) / 2
   else if (pos[0] === 'b') y = canvas.height - pipH - padding
+
   ctx.save()
   if (shape === 'circle') {
     ctx.beginPath()
-    ctx.ellipse(x + pipW / 2, y + pipH / 2, pipW / 2, pipH / 2, 0, 0, Math.PI * 2)
+    ctx.arc(x + pipW / 2, y + pipH / 2, pipW / 2, 0, Math.PI * 2)
     ctx.clip()
+    // 摄像头是横长方形 (如 640x480 / 16:9), 要 cover 模式裁到方形 PIP 里 (居中裁) 不变形
+    drawCover(ctx, cameraV, x, y, pipW, pipH)
   } else if (shape === 'rounded') {
     const r = Math.min(pipW, pipH) * 0.15
     roundRect(ctx, x, y, pipW, pipH, r)
     ctx.clip()
+    ctx.drawImage(cameraV, x, y, pipW, pipH)
+  } else {
+    ctx.drawImage(cameraV, x, y, pipW, pipH)
   }
-  ctx.drawImage(cameraV, x, y, pipW, pipH)
   ctx.restore()
+
   // 边框
   ctx.strokeStyle = 'rgba(255,255,255,0.9)'
   ctx.lineWidth = Math.max(3, canvas.width / 400)
   if (shape === 'circle') {
     ctx.beginPath()
-    ctx.ellipse(x + pipW / 2, y + pipH / 2, pipW / 2, pipH / 2, 0, 0, Math.PI * 2)
+    ctx.arc(x + pipW / 2, y + pipH / 2, pipW / 2, 0, Math.PI * 2)
     ctx.stroke()
   } else if (shape === 'rounded') {
     const r = Math.min(pipW, pipH) * 0.15
@@ -587,6 +669,24 @@ function drawPip(
   } else {
     ctx.strokeRect(x, y, pipW, pipH)
   }
+}
+
+/** cover 模式画 video — 源 crop 居中填满目标矩形, 不变形, 多出部分裁掉 */
+function drawCover(ctx: CanvasRenderingContext2D, v: HTMLVideoElement, dx: number, dy: number, dw: number, dh: number) {
+  const sw = v.videoWidth, sh = v.videoHeight
+  if (!sw || !sh) return
+  const srcAspect = sw / sh, dstAspect = dw / dh
+  let sx = 0, sy = 0, sWidth = sw, sHeight = sh
+  if (srcAspect > dstAspect) {
+    // 源更宽, 裁左右
+    sWidth = sh * dstAspect
+    sx = (sw - sWidth) / 2
+  } else {
+    // 源更高, 裁上下
+    sHeight = sw / dstAspect
+    sy = (sh - sHeight) / 2
+  }
+  ctx.drawImage(v, sx, sy, sWidth, sHeight, dx, dy, dw, dh)
 }
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
