@@ -715,7 +715,7 @@ function drawPip(
     // 摄像头是横长方形 (如 640x480 / 16:9), 要 cover 模式裁到方形 PIP 里 (居中裁) 不变形
     drawCover(ctx, cameraV, x, y, pipW, pipH)
   } else if (shape === 'rounded') {
-    const r = Math.min(pipW, pipH) * 0.15
+    const r = Math.min(pipW, pipH) * 0.08
     roundRect(ctx, x, y, pipW, pipH, r)
     ctx.clip()
     ctx.drawImage(cameraV, x, y, pipW, pipH)
@@ -732,7 +732,7 @@ function drawPip(
     ctx.arc(x + pipW / 2, y + pipH / 2, pipW / 2, 0, Math.PI * 2)
     ctx.stroke()
   } else if (shape === 'rounded') {
-    const r = Math.min(pipW, pipH) * 0.15
+    const r = Math.min(pipW, pipH) * 0.08
     roundRect(ctx, x, y, pipW, pipH, r)
     ctx.stroke()
   } else {

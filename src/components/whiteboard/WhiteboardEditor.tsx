@@ -500,7 +500,7 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
           else if (pipPos[1] === 'r') left = displaySize.w - pipW - pad
           if (pipPos[0] === 'c') top = (displaySize.h - pipH) / 2
           else if (pipPos[0] === 'b') top = displaySize.h - pipH - pad
-          const radius = pipShape === 'circle' ? '50%' : pipShape === 'rounded' ? '15%' : '0'
+          const radius = pipShape === 'circle' ? '50%' : pipShape === 'rounded' ? '8%' : '0'
           return (
             <video ref={videoRef} muted playsInline autoPlay
               style={{
