@@ -428,8 +428,10 @@ export default function RecordTab() {
               {/* 录制中故意藏画布 — 否则 getDisplayMedia 录到浏览器自己 → 套娃无限镜子.
                   画布仍然在跑 (requestAnimationFrame + captureStream 都要), 只是 visibility hidden 视觉藏掉 */}
               {phase === 'previewing' ? (
-                <div className="rounded-2xl border border-[var(--border)] bg-black overflow-hidden">
-                  <canvas ref={canvasRef} className="w-full h-auto block max-h-[55vh] object-contain"/>
+                // flex 居中 + canvas 用 max-w/max-h 自动保持比例 (而不是 w-full 强拉)
+                // 这样选 9:16 竖屏时, canvas 真的显示成竖的而不是被压成横向 letterbox
+                <div className="rounded-2xl border border-[var(--border)] bg-black overflow-hidden flex items-center justify-center" style={{ minHeight: '300px' }}>
+                  <canvas ref={canvasRef} className="block max-w-full max-h-[60vh]"/>
                 </div>
               ) : (
                 // recording 阶段: canvas 绝对定位藏到屏幕外 (浏览器仍渲染 → captureStream 能 capture)
