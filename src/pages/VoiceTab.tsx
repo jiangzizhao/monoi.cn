@@ -16,6 +16,8 @@ export default function VoiceTab() {
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle')
   const [micLabel, setMicLabel] = useState<string>('')  // 实际用的麦克风名字
   const [audioLevel, setAudioLevel] = useState<number>(0)  // 0-100 实时音量 (调试用, 让用户能看到麦克风有没有进音)
+  const [availableMics, setAvailableMics] = useState<MediaDeviceInfo[]>([])
+  const [selectedMicId, setSelectedMicId] = useState<string>('')  // 空 = 系统默认
   // 翻译状态
   const [translatedText, setTranslatedText] = useState('')
   const [translating, setTranslating] = useState(false)
@@ -35,17 +37,33 @@ export default function VoiceTab() {
     return () => clearInterval(id)
   }, [isListening])
 
+  // 列出所有麦克风设备 (挂载时拉一次, 给用户选). 未授权时 label 是空, 授权后能看到名字
+  const refreshMics = async () => {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices()
+      setAvailableMics(devices.filter(d => d.kind === 'audioinput'))
+    } catch {}
+  }
+  useEffect(() => {
+    refreshMics()
+    navigator.mediaDevices?.addEventListener?.('devicechange', refreshMics)
+    return () => navigator.mediaDevices?.removeEventListener?.('devicechange', refreshMics)
+  }, [])
+
   /** 启动录音 + WebSocket 流式 ASR. */
   const startListening = async () => {
     setError('')
     setConnectionStatus('connecting')
 
     // 1. 拿麦克风 — 不写死 sampleRate, 让浏览器选 (一般 48000), 客户端再降采样到 16k
+    //    selectedMicId 空 = 用系统默认; 有值 = 用用户在下拉里选的那个
     let stream: MediaStream
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      })
+      const audioConstraints: MediaTrackConstraints = {
+        echoCancellation: true, noiseSuppression: true, autoGainControl: true,
+      }
+      if (selectedMicId) audioConstraints.deviceId = { exact: selectedMicId }
+      stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints })
       streamRef.current = stream
       // 诊断: 列出实际拿到的音轨 + label
       const audioTracks = stream.getAudioTracks()
@@ -60,6 +78,8 @@ export default function VoiceTab() {
       if (audioTracks[0].muted) {
         setError(`麦克风被静音了 (${audioTracks[0].label}). 物理静音按钮 / 系统静音都查一下`)
       }
+      // 授权后重新枚举一次, 拿到设备 label (浏览器隐私规则: 没授权时 label 是空)
+      await refreshMics()
     } catch (e: any) {
       setError(`麦克风获取失败: ${e?.name === 'NotAllowedError' ? '你拒绝了麦克风权限' : e?.message || e}`)
       setConnectionStatus('error')
@@ -336,7 +356,20 @@ export default function VoiceTab() {
 
       {/* 下半: 底部录音控制条 (跟 ChatInput 一致) */}
       <div className="border-t border-[var(--border)] bg-[var(--bg-chat)] px-4 pt-3 pb-4">
-        <div className="max-w-3xl mx-auto flex items-center justify-center">
+        <div className="max-w-3xl mx-auto flex flex-col items-center gap-2">
+          {/* 录音前: 麦克风选择下拉 (有 ≥ 2 个 + 未授权时 label 是空时不显示) */}
+          {!isListening && availableMics.length > 0 && availableMics.some(m => m.label) && (
+            <div className="w-full max-w-md flex items-center gap-2 text-xs">
+              <Mic size={12} className="text-[var(--text-3)] flex-shrink-0"/>
+              <select value={selectedMicId} onChange={e => setSelectedMicId(e.target.value)}
+                className="flex-1 bg-[var(--bg-input)] border border-[var(--border)] rounded-lg px-2 py-1.5 text-xs text-[var(--text)] cursor-pointer">
+                <option value="">系统默认麦克风</option>
+                {availableMics.map(m => (
+                  <option key={m.deviceId} value={m.deviceId}>{m.label || `设备 ${m.deviceId.slice(0, 8)}`}</option>
+                ))}
+              </select>
+            </div>
+          )}
           {!isListening ? (
             <button onClick={startListening} disabled={connectionStatus === 'connecting'}
               className="flex items-center gap-2 px-6 py-3 rounded-full bg-red-500 hover:bg-red-600 text-white font-medium text-base cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-lg transition-colors">
