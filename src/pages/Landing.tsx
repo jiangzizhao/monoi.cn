@@ -146,6 +146,14 @@ export default function Landing() {
             <a href="#features" className="hover:text-[var(--text)]">功能</a>
             <a href="#pricing" className="hover:text-[var(--text)]">定价</a>
             <a href="#faq" className="hover:text-[var(--text)]">FAQ</a>
+            {/* 下载桌面版 — 桌面端自身不显示这个链接 (你已经装了); 普通网页显示 */}
+            {typeof (window as any).monoiDesktop === 'undefined' && (
+              <a href="https://github.com/jiangzizhao/monoi.cn/releases/latest"
+                target="_blank" rel="noopener noreferrer"
+                className="hover:text-[var(--text)] flex items-center gap-1">
+                💻 桌面版
+              </a>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <button onClick={() => nav('/login')}

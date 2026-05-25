@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, Trash2, MessageSquare, LogOut, Shield, Video, Mic } from 'lucide-react'
+import { Plus, Trash2, MessageSquare, LogOut, Shield, Video, Mic, Download } from 'lucide-react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useChatStore } from '../../store/chatStore'
 import { getUsername, logout, isLoggedIn } from '../../lib/auth'
@@ -141,6 +141,16 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
             <span className="flex-1 truncate">管理后台</span>
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500 text-white">admin</span>
           </Link>
+        )}
+        {/* 下载桌面版 — 已在桌面端不显示 (它自己装好了) */}
+        {typeof (window as any).monoiDesktop === 'undefined' && (
+          <a href="https://github.com/jiangzizhao/monoi.cn/releases/latest"
+            target="_blank" rel="noopener noreferrer"
+            className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-[var(--text-2)] hover:bg-[var(--bg-hover)] hover:text-[var(--text)] cursor-pointer transition-colors">
+            <Download size={14}/>
+            <span className="flex-1 truncate">下载桌面版</span>
+            <span className="text-[10px] text-[var(--text-3)]">用自己账号发</span>
+          </a>
         )}
         <button onClick={handleLogout}
           className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-[var(--text-3)] hover:bg-[var(--bg-hover)] hover:text-red-400 cursor-pointer transition-colors">
