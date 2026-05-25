@@ -5,9 +5,9 @@
 // MediaRecorder 录的就是合成结果.
 
 import { useEffect, useRef, useState } from 'react'
-import { Stage, Layer, Rect, Text as KonvaText, Image as KonvaImage, Transformer } from 'react-konva'
+import { Stage, Layer, Rect, Text as KonvaText, Image as KonvaImage, Line as KonvaLine, Group, Transformer } from 'react-konva'
 import type Konva from 'konva'
-import { Type, ImagePlus, Trash2, Undo2, Redo2, Copy, LayoutTemplate, X, Loader2 } from 'lucide-react'
+import { Type, ImagePlus, Trash2, Undo2, Redo2, Copy, LayoutTemplate, X, Loader2, Network, Pencil, ChevronDown } from 'lucide-react'
 
 export type WhiteboardItem =
   | {
@@ -30,6 +30,32 @@ export type WhiteboardItem =
       height: number
       src: string  // base64 data URL
       rotation: number
+    }
+  | {
+      id: string
+      type: 'mindNode'
+      x: number
+      y: number
+      width: number
+      height: number
+      text: string
+      fontSize: number
+      fill: string          // 节点底色
+      textFill: string      // 文字色
+      fontFamily: string
+      rotation: number
+      isRoot: boolean       // 根节点 (中心), 区别于分支
+      parentId?: string     // 父节点 id, 用于自动连线 (root 为 undefined)
+    }
+  | {
+      id: string
+      type: 'freeStroke'
+      points: number[]      // [x0,y0, x1,y1, ...] 一笔连续轨迹 (画笔工具)
+      stroke: string
+      strokeWidth: number
+      rotation: number
+      x: number             // 用于 Konva 节点定位 (整笔可拖整体平移)
+      y: number
     }
 
 interface Props {
@@ -65,6 +91,17 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
   const [editingId, setEditingId] = useState<string | null>(null)  // 当前内嵌编辑的 text id
   const [history, setHistory] = useState<WhiteboardItem[][]>([[]])
   const [historyIdx, setHistoryIdx] = useState(0)
+
+  // 模式: select (默认选择/拖动) | pen (画笔模式)
+  const [mode, setMode] = useState<'select' | 'pen'>('select')
+  // 思维导图预设下拉
+  const [mindMenuOpen, setMindMenuOpen] = useState(false)
+  // 画笔颜色 / 粗细 (复用 defaultTextStyle.fill 也行, 这里独立一份方便后续加粗细调节)
+  const [penColor, setPenColor] = useState('#3B82F6')
+  const [penWidth] = useState(6)
+  // 正在画的临时笔触 (mouseup 时存为 freeStroke item)
+  const drawingStrokeRef = useRef<{ points: number[]; id: string } | null>(null)
+  const [drawingTick, setDrawingTick] = useState(0)  // 触发重渲染显示正在画的线
   // monoi 服务器字体库 (跟 CoverGeneratorForm 用同一份). 状态指示砍掉 (用户嫌吵), debug 全走 console.
   const [serverFonts, setServerFonts] = useState<{ label: string; value: string }[]>([])
 
@@ -276,6 +313,93 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
   }
   const onDragOver = (e: React.DragEvent) => e.preventDefault()
 
+  // ============== 思维导图 ==============
+  // 插入一组节点 (1 个根 + N 个子). preset 控制布局.
+  const insertMindMap = (preset: 'radial' | 'horizontal') => {
+    const rootId = `m_${Date.now()}_root`
+    const cx = width / 2, cy = height / 2
+    const nodeW = 240, nodeH = 96
+    const branchW = 200, branchH = 80
+    const root: WhiteboardItem = {
+      id: rootId, type: 'mindNode',
+      x: cx - nodeW / 2, y: cy - nodeH / 2,
+      width: nodeW, height: nodeH,
+      text: '中心主题', fontSize: 36, fill: '#3B82F6', textFill: '#FFFFFF',
+      fontFamily: defaultTextStyle.fontFamily,
+      rotation: 0, isRoot: true,
+    }
+    const children: WhiteboardItem[] = []
+    const labels = ['分支一', '分支二', '分支三', '分支四', '分支五']
+    const branchFills = ['#FEF3C7', '#DBEAFE', '#DCFCE7', '#FCE7F3', '#EDE9FE']
+    if (preset === 'radial') {
+      // 中心放射: 5 个分支均匀环绕 root
+      const radius = Math.min(width, height) * 0.28
+      const N = 5
+      for (let i = 0; i < N; i++) {
+        const angle = -Math.PI / 2 + (i * 2 * Math.PI / N)  // 从顶部开始顺时针
+        const bx = cx + radius * Math.cos(angle) - branchW / 2
+        const by = cy + radius * Math.sin(angle) - branchH / 2
+        children.push({
+          id: `m_${Date.now()}_${i}`, type: 'mindNode',
+          x: bx, y: by, width: branchW, height: branchH,
+          text: labels[i], fontSize: 28, fill: branchFills[i % branchFills.length], textFill: '#1F2937',
+          fontFamily: defaultTextStyle.fontFamily,
+          rotation: 0, isRoot: false, parentId: rootId,
+        })
+      }
+    } else {
+      // 水平树: 左根, 4 个分支右侧上下错落
+      root.x = width * 0.15 - nodeW / 2
+      const N = 4
+      const totalH = (branchH + 40) * N
+      const startY = cy - totalH / 2
+      for (let i = 0; i < N; i++) {
+        children.push({
+          id: `m_${Date.now()}_${i}`, type: 'mindNode',
+          x: width * 0.65 - branchW / 2,
+          y: startY + i * (branchH + 40),
+          width: branchW, height: branchH,
+          text: labels[i], fontSize: 28, fill: branchFills[i % branchFills.length], textFill: '#1F2937',
+          fontFamily: defaultTextStyle.fontFamily,
+          rotation: 0, isRoot: false, parentId: rootId,
+        })
+      }
+    }
+    updateItems([...items, root, ...children])
+    setSelectedId(rootId)
+    setMindMenuOpen(false)
+  }
+
+  // v1: 加分支用现有 "复制" 按钮 (选中分支点复制 → 同父节点的同级分支自动出现)
+
+  // ============== 画笔 ==============
+  const startStroke = (px: number, py: number) => {
+    const id = `s_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
+    drawingStrokeRef.current = { id, points: [px, py] }
+    setDrawingTick(t => t + 1)
+  }
+  const appendStroke = (px: number, py: number) => {
+    const s = drawingStrokeRef.current
+    if (!s) return
+    s.points.push(px, py)
+    setDrawingTick(t => t + 1)
+  }
+  const finishStroke = () => {
+    const s = drawingStrokeRef.current
+    if (!s) return
+    drawingStrokeRef.current = null
+    if (s.points.length >= 4) {
+      // 至少 2 点才存
+      const stroke: WhiteboardItem = {
+        id: s.id, type: 'freeStroke',
+        points: s.points, stroke: penColor, strokeWidth: penWidth,
+        rotation: 0, x: 0, y: 0,
+      }
+      updateItems([...items, stroke])
+    }
+    setDrawingTick(t => t + 1)
+  }
+
   // 删除选中
   const deleteSelected = () => {
     if (!selectedId) return
@@ -334,6 +458,50 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
           <ImagePlus size={13}/> 图片
           <input type="file" accept="image/*" onChange={handleFilePick} className="hidden"/>
         </label>
+        {/* 思维导图下拉 */}
+        <div className="relative">
+          <button onClick={() => setMindMenuOpen(o => !o)} title="思维导图"
+            className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs text-[var(--text-2)] hover:bg-[var(--bg-hover)] cursor-pointer">
+            <Network size={13}/> 思维导图 <ChevronDown size={10}/>
+          </button>
+          {mindMenuOpen && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setMindMenuOpen(false)}/>
+              <div className="absolute left-0 top-full mt-1 z-50 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg shadow-lg min-w-[140px] py-1">
+                <button onClick={() => insertMindMap('radial')}
+                  className="w-full text-left px-3 py-1.5 text-xs text-[var(--text-2)] hover:bg-[var(--bg-hover)] cursor-pointer flex items-center gap-2">
+                  <span className="text-base">⊕</span> 中心放射
+                </button>
+                <button onClick={() => insertMindMap('horizontal')}
+                  className="w-full text-left px-3 py-1.5 text-xs text-[var(--text-2)] hover:bg-[var(--bg-hover)] cursor-pointer flex items-center gap-2">
+                  <span className="text-base">⫶</span> 水平树
+                </button>
+                <div className="border-t border-[var(--border)] my-1"/>
+                <div className="px-3 py-1 text-[10px] text-[var(--text-3)]">选中节点后用"复制"加分支, 拖动节点连线自动跟随</div>
+              </div>
+            </>
+          )}
+        </div>
+        {/* 画笔 */}
+        <button onClick={() => { setMode(m => m === 'pen' ? 'select' : 'pen'); setSelectedId(null) }}
+          title={mode === 'pen' ? '退出画笔' : '自由画笔'}
+          className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs cursor-pointer transition-colors ${
+            mode === 'pen'
+              ? 'bg-blue-500 text-white hover:bg-blue-600'
+              : 'text-[var(--text-2)] hover:bg-[var(--bg-hover)]'
+          }`}>
+          <Pencil size={13}/> 画笔
+        </button>
+        {mode === 'pen' && (
+          <label
+            title="画笔颜色"
+            className="relative w-5 h-5 rounded-full border border-[var(--border)] cursor-pointer overflow-hidden shadow-sm hover:scale-110 transition-transform"
+            style={{ background: penColor }}>
+            <input type="color" value={penColor}
+              onChange={e => setPenColor(e.target.value)}
+              className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"/>
+          </label>
+        )}
         <div className="w-px h-4 bg-[var(--border)] mx-1"/>
         <button onClick={undo} disabled={historyIdx <= 0} title="撤销"
           className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs text-[var(--text-2)] hover:bg-[var(--bg-hover)] cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
@@ -417,6 +585,12 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
         }}>
         <Stage ref={stageRef} width={width} height={height}
           onMouseDown={(e) => {
+            // 画笔模式: 在空白处或元素上, 一律开始一笔
+            if (mode === 'pen') {
+              const pos = e.target.getStage()?.getPointerPosition()
+              if (pos) startStroke(pos.x, pos.y)
+              return
+            }
             // 点击空白处: 取消选中 (如果有选中) OR 在该位置直接创建文字 (如果无选中, 类似 PPT 文本工具)
             if (e.target === e.target.getStage() || e.target.attrs.id === 'bg-rect' || e.target.attrs.id === 'bg-image') {
               if (selectedId) {
@@ -427,7 +601,14 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
                 if (pointerPos) addTextAt(pointerPos.x, pointerPos.y)
               }
             }
-          }}>
+          }}
+          onMouseMove={(e) => {
+            if (mode !== 'pen' || !drawingStrokeRef.current) return
+            const pos = e.target.getStage()?.getPointerPosition()
+            if (pos) appendStroke(pos.x, pos.y)
+          }}
+          onMouseUp={() => { if (mode === 'pen') finishStroke() }}
+          onMouseLeave={() => { if (mode === 'pen' && drawingStrokeRef.current) finishStroke() }}>
           <Layer>
             {/* 背景: bgImage 有就铺图 (cover 填满, 不留白边), 没图就纯白 */}
             <Rect id="bg-rect" x={0} y={0} width={width} height={height} fill="white"/>
@@ -440,6 +621,33 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
                 listening={false}
               />
             )}
+
+            {/* 思维导图连线 (要画在节点底下, 先渲染). 每个非根 mindNode → 找父节点画 bezier. */}
+            {items.map(it => {
+              if (it.type !== 'mindNode' || !it.parentId) return null
+              const parent = items.find(p => p.id === it.parentId)
+              if (!parent || parent.type !== 'mindNode') return null
+              // 起点: 父节点最近边的中点 (右 / 左 / 上 / 下 按相对位置自动选)
+              const px = parent.x + parent.width / 2
+              const py = parent.y + parent.height / 2
+              const cx = it.x + it.width / 2
+              const cy = it.y + it.height / 2
+              // bezier 用水平的中点作控制点 (S 形)
+              const midX = (px + cx) / 2
+              const points = [px, py, midX, py, midX, cy, cx, cy]
+              return (
+                <KonvaLine
+                  key={`line_${it.id}`}
+                  points={points}
+                  stroke="#94A3B8"
+                  strokeWidth={2.5}
+                  bezier
+                  lineCap="round"
+                  listening={false}
+                />
+              )
+            })}
+
             {/* 元素 */}
             {items.map(it => {
               if (it.type === 'text') {
@@ -450,11 +658,11 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
                     fontSize={it.fontSize} fill={it.fill}
                     fontFamily={it.fontFamily}
                     rotation={it.rotation}
-                    draggable
-                    onClick={() => setSelectedId(it.id)}
-                    onTap={() => setSelectedId(it.id)}
-                    onDblClick={() => setEditingId(it.id)}
-                    onDblTap={() => setEditingId(it.id)}
+                    draggable={mode === 'select'}
+                    onClick={() => mode === 'select' && setSelectedId(it.id)}
+                    onTap={() => mode === 'select' && setSelectedId(it.id)}
+                    onDblClick={() => mode === 'select' && setEditingId(it.id)}
+                    onDblTap={() => mode === 'select' && setEditingId(it.id)}
                     visible={editingId !== it.id}  // 编辑时隐藏 Konva 文字, 让 HTML input 接管显示
                     onDragEnd={(e) => handleTransform(it.id, { x: e.target.x(), y: e.target.y() })}
                     onTransformEnd={(e) => {
@@ -471,8 +679,50 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
                   />
                 )
               }
+              if (it.type === 'mindNode') {
+                return (
+                  <MindNodeItem key={it.id} item={it as any}
+                    selected={selectedId === it.id} editing={editingId === it.id}
+                    selectable={mode === 'select'}
+                    onSelect={setSelectedId} onEdit={setEditingId}
+                    onChange={handleTransform}/>
+                )
+              }
+              if (it.type === 'freeStroke') {
+                return (
+                  <KonvaLine
+                    key={it.id} id={it.id}
+                    x={it.x} y={it.y}
+                    points={it.points}
+                    stroke={it.stroke}
+                    strokeWidth={it.strokeWidth}
+                    lineCap="round" lineJoin="round"
+                    tension={0.5}
+                    rotation={it.rotation}
+                    draggable={mode === 'select'}
+                    listening={mode === 'select'}
+                    onClick={() => mode === 'select' && setSelectedId(it.id)}
+                    onTap={() => mode === 'select' && setSelectedId(it.id)}
+                    onDragEnd={(e) => handleTransform(it.id, { x: e.target.x(), y: e.target.y() })}
+                  />
+                )
+              }
               return <ImageItem key={it.id} item={it as any} onSelect={setSelectedId} onChange={handleTransform}/>
             })}
+
+            {/* 正在画的临时笔触 (mouseup 才存为 item) */}
+            {drawingStrokeRef.current && drawingStrokeRef.current.points.length >= 2 && (
+              <KonvaLine
+                key={`drawing_${drawingTick}`}
+                points={drawingStrokeRef.current.points}
+                stroke={penColor}
+                strokeWidth={penWidth}
+                lineCap="round" lineJoin="round"
+                tension={0.5}
+                listening={false}
+              />
+            )}
+
             <Transformer ref={transformerRef} rotateEnabled keepRatio={false}
               anchorSize={12}
               anchorCornerRadius={6}
@@ -491,22 +741,23 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
         </Stage>
         </div>
 
-        {/* 内嵌文字编辑器 — 双击文字激活, 直接在白板上输入 (取代 prompt 弹窗) */}
+        {/* 内嵌文字编辑器 — 双击 text / mindNode 激活, 直接在白板上输入 */}
         {editingId && (() => {
           const it = items.find(x => x.id === editingId)
-          if (!it || it.type !== 'text') return null
+          if (!it || (it.type !== 'text' && it.type !== 'mindNode')) return null
+          const isMind = it.type === 'mindNode'
           const inputX = it.x * scale
           const inputY = it.y * scale
-          const inputW = Math.max(200, displaySize.w - inputX - 10) * 0.6
-          const inputH = (it.fontSize * scale) * 1.4
+          const inputW = isMind ? (it as any).width * scale : Math.max(200, displaySize.w - inputX - 10) * 0.6
+          const inputH = isMind ? (it as any).height * scale : (it.fontSize * scale) * 1.4
           return (
             <textarea
               autoFocus
               defaultValue={it.text}
               onBlur={(e) => {
                 const v = e.target.value
-                if (!v.trim()) {
-                  // 空文字 → 删掉这个 item (用户加了又没填, 或全删空了)
+                if (!v.trim() && !isMind) {
+                  // 纯文字: 空内容 → 删元素. 思维导图节点保留 (允许空 label).
                   updateItems(items.filter(x => x.id !== editingId))
                   setSelectedId(null)
                 } else {
@@ -524,14 +775,15 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
                 width: inputW, minHeight: inputH,
                 fontSize: it.fontSize * scale,
                 fontFamily: it.fontFamily,
-                color: it.fill,
-                background: 'transparent',  // 无背景, 像直接在白板上打字
-                border: 'none',              // 无边框
+                color: isMind ? (it as any).textFill : it.fill,
+                background: 'transparent',
+                border: 'none',
                 outline: 'none',
-                caretColor: '#3B82F6',       // 蓝色光标更显眼, 提示用户在编辑
+                caretColor: '#3B82F6',
                 padding: '0',
                 margin: '0',
-                lineHeight: 1,
+                lineHeight: isMind ? (inputH / (it.fontSize * scale)) : 1,
+                textAlign: isMind ? 'center' : 'left',
                 resize: 'none',
                 overflow: 'hidden',
                 whiteSpace: 'pre',
@@ -567,7 +819,9 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
       </div>
 
       <p className="text-[10px] text-[var(--text-3)] text-center">
-        点击元素选中 (角上拖动缩放, 顶上圆点旋转). 双击文字编辑. 拖图片文件到白板上传.
+        {mode === 'pen'
+          ? '画笔模式: 鼠标拖动自由画线. 再点"画笔"退出.'
+          : '点击元素选中 (角上拖缩放, 顶上点旋转). 双击文字 / 思维导图节点编辑. 拖图片到白板上传.'}
       </p>
 
       {bgPickerOpen && (
@@ -578,6 +832,66 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
         />
       )}
     </div>
+  )
+}
+
+
+/** 思维导图节点 — 圆角矩形 + 居中文字, 可拖动 / 双击编辑 / 选中后用工具栏复制即"加分支" */
+function MindNodeItem({ item, selected, editing, selectable, onSelect, onEdit, onChange }: {
+  item: Extract<WhiteboardItem, { type: 'mindNode' }>
+  selected: boolean
+  editing: boolean
+  selectable: boolean
+  onSelect: (id: string) => void
+  onEdit: (id: string) => void
+  onChange: (id: string, updates: Partial<WhiteboardItem>) => void
+}) {
+  void selected
+  return (
+    <Group
+      id={item.id}
+      x={item.x} y={item.y}
+      width={item.width} height={item.height}
+      rotation={item.rotation}
+      draggable={selectable}
+      onClick={() => selectable && onSelect(item.id)}
+      onTap={() => selectable && onSelect(item.id)}
+      onDblClick={() => selectable && onEdit(item.id)}
+      onDblTap={() => selectable && onEdit(item.id)}
+      onDragEnd={(e) => onChange(item.id, { x: e.target.x(), y: e.target.y() })}
+      onTransformEnd={(e) => {
+        const node = e.target
+        const scaleX = node.scaleX(), scaleY = node.scaleY()
+        onChange(item.id, {
+          x: node.x(), y: node.y(),
+          width: Math.max(60, item.width * scaleX),
+          height: Math.max(40, item.height * scaleY),
+          rotation: node.rotation(),
+        })
+        node.scaleX(1); node.scaleY(1)
+      }}>
+      <Rect
+        x={0} y={0}
+        width={item.width} height={item.height}
+        fill={item.fill}
+        cornerRadius={item.isRoot ? 24 : 16}
+        shadowColor="rgba(0,0,0,0.15)"
+        shadowBlur={item.isRoot ? 12 : 6}
+        shadowOffsetY={item.isRoot ? 4 : 2}
+        shadowOpacity={1}
+      />
+      <KonvaText
+        x={8} y={0}
+        width={item.width - 16} height={item.height}
+        text={item.text || '点击编辑'}
+        fontSize={item.fontSize}
+        fontFamily={item.fontFamily}
+        fill={item.textFill}
+        align="center" verticalAlign="middle"
+        listening={false}
+        visible={!editing}
+      />
+    </Group>
   )
 }
 
