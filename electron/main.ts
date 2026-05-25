@@ -19,7 +19,9 @@ if (!gotLock) {
   app.quit()
 }
 
-const MONOI_URL = process.env.MONOI_URL || 'https://monoi.cn'
+// 默认走 Vercel 直连 (monoi.cn 域名国内 DNS 不一定通).
+// 等域名稳定后可改回 monoi.cn, 或用 MONOI_URL 环境变量覆盖.
+const MONOI_URL = process.env.MONOI_URL || 'https://monoi-cn.vercel.app'
 const isDev = !app.isPackaged
 
 let mainWin: BrowserWindow | null = null
