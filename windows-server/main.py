@@ -3519,7 +3519,9 @@ async def asr_ws_proxy(client_ws: WebSocket):
     import asyncio
     backend_url = "ws://127.0.0.1:9001/ws/asr"
     try:
-        async with websockets.connect(backend_url, max_size=None) as backend_ws:
+        # open_timeout 加大到 60s — voice-server 第一次加载 funasr 模型可能要 30s+,
+        # 默认 10s 会超时. ping_interval=None 不要 ping/pong, 让闲置连接也活着 (闪说用户中间停顿不会断)
+        async with websockets.connect(backend_url, max_size=None, open_timeout=60, ping_interval=None) as backend_ws:
             async def fwd_client_to_backend():
                 try:
                     while True:
