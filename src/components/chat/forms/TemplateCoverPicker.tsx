@@ -46,7 +46,13 @@ export function TemplateCoverPicker({ onClose }: { onClose?: () => void } = {}) 
   useEffect(() => {
     listCoverTemplates()
       .then(r => setTemplates(r.templates || []))
-      .catch(e => setLoadErr(e.message || '加载失败'))
+      .catch(e => {
+        const raw = String(e?.message || e || '加载失败')
+        const friendly = raw.includes('Failed to fetch') || raw.includes('NetworkError')
+          ? '网络连接失败 — 服务器可能不在线, 等 10 秒重试; 还不行请联系客服'
+          : raw
+        setLoadErr(friendly)
+      })
     // 同时拉字体库 (admin 跟内置合并)
     fetch(directBase + '/api/voice/cover-fonts')
       .then(r => r.json())
