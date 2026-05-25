@@ -124,6 +124,8 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
   // 白板背景图 (admin 上传). 默认纯白 (bgImage = null).
   const [bgImage, setBgImage] = useState<HTMLImageElement | null>(null)
   const [bgPickerOpen, setBgPickerOpen] = useState(false)
+  // 背景偏暗 (用于光标颜色自动反色: 浅底用黑光标, 深底用白光标)
+  const [bgIsDark, setBgIsDark] = useState(false)
 
   // 默认文字样式 — 工具栏一直显示, 没选中文字时改这个 (应用到下一次新建文字).
   // 选中文字时, 工具栏显示选中文字的样式, 改的是选中那条.
@@ -193,6 +195,26 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
       videoRef.current.play().catch(() => {})
     }
   }, [cameraStream])
+
+  // 背景图变化 → 缩到 1×1 像素采样平均色, 算亮度判断 dark / light, 给光标颜色用.
+  // (用 1×1 让浏览器自己做平均, 比逐像素采样快得多)
+  useEffect(() => {
+    if (!bgImage) { setBgIsDark(false); return }
+    try {
+      const c = document.createElement('canvas')
+      c.width = 1; c.height = 1
+      const ctx = c.getContext('2d')
+      if (!ctx) return
+      ctx.drawImage(bgImage, 0, 0, 1, 1)
+      const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data
+      // 相对亮度近似 (Rec. 709 加权)
+      const lum = 0.299 * r + 0.587 * g + 0.114 * b
+      setBgIsDark(lum < 128)
+    } catch {
+      // 跨域采样失败 (CORS 没 anonymous 头) → 当浅底处理
+      setBgIsDark(false)
+    }
+  }, [bgImage])
 
   // 显示尺寸 (canvas 内部分辨率 vs 显示尺寸: 用 scale 缩放, 保持高分辨率渲染)
   const [displaySize, setDisplaySize] = useState({ w: 0, h: 0 })
@@ -899,17 +921,20 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
                 background: 'transparent',
                 border: 'none',
                 outline: 'none',
-                caretColor: '#3B82F6',
+                // 光标颜色: 深底用白, 浅底用黑 (auto contrast).
+                // caretShape:'block' 让支持的浏览器渲染方块光标, 比 1px 细线粗 (不支持的浏览器无影响).
+                caretColor: bgIsDark ? '#FFFFFF' : '#000000',
+                caretShape: 'block',
                 padding: '0',
                 margin: '0',
                 lineHeight: isMind ? (minH / (it.fontSize * scale)) : 1.15,
                 textAlign: isMind ? 'center' : 'left',
                 resize: 'none',
                 overflow: 'hidden',
-                whiteSpace: 'pre-wrap',      // 自动换行 (按字断, 跟 KonvaText wrap='char' 一致显示)
+                whiteSpace: 'pre-wrap',
                 wordBreak: 'break-word',
                 boxSizing: 'border-box',
-              }}
+              } as React.CSSProperties}
             />
           )
         })()}
