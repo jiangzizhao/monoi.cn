@@ -120,6 +120,20 @@ export function ChatInput({ moduleMenu, onModuleClick, onModuleMenuClose }: Prop
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // URL query ?openForm=xxx — 从录屏 tab "进入剪辑" 跳过来时自动开 NarrationVideoForm (录屏 blob 由 window 全局传)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const openForm = params.get('openForm')
+    if (openForm === 'narration_video') {
+      setNarrationVideoForm(true)
+      // 清掉 query 防止刷新又触发
+      const url = new URL(window.location.href)
+      url.searchParams.delete('openForm')
+      window.history.replaceState({}, '', url.toString())
+    }
+    // 同理可加 openForm=copywriting / cover 等, 给其他 tab "进入..."按钮用
+  }, [])
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()

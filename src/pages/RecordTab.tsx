@@ -5,7 +5,8 @@
 // 输出 webm. iOS Safari 不支持 (显示提示).
 
 import { useEffect, useRef, useState } from 'react'
-import { Camera, Monitor, Mic, Square, Download, AlertCircle, RotateCcw, Settings, Video } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Camera, Monitor, Mic, Square, Download, AlertCircle, RotateCcw, Settings, Video, Scissors } from 'lucide-react'
 import type Konva from 'konva'
 import { WhiteboardEditor } from '../components/whiteboard/WhiteboardEditor'
 
@@ -31,6 +32,7 @@ const RECORD_PRESETS = [
 ]
 
 export default function RecordTab() {
+  const navigate = useNavigate()
   const [phase, setPhase] = useState<Phase>('setup')
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null)
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null)
@@ -340,6 +342,18 @@ export default function RecordTab() {
     document.body.appendChild(a); a.click(); document.body.removeChild(a)
   }
 
+  // 进入口播剪辑: blob 存到 window 全局 (SPA 导航不丢, 刷新会丢 — 提示用户别刷)
+  // 跳到 /app 主创作页, AppShell mount 时检 ?openForm=narration_video → 自动开 NarrationVideoForm,
+  // form mount 时读 window.__pendingRecording__ 当 videoFile 预填.
+  const goToEdit = () => {
+    if (!recordedBlob) return
+    const isMp4 = recordedBlob.type.includes('mp4')
+    const ext = isMp4 ? 'mp4' : 'webm'
+    const file = new File([recordedBlob], `monoi-record-${Date.now()}.${ext}`, { type: recordedBlob.type })
+    ;(window as any).__pendingRecording__ = file
+    navigate('/app?openForm=narration_video')
+  }
+
   useEffect(() => () => {
     screenStream?.getTracks().forEach(t => t.stop())
     cameraStream?.getTracks().forEach(t => t.stop())
@@ -570,7 +584,7 @@ export default function RecordTab() {
                   录制完成 · 时长 {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')} · 大小 {recordedBlob ? `${(recordedBlob.size / 1024 / 1024).toFixed(1)} MB` : ''}
                 </div>
                 <p className="text-[11px] text-[var(--text-3)]">
-                  .webm 格式. 想转 mp4 用剪映 / FFmpeg 导一下. 后续会加自动转 mp4 + 直接进口播剪辑.
+                  点 "进入剪辑" 直接拿这段进口播剪辑 (加字幕/转场/BGM). 或下载本地存档. 注意: 进剪辑后别刷新 (录屏暂存在内存里).
                 </p>
               </div>
             </div>
@@ -610,8 +624,13 @@ export default function RecordTab() {
             {phase === 'done' && (
               <>
                 <span className="flex-1 text-sm text-green-500 font-medium">✓ 录制完成</span>
+                <button onClick={goToEdit}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium cursor-pointer"
+                  title="把这段录屏丢进口播剪辑流程">
+                  <Scissors size={12}/> 进入剪辑
+                </button>
                 <button onClick={downloadVideo}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[var(--text)] text-[var(--bg)] text-sm hover:opacity-80 cursor-pointer">
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-[var(--border)] text-[var(--text-2)] text-sm hover:bg-[var(--bg-hover)] cursor-pointer">
                   <Download size={12}/> 下载
                 </button>
                 <button onClick={resetAll}

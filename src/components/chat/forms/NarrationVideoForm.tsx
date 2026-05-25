@@ -26,6 +26,16 @@ export function NarrationVideoForm({ onSubmit, onClose }: Props) {
 
   const directBase = import.meta.env.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'
 
+  // 从录屏 tab 进来时, RecordTab 把 blob 塞到 window.__pendingRecording__.
+  // mount 时取一次 + 立刻清掉 (防止重开 form 又用同一份).
+  useEffect(() => {
+    const pending = (window as any).__pendingRecording__ as File | undefined
+    if (pending && pending instanceof File) {
+      setVideoFile(pending)
+      delete (window as any).__pendingRecording__
+    }
+  }, [])
+
   // 选文件后, 用临时 video element 探测时长 (给转录进度估计用)
   useEffect(() => {
     if (!videoFile) {
