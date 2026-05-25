@@ -6,11 +6,14 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Camera, Monitor, Mic, Square, Download, AlertCircle, RotateCcw, Settings, Video, Scissors, Trash2 } from 'lucide-react'
+import { Camera, Monitor, Mic, Square, Download, AlertCircle, RotateCcw, Settings, Video, Scissors } from 'lucide-react'
 import type Konva from 'konva'
 import { WhiteboardEditor } from '../components/whiteboard/WhiteboardEditor'
 import { useChatStore, makeAssistantMsg } from '../store/chatStore'
-import { uploadBlobToOss, saveMyRecording, listMyRecordings, deleteMyRecording, transcodeRecordingToMp4, type MyRecording } from '../services/recordings'
+// 转 mp4 走 OSS 临时上传 (5 分钟后让 lifecycle 清, 成本可忽略)
+// 录屏本身不再持久化到 OSS — 免费功能, 长期存储成本爆炸 (见 5/25 开发日志)
+// 用户必须当场决策: 进剪辑 / 下载 / 重录, 不能刷新走开.
+import { uploadBlobToOss, transcodeRecordingToMp4 } from '../services/recordings'
 
 type Phase = 'setup' | 'previewing' | 'recording' | 'done'
 type PipShape = 'circle' | 'rounded' | 'square'
@@ -60,10 +63,7 @@ export default function RecordTab() {
   // 麦克风也同理 (USB 铁三角 / OBSBOT / 内置). 默认非虚拟实体优先
   const [availableMics, setAvailableMics] = useState<MediaDeviceInfo[]>([])
   const [selectedMicId, setSelectedMicId] = useState<string>('')
-  // "我的录屏" 列表 (持久化 OSS, 跨刷新可用)
-  const [myRecordings, setMyRecordings] = useState<MyRecording[]>([])
-  const [showMyList, setShowMyList] = useState(false)
-  // 进入剪辑 / 转 mp4 / 上传进度
+  // 转 mp4 时的上传/转码状态 (录屏本身不上 OSS)
   const [uploadPct, setUploadPct] = useState(0)
   const [busy, setBusy] = useState<'idle' | 'uploading' | 'transcoding'>('idle')
 
@@ -421,38 +421,19 @@ export default function RecordTab() {
     document.body.appendChild(a); a.click(); document.body.removeChild(a)
   }
 
-  // 进入口播剪辑 (持久化路径):
-  // 1. blob 上传到 OSS (prefix=recordings) — 显示上传进度
-  // 2. 调 /api/recordings 登记到 DB (我的录屏)
-  // 3. blob 同时塞 window.__pendingRecording__ (省去 form 二次拉 OSS)
-  // 4. 注入 chat assistant 消息 (带 chip "开始剪辑")
-  // 5. navigate('/app/chat')
-  // 失败时退回纯内存路径 (不挡用户继续)
-  const goToEdit = async () => {
-    if (!recordedBlob || busy !== 'idle') return
+  // 进入口播剪辑 (纯内存):
+  // 1. blob 包成 File → window.__pendingRecording__
+  // 2. 注入 chat assistant 消息 (带 chip "开始剪辑")
+  // 3. navigate('/app/chat')
+  // 不上 OSS — 录屏免费, 长期存储成本爆炸. 用户必须当场决策, 刷新就丢.
+  // (NarrationVideoForm 走自己原有的上传路径, 不重复.)
+  const goToEdit = () => {
+    if (!recordedBlob) return
     const isMp4 = recordedBlob.type.includes('mp4')
     const ext = isMp4 ? 'mp4' : 'webm'
-    const filename = `monoi-record-${Date.now()}.${ext}`
-    const file = new File([recordedBlob], filename, { type: recordedBlob.type })
+    const file = new File([recordedBlob], `monoi-record-${Date.now()}.${ext}`, { type: recordedBlob.type })
     ;(window as any).__pendingRecording__ = file
 
-    // 试 OSS 持久化 (失败也不挡用户继续走 in-memory)
-    try {
-      setBusy('uploading'); setError(''); setUploadPct(0)
-      const { oss_key } = await uploadBlobToOss(recordedBlob, filename, 'recordings', setUploadPct)
-      await saveMyRecording({
-        oss_key, filename, mime: recordedBlob.type,
-        duration_sec: elapsed, size_bytes: recordedBlob.size,
-      })
-      console.log('[record] uploaded + saved:', oss_key)
-    } catch (e: any) {
-      console.warn('[record] OSS 上传/保存失败, 走内存路径:', e?.message || e)
-      // 不报错给用户 — blob 在 window 里, 直接进剪辑还能用. 只是没"我的录屏"持久化.
-    } finally {
-      setBusy('idle'); setUploadPct(0)
-    }
-
-    // 拿/建当前会话, 注入 assistant 消息
     const store = useChatStore.getState()
     let convId = store.activeId
     if (!convId) convId = store.newConversation()
@@ -469,61 +450,6 @@ export default function RecordTab() {
     ])
     store.addMessage(convId, msg)
     navigate('/app/chat')
-  }
-
-  // 拉"我的录屏"列表 — 展开面板时拉一次
-  const refreshMyRecordings = async () => {
-    try {
-      const r = await listMyRecordings()
-      setMyRecordings(r.recordings || [])
-    } catch (e: any) {
-      console.warn('[record] list mine failed:', e?.message || e)
-    }
-  }
-  useEffect(() => {
-    if (showMyList) refreshMyRecordings()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showMyList])
-
-  // 点列表里的某条 → 拉 OSS blob → 跟 goToEdit 一样进剪辑流程
-  const openMyRecording = async (r: MyRecording) => {
-    try {
-      setBusy('uploading'); setError('')   // 复用状态指示, 实际是 download
-      const resp = await fetch(r.url)
-      const blob = await resp.blob()
-      const file = new File([blob], r.filename || `monoi-record-${r.id}.mp4`, { type: r.mime || blob.type })
-      ;(window as any).__pendingRecording__ = file
-
-      const store = useChatStore.getState()
-      let convId = store.activeId
-      if (!convId) convId = store.newConversation()
-      const sizeMb = (blob.size / 1024 / 1024).toFixed(1)
-      const mm = Math.floor((r.duration_sec || 0) / 60), ss = String((r.duration_sec || 0) % 60).padStart(2, '0')
-      const msg = makeAssistantMsg([
-        { type: 'text', content: `已载入 ${r.title || '历史录屏'} (${sizeMb} MB · ${mm}:${ss}). 点下面进剪辑.` },
-        {
-          type: 'choices',
-          options: [{ id: '__narration_video__', label: '开始剪辑', description: '打开口播剪辑表单' }],
-        },
-      ])
-      store.addMessage(convId, msg)
-      navigate('/app/chat')
-    } catch (e: any) {
-      setError('载入历史录屏失败: ' + (e?.message || e))
-    } finally {
-      setBusy('idle')
-    }
-  }
-
-  // 删历史录屏
-  const removeMyRecording = async (id: number, label: string) => {
-    if (!confirm(`删除 "${label}"? 不可恢复.`)) return
-    try {
-      await deleteMyRecording(id)
-      setMyRecordings(prev => prev.filter(r => r.id !== id))
-    } catch (e: any) {
-      alert('删除失败: ' + (e?.message || e))
-    }
   }
 
   // 转 mp4 下载 — 先上传 webm 到 OSS, 调转码, 拉新 mp4 自动下载.
@@ -656,54 +582,6 @@ export default function RecordTab() {
                 <p className="text-xs text-[var(--text-3)]">
                   也可以直接用下方工具栏图标单独授权摄像头 / 屏幕. 建议录制不超过 5 分钟.
                 </p>
-
-                {/* 我的录屏 — 折叠面板, 展开拉列表, 点击可重新进剪辑 */}
-                <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-card)] overflow-hidden">
-                  <button onClick={() => setShowMyList(s => !s)}
-                    className="w-full flex items-center justify-between px-3.5 py-2.5 cursor-pointer hover:bg-[var(--bg-hover)] transition-colors">
-                    <div className="flex items-center gap-2">
-                      <Video size={14} className="text-[var(--text-3)]"/>
-                      <span className="text-sm text-[var(--text-2)] font-medium">我的录屏</span>
-                      {myRecordings.length > 0 && (
-                        <span className="text-[10px] text-[var(--text-3)]">({myRecordings.length})</span>
-                      )}
-                    </div>
-                    <span className="text-[10px] text-[var(--text-3)]">{showMyList ? '收起' : '展开'}</span>
-                  </button>
-                  {showMyList && (
-                    <div className="border-t border-[var(--border)] px-3 py-2 max-h-64 overflow-y-auto">
-                      {myRecordings.length === 0 ? (
-                        <div className="text-xs text-[var(--text-3)] text-center py-4">还没有录屏. 录完点 "进入剪辑" 会自动上传到这里.</div>
-                      ) : (
-                        <div className="flex flex-col gap-1">
-                          {myRecordings.map(r => {
-                            const sizeMb = (r.size_bytes / 1024 / 1024).toFixed(1)
-                            const mm = Math.floor((r.duration_sec || 0) / 60)
-                            const ss = String((r.duration_sec || 0) % 60).padStart(2, '0')
-                            const date = new Date(r.created_at * 1000).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
-                            const label = r.title || r.filename || `录屏 #${r.id}`
-                            return (
-                              <div key={r.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-[var(--bg-hover)] group">
-                                <div className="flex-1 min-w-0 cursor-pointer" onClick={() => openMyRecording(r)}>
-                                  <div className="text-xs text-[var(--text)] truncate">{label}</div>
-                                  <div className="text-[10px] text-[var(--text-3)]">{date} · {mm}:{ss} · {sizeMb} MB</div>
-                                </div>
-                                <button onClick={() => openMyRecording(r)} disabled={busy !== 'idle'}
-                                  className="opacity-0 group-hover:opacity-100 text-[10px] text-blue-500 hover:underline disabled:opacity-30 cursor-pointer">
-                                  进剪辑
-                                </button>
-                                <button onClick={() => removeMyRecording(r.id, label)}
-                                  className="opacity-0 group-hover:opacity-100 text-[10px] text-red-400 hover:bg-red-950/20 p-1 rounded cursor-pointer">
-                                  <Trash2 size={11}/>
-                                </button>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
               </div>
             </div>
           )}
@@ -850,7 +728,7 @@ export default function RecordTab() {
                   录制完成 · 时长 {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')} · 大小 {recordedBlob ? `${(recordedBlob.size / 1024 / 1024).toFixed(1)} MB` : ''}
                 </div>
                 <p className="text-[11px] text-[var(--text-3)]">
-                  点 "进入剪辑" 上传到云端 + 进口播剪辑 (加字幕/转场/BGM). 或下载本地存档. 上传后可在底下"我的录屏"再回来用.
+                  点 "进入剪辑" 直接进口播剪辑流程. 或下载本地存档. 注意: 进剪辑后别刷新 (录屏暂存在内存里, 没云端备份).
                 </p>
               </div>
             </div>
@@ -905,12 +783,12 @@ export default function RecordTab() {
                 </span>
                 <button onClick={goToEdit} disabled={busy !== 'idle'}
                   className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-white text-sm font-medium ${busy === 'idle' ? 'bg-blue-500 hover:bg-blue-600 cursor-pointer' : 'bg-blue-400 cursor-not-allowed'}`}
-                  title="先上传到云端, 再开口播剪辑表单">
+                  title="直接进口播剪辑表单 (录屏暂存内存里, 别刷新)">
                   <Scissors size={12}/> 进入剪辑
                 </button>
                 <button onClick={transcodeAndDownload} disabled={busy !== 'idle'}
                   className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-[var(--border)] text-[var(--text-2)] text-sm hover:bg-[var(--bg-hover)] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                  title={recordedBlob?.type.includes('mp4') ? '直接下载 (浏览器已出 mp4)' : '上传 + 服务端转 mp4 后下载'}>
+                  title={recordedBlob?.type.includes('mp4') ? '直接下载 (浏览器已出 mp4)' : '上传服务端用 ffmpeg 转 mp4 后下载 (临时文件不持久)'}>
                   <Download size={12}/> {recordedBlob?.type.includes('mp4') ? '下载' : '转 mp4 下载'}
                 </button>
                 <button onClick={resetAll} disabled={busy !== 'idle'}
