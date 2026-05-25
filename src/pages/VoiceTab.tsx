@@ -3,8 +3,9 @@
 // → WebSocket 推 voice-server 的 /ws/asr → funasr 推 partial/final 文字回来.
 
 import { useEffect, useRef, useState } from 'react'
-import { Mic, Square, Trash2, Languages, Type, AlertCircle, Copy, Check } from 'lucide-react'
+import { Mic, Square, Trash2, Languages, Type, AlertCircle, Copy, Check, Save, History } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
+import { listMyAsrRecords, saveMyAsrRecord, deleteMyAsrRecord, type MyAsrRecord } from '../services/asr'
 
 export default function VoiceTab() {
   const nav = useNavigate()
@@ -21,6 +22,11 @@ export default function VoiceTab() {
   // 翻译状态
   const [translatedText, setTranslatedText] = useState('')
   const [translating, setTranslating] = useState(false)
+  // 我的闪说历史
+  const [myRecords, setMyRecords] = useState<MyAsrRecord[]>([])
+  const [showHistory, setShowHistory] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [savedJustNow, setSavedJustNow] = useState(false)
 
   // 录音 + ASR 资源 refs (用户停止时全部释放)
   const wsRef = useRef<WebSocket | null>(null)
@@ -234,6 +240,59 @@ export default function VoiceTab() {
     nav('/app/chat')
   }
 
+  // 保存当前转写到"我的闪说"
+  const saveCurrent = async () => {
+    if (!finalText.trim() || saving) return
+    setSaving(true); setError('')
+    try {
+      await saveMyAsrRecord({
+        text: finalText.trim(),
+        language: 'zh',
+        duration_sec: elapsed,
+        title: finalText.trim().slice(0, 30),
+      })
+      setSavedJustNow(true)
+      setTimeout(() => setSavedJustNow(false), 2000)
+      // 如果历史面板开着, 顺便刷新
+      if (showHistory) refreshHistory()
+    } catch (e: any) {
+      setError('保存失败: ' + (e?.message || e))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // 拉历史
+  const refreshHistory = async () => {
+    try {
+      const r = await listMyAsrRecords()
+      setMyRecords(r.records || [])
+    } catch (e: any) {
+      console.warn('[asr] list mine failed:', e?.message || e)
+    }
+  }
+  useEffect(() => {
+    if (showHistory) refreshHistory()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showHistory])
+
+  // 用某条历史填到当前文本框 (替换/追加都行, 这里直接替换)
+  const loadHistoryRecord = (r: MyAsrRecord) => {
+    setFinalText(r.text)
+    setShowHistory(false)
+  }
+
+  // 删历史
+  const removeHistory = async (id: number) => {
+    if (!confirm('删除这条? 不可恢复.')) return
+    try {
+      await deleteMyAsrRecord(id)
+      setMyRecords(prev => prev.filter(r => r.id !== id))
+    } catch (e: any) {
+      alert('删除失败: ' + (e?.message || e))
+    }
+  }
+
   // 卸载停掉所有 (麦克风 / WebSocket / 音频管道)
   useEffect(() => () => {
     try { processorRef.current?.disconnect() } catch {}
@@ -283,6 +342,11 @@ export default function VoiceTab() {
               </div>
               {finalText && (
                 <div className="flex gap-1">
+                  <button onClick={saveCurrent} disabled={saving || !finalText.trim()}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs text-[var(--text-2)] hover:bg-[var(--bg-hover)] cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                    title="存到'我的闪说', 之后可以回来取">
+                    {savedJustNow ? <><Check size={12} className="text-green-500"/> 已存</> : <><Save size={12}/> {saving ? '存中...' : '保存'}</>}
+                  </button>
                   <button onClick={copyText}
                     className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs text-[var(--text-2)] hover:bg-[var(--bg-hover)] cursor-pointer">
                     {copied ? <><Check size={12}/> 已复制</> : <><Copy size={12}/> 复制</>}
@@ -334,6 +398,51 @@ export default function VoiceTab() {
               )}
             </div>
           )}
+
+          {/* 我的闪说 — 折叠面板, 展开可载入历史转写到当前文本框 */}
+          <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] overflow-hidden">
+            <button onClick={() => setShowHistory(s => !s)}
+              className="w-full flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-[var(--bg-hover)] transition-colors">
+              <div className="flex items-center gap-2">
+                <History size={14} className="text-[var(--text-3)]"/>
+                <span className="text-sm text-[var(--text-2)] font-medium">我的闪说</span>
+                {myRecords.length > 0 && (
+                  <span className="text-[10px] text-[var(--text-3)]">({myRecords.length})</span>
+                )}
+              </div>
+              <span className="text-[10px] text-[var(--text-3)]">{showHistory ? '收起' : '展开'}</span>
+            </button>
+            {showHistory && (
+              <div className="border-t border-[var(--border)] px-3 py-2 max-h-64 overflow-y-auto">
+                {myRecords.length === 0 ? (
+                  <div className="text-xs text-[var(--text-3)] text-center py-4">还没保存过. 转写完点上面 "保存" 存到这里.</div>
+                ) : (
+                  <div className="flex flex-col gap-1">
+                    {myRecords.map(r => {
+                      const date = new Date(r.created_at * 1000).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+                      const preview = r.text.slice(0, 60) + (r.text.length > 60 ? '...' : '')
+                      return (
+                        <div key={r.id} className="flex items-start gap-2 px-2 py-2 rounded-lg hover:bg-[var(--bg-hover)] group">
+                          <div className="flex-1 min-w-0 cursor-pointer" onClick={() => loadHistoryRecord(r)}>
+                            <div className="text-xs text-[var(--text)] leading-snug whitespace-pre-wrap break-words">{preview}</div>
+                            <div className="text-[10px] text-[var(--text-3)] mt-1">{date} · {r.text.length} 字</div>
+                          </div>
+                          <button onClick={() => loadHistoryRecord(r)}
+                            className="opacity-0 group-hover:opacity-100 text-[10px] text-blue-500 hover:underline cursor-pointer flex-shrink-0">
+                            载入
+                          </button>
+                          <button onClick={() => removeHistory(r.id)}
+                            className="opacity-0 group-hover:opacity-100 text-[10px] text-red-400 hover:bg-red-950/20 p-1 rounded cursor-pointer flex-shrink-0">
+                            <Trash2 size={11}/>
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
 
           {/* 用这段文字 → 跳 monoi 流程 */}
           {finalText && !isListening && (

@@ -470,6 +470,38 @@ def init_billing_tables():
     """)
     c.execute("CREATE INDEX IF NOT EXISTS idx_whiteboard_bg_visible ON whiteboard_background(visible, order_index)")
 
+    # 14. 用户录屏库 — "我的录屏" 列表, 用户录完点"进入剪辑"时上传到 OSS 持久化,
+    # 可以回头重新剪辑 / 下载 / 删除. 不限制条数 (用户自行管理).
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS user_recording (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            oss_key TEXT NOT NULL,                    -- OSS key (recordings/ 前缀)
+            filename TEXT,                            -- 客户端原文件名
+            mime TEXT,                                -- video/mp4 / video/webm 等
+            duration_sec INTEGER,                     -- 时长 (秒)
+            size_bytes INTEGER,                       -- 文件大小 (字节)
+            title TEXT DEFAULT '',                    -- 用户标题 (可选, 默认空)
+            created_at REAL NOT NULL
+        )
+    """)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_user_recording_user ON user_recording(user_id, created_at DESC)")
+
+    # 15. 用户闪说历史 — 用户保存的实时转写文本, "我的闪说" 列表用
+    # 用户在 VoiceTab 转写完按"保存"才写库, 不自动保存 (避免短/废文塞满)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS user_asr_record (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            text TEXT NOT NULL,                       -- 转写正文
+            language TEXT DEFAULT 'zh',               -- zh / en
+            duration_sec INTEGER DEFAULT 0,           -- 录音时长 (秒), 不准确也行
+            title TEXT DEFAULT '',                    -- 用户标题 (默认空, 列表显示前 20 字)
+            created_at REAL NOT NULL
+        )
+    """)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_user_asr_record_user ON user_asr_record(user_id, created_at DESC)")
+
     # 11. 用户人物库 — 用户抠过的所有人物图, "我的人物" 列表用
     # 跟 rembg_cache 互补: rembg_cache 是字节级去重 (内部缓存), user_person_cutout 是用户视角的资产列表.
     # 同一个 user 多次抠出来的图都进这里 (即使源图字节一样, 也至少留一条 — 用户可能想多版本对比).

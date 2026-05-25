@@ -2268,7 +2268,7 @@ class OssSignUploadRequest(BaseModel):
 
 
 # 白名单, 防恶意客户端传随便 prefix 把文件传到非预期路径
-_ALLOWED_UPLOAD_PREFIXES = {'uploads', 'cover_templates', 'bgm_library', 'avatars', 'landing_demos', 'whiteboard_bg'}
+_ALLOWED_UPLOAD_PREFIXES = {'uploads', 'cover_templates', 'bgm_library', 'avatars', 'landing_demos', 'whiteboard_bg', 'recordings'}
 
 
 @app.post("/api/oss/sign-upload")
@@ -2630,6 +2630,225 @@ def public_whiteboard_backgrounds():
             continue   # 签不到就跳过, 不让一条坏数据搞挂白板
         items.append(d)
     return {'backgrounds': items}
+
+
+# ============== 我的录屏 ==============
+
+
+class SaveRecordingReq(BaseModel):
+    oss_key: str                        # 客户端先 OSS sign-upload 上传 (prefix=recordings), 拿 key
+    filename: Optional[str] = None
+    mime: Optional[str] = None
+    duration_sec: Optional[int] = None
+    size_bytes: Optional[int] = None
+    title: Optional[str] = ''
+
+
+@app.post("/api/recordings")
+def save_my_recording(req: SaveRecordingReq, request: Request):
+    """录屏完上传 OSS 后调这里登记到 user_recording 表."""
+    user_id = _user_id_from_request(request)
+    if not req.oss_key.strip():
+        raise HTTPException(400, 'oss_key 不能为空')
+    conn = get_db()
+    cur = conn.execute("""
+        INSERT INTO user_recording (user_id, oss_key, filename, mime, duration_sec, size_bytes, title, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        user_id, req.oss_key.strip(), req.filename or '', req.mime or '',
+        req.duration_sec or 0, req.size_bytes or 0, (req.title or '').strip(),
+        time.time(),
+    ))
+    new_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return {'success': True, 'id': new_id}
+
+
+@app.get("/api/recordings")
+def list_my_recordings(request: Request):
+    """我的录屏列表 (按时间倒序). 返签好的 1h URL 给前端播放/下载/进剪辑."""
+    user_id = _user_id_from_request(request)
+    conn = get_db()
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute("""
+        SELECT id, oss_key, filename, mime, duration_sec, size_bytes, title, created_at
+        FROM user_recording
+        WHERE user_id = ?
+        ORDER BY created_at DESC
+        LIMIT 100
+    """, (user_id,)).fetchall()
+    conn.close()
+    from oss_helper import oss_sign_get
+    items = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d['url'] = oss_sign_get(d['oss_key'], expires=3600)
+        except Exception:
+            continue   # 签不到跳过 (可能 OSS 已删但 DB 没清)
+        items.append(d)
+    return {'recordings': items}
+
+
+@app.delete("/api/recordings/{rid}")
+def delete_my_recording(rid: int, request: Request):
+    """删录屏 (验所有权 → OSS 删 → DB 删)."""
+    user_id = _user_id_from_request(request)
+    conn = get_db()
+    conn.row_factory = sqlite3.Row
+    row = conn.execute(
+        "SELECT oss_key FROM user_recording WHERE id = ? AND user_id = ?",
+        (rid, user_id)
+    ).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(404, '不存在或无权删')
+    try:
+        from oss_helper import oss_delete
+        oss_delete(row['oss_key'])
+    except Exception as e:
+        print(f"[recording delete] OSS delete fail {row['oss_key']}: {e}", flush=True)
+        # OSS 删失败不阻塞 DB 删 (避免成幽灵记录)
+    conn.execute("DELETE FROM user_recording WHERE id = ?", (rid,))
+    conn.commit()
+    conn.close()
+    return {'success': True}
+
+
+# ============== 我的闪说 (ASR 历史) ==============
+
+
+class SaveAsrReq(BaseModel):
+    text: str                           # 转写正文
+    language: Optional[str] = 'zh'
+    duration_sec: Optional[int] = 0
+    title: Optional[str] = ''
+
+
+@app.post("/api/asr/records")
+def save_my_asr(req: SaveAsrReq, request: Request):
+    """闪说转写完, 用户点"保存"才存. 不自动存 (避免短/废文塞满)."""
+    user_id = _user_id_from_request(request)
+    text = (req.text or '').strip()
+    if not text:
+        raise HTTPException(400, '文字为空')
+    if len(text) > 50000:
+        raise HTTPException(400, '文字过长 (>5 万字)')
+    conn = get_db()
+    cur = conn.execute("""
+        INSERT INTO user_asr_record (user_id, text, language, duration_sec, title, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (
+        user_id, text, req.language or 'zh', req.duration_sec or 0,
+        (req.title or '').strip(), time.time(),
+    ))
+    new_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return {'success': True, 'id': new_id}
+
+
+@app.get("/api/asr/records")
+def list_my_asr(request: Request):
+    """我的闪说历史 (倒序)."""
+    user_id = _user_id_from_request(request)
+    conn = get_db()
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute("""
+        SELECT id, text, language, duration_sec, title, created_at
+        FROM user_asr_record
+        WHERE user_id = ?
+        ORDER BY created_at DESC
+        LIMIT 200
+    """, (user_id,)).fetchall()
+    conn.close()
+    return {'records': [dict(r) for r in rows]}
+
+
+@app.delete("/api/asr/records/{rid}")
+def delete_my_asr(rid: int, request: Request):
+    user_id = _user_id_from_request(request)
+    conn = get_db()
+    row = conn.execute(
+        "SELECT 1 FROM user_asr_record WHERE id = ? AND user_id = ?",
+        (rid, user_id)
+    ).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(404, '不存在或无权删')
+    conn.execute("DELETE FROM user_asr_record WHERE id = ?", (rid,))
+    conn.commit()
+    conn.close()
+    return {'success': True}
+
+
+# ============== 录屏 webm → mp4 转码 ==============
+
+
+class TranscodeReq(BaseModel):
+    oss_key: str       # 源 webm OSS key
+
+
+@app.post("/api/recording/transcode-to-mp4")
+def transcode_recording_to_mp4(req: TranscodeReq, request: Request):
+    """把已上传的 webm 录屏转码成 mp4. 同步阻塞 (短视频几秒到几十秒). 返新 OSS key + URL.
+    用 ffmpeg libx264 + aac, 适配性最好. CRF 23 平衡画质/大小."""
+    _user_id_from_request(request)   # 必须登录
+    import tempfile, subprocess, os as _os
+    from oss_helper import oss_sign_get, oss_upload
+
+    src_key = req.oss_key.strip()
+    if not src_key:
+        raise HTTPException(400, 'oss_key 不能为空')
+
+    # 拉 OSS 文件到本地临时文件
+    try:
+        from oss_helper import _get_bucket  # type: ignore
+        bucket = _get_bucket()
+        src_obj = bucket.get_object(src_key)
+        src_bytes = src_obj.read()
+    except Exception as e:
+        # 通过签 URL 拉 (兜底)
+        try:
+            import urllib.request
+            url = oss_sign_get(src_key, expires=300)
+            with urllib.request.urlopen(url, timeout=60) as r:
+                src_bytes = r.read()
+        except Exception as e2:
+            raise HTTPException(500, f'读 OSS 文件失败: {e2}')
+
+    src_tmp = tempfile.NamedTemporaryFile(suffix='.webm', delete=False)
+    src_tmp.write(src_bytes); src_tmp.close()
+    dst_tmp_path = src_tmp.name.rsplit('.', 1)[0] + '.mp4'
+
+    try:
+        # ffmpeg 转 mp4 — H.264 video + AAC audio, faststart 让网页能边下边播
+        # -preset fast 平衡速度/压缩; -crf 23 平衡画质/大小
+        cmd = [
+            'ffmpeg', '-y', '-i', src_tmp.name,
+            '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
+            '-c:a', 'aac', '-b:a', '128k',
+            '-movflags', '+faststart',
+            dst_tmp_path,
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        if result.returncode != 0:
+            raise HTTPException(500, f'ffmpeg 转码失败: {result.stderr[:500]}')
+
+        mp4_size = _os.path.getsize(dst_tmp_path)
+        # 上 OSS, 新 key 用源 key 改后缀 + 加 _mp4 防覆盖
+        dst_key = src_key.rsplit('.', 1)[0] + '_mp4.mp4'
+        if not dst_key.startswith('recordings/'):
+            dst_key = 'recordings/' + dst_key.lstrip('/')
+        oss_upload(dst_key, dst_tmp_path, content_type='video/mp4')
+        url = oss_sign_get(dst_key, expires=3600)
+        return {'success': True, 'oss_key': dst_key, 'url': url, 'size_bytes': mp4_size}
+    finally:
+        try: _os.unlink(src_tmp.name)
+        except Exception: pass
+        try: _os.unlink(dst_tmp_path)
+        except Exception: pass
 
 
 def _extract_original_filename(request) -> Optional[str]:
