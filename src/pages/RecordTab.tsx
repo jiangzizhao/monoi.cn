@@ -9,6 +9,7 @@ import { useNavigate } from 'react-router-dom'
 import { Camera, Monitor, Mic, Square, Download, AlertCircle, RotateCcw, Settings, Video, Scissors } from 'lucide-react'
 import type Konva from 'konva'
 import { WhiteboardEditor } from '../components/whiteboard/WhiteboardEditor'
+import { useChatStore, makeAssistantMsg } from '../store/chatStore'
 
 type Phase = 'setup' | 'previewing' | 'recording' | 'done'
 type PipShape = 'circle' | 'rounded' | 'square'
@@ -342,16 +343,35 @@ export default function RecordTab() {
     document.body.appendChild(a); a.click(); document.body.removeChild(a)
   }
 
-  // 进入口播剪辑: blob 存到 window 全局 (SPA 导航不丢, 刷新会丢 — 提示用户别刷)
-  // 跳到 /app 主创作页, AppShell mount 时检 ?openForm=narration_video → 自动开 NarrationVideoForm,
-  // form mount 时读 window.__pendingRecording__ 当 videoFile 预填.
+  // 进入口播剪辑:
+  // 1. blob 包成 File 存到 window 全局 (SPA 导航不丢, 刷新会丢)
+  // 2. 往当前对话注入一条 assistant 消息, 带 chip "开始剪辑" — 用户点了才真开表单
+  //    (不自动开是因为用户从录屏跳过去, 突然弹个 form 会懵)
+  // 3. navigate('/app') — 不带 query, 让用户在 chat 里看到那条新消息
   const goToEdit = () => {
     if (!recordedBlob) return
     const isMp4 = recordedBlob.type.includes('mp4')
     const ext = isMp4 ? 'mp4' : 'webm'
     const file = new File([recordedBlob], `monoi-record-${Date.now()}.${ext}`, { type: recordedBlob.type })
     ;(window as any).__pendingRecording__ = file
-    navigate('/app?openForm=narration_video')
+
+    // 拿/建当前会话, 注入 assistant 消息
+    const store = useChatStore.getState()
+    let convId = store.activeId
+    if (!convId) convId = store.newConversation()
+    const sizeMb = (recordedBlob.size / 1024 / 1024).toFixed(1)
+    const mm = Math.floor(elapsed / 60), ss = String(elapsed % 60).padStart(2, '0')
+    const msg = makeAssistantMsg([
+      { type: 'text', content: `你的录屏已就绪 (${sizeMb} MB · ${mm}:${ss}). 点下面进剪辑流程, 自动去气口 / 加字幕 / 上 BGM.` },
+      {
+        type: 'choices',
+        options: [
+          { id: '__narration_video__', label: '开始剪辑', description: '打开口播剪辑表单 (已带刚才的录屏)' },
+        ],
+      },
+    ])
+    store.addMessage(convId, msg)
+    navigate('/app/chat')
   }
 
   useEffect(() => () => {
