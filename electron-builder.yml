@@ -39,18 +39,22 @@ mac:
   target: [dmg]
   category: public.app-category.video
 
-# 发布走 OSS (generic provider) — electron-updater 启动时去这个 URL 查 latest.yml.
-# GitHub Releases 在国内慢 + 用户看 github.com 不专业, 走 monoi 自己的 OSS 域名.
+# 发布走 monoi 后端代理 — 桌面端启动后向 {url}/latest.yml + {url}/{file} 拉,
+# 后端 /api/desktop/update/* 拿到请求会签名 OSS URL 然后 302 跳过去, 用户最终
+# 还是从 OSS 下, 但不需要 OSS bucket 公共读 ACL (RAM 子账号没权设).
+#
+# 好处:
+# - 不依赖 OSS 权限设置 (用户后端凭据签 URL 就行)
+# - URL 在 monoi 域名下永久稳定
+# - 后期可以加下载量统计 / 限流 / 防黑产爬
 #
 # 部署 workflow (每次发新版):
 # 1. 改 package.json version (0.1.0 → 0.2.0)
-# 2. npm run pack:win → release/monoi-Setup-0.2.0.exe + release/latest.yml
-# 3. 把这两个文件上传到 OSS desktop_release/ 目录 (ACL: 公共读)
-# 4. 改 windows-server/desktop_release.json version+url, 重启 main.py
-# 5. 已装的桌面端启动 5 秒后自动查 → 后台下载新版
-#
-# ⚠️ 改下面 url 成你真实的 OSS 域名再 pack:win, 不然 latest.yml 写的是占位地址.
+# 2. npm run pack:win → release/monoi-Setup-0.2.0.exe + latest.yml + .blockmap
+# 3. 跑 python upload_desktop_release.py D:\monoi-electron\release\monoi-Setup-0.2.0.exe
+# 4. 改 D:\monoi-server\desktop_release.json (version + exe_url), 重启 main.py
+# 5. 已装桌面端 5s 自动查 → 走代理下载新版
 publish:
   provider: generic
-  url: https://monoi-temp.oss-cn-shenzhen.aliyuncs.com/desktop_release
+  url: https://monoi.nat100.top/api/desktop/update
   channel: latest
