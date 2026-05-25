@@ -1,0 +1,43 @@
+# electron-builder 配置 — 打 Windows .exe (NSIS installer)
+#
+# 不签名: 用户首次启动会有 Windows SmartScreen 警告, 提示"未知发布者".
+# 教程: 用户点 "更多信息" → "仍要运行". 内置教程图引导.
+# 签名要 ¥1500/年 (DigiCert 等), 等用户量上来再说.
+
+appId: cn.monoi.desktop
+productName: monoi
+copyright: Copyright © 2026 monoi.cn
+
+# 主进程入口 (编译后的 JS)
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - dist-electron/**/*       # 编译后的 main.js + preload.js
+  - package.json
+
+# Windows 配置
+win:
+  target:
+    - target: nsis            # 安装程序 (推荐, 用户双击装)
+      arch: [x64]
+  # icon: build/icon.ico       # TODO: 加图标 (256x256 ico). 没图标用 Electron 默认
+  artifactName: "${productName}-Setup-${version}.${ext}"
+
+nsis:
+  oneClick: false              # 不一键装, 让用户选路径
+  perMachine: false            # 装到当前用户 (不要管理员权限)
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: monoi
+  uninstallDisplayName: monoi 视频创作
+
+# macOS (留接口, 当前没 Apple 账号不打包)
+mac:
+  target: [dmg]
+  category: public.app-category.video
+
+# 发布 (Phase 4 暂手动 — 不让 electron-builder 自动 publish, 手动传 GitHub Releases)
+publish: null

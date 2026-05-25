@@ -25,3 +25,7 @@ dist-ssr
 
 # Claude Code 工作目录 (临时, 不 track)
 .claude/worktrees/
+
+# Electron 打包产物 (Phase 4 桌面端)
+dist-electron/
+release/
