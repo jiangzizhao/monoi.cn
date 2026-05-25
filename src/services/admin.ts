@@ -375,6 +375,61 @@ export async function adminDeleteLandingDemo(demo_id: number): Promise<{ success
 }
 
 
+// ================= 白板背景库管理 =================
+
+export interface AdminWhiteboardBackground {
+  id: number
+  name: string
+  oss_key: string
+  url?: string                            // 1h 签名 URL
+  category: string
+  order_index: number
+  visible: number                         // 1 = 显示, 0 = 隐藏
+  uploaded_by: number
+  created_at: number
+}
+
+export async function adminListWhiteboardBackgrounds(): Promise<{ backgrounds: AdminWhiteboardBackground[] }> {
+  return get('/api/admin/whiteboard-backgrounds')
+}
+
+export async function adminAddWhiteboardBackground(req: {
+  name: string
+  oss_key: string
+  category?: string
+  order_index?: number
+  visible?: number
+}): Promise<{ success: boolean; id: number }> {
+  return post('/api/admin/whiteboard-backgrounds', req)
+}
+
+export async function adminUpdateWhiteboardBackground(bg_id: number, req: {
+  name?: string
+  category?: string
+  order_index?: number
+  visible?: number
+}): Promise<{ success: boolean }> {
+  const res = await fetch(directBase + `/api/admin/whiteboard-backgrounds/${bg_id}`, {
+    method: 'PUT',
+    headers: headers(),
+    body: JSON.stringify(req),
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.detail || data.error || `update failed ${res.status}`)
+  return data
+}
+
+export async function adminDeleteWhiteboardBackground(bg_id: number): Promise<{ success: boolean }> {
+  const res = await fetch(directBase + `/api/admin/whiteboard-backgrounds/${bg_id}`, {
+    method: 'DELETE',
+    headers: headers(),
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.detail || data.error || `delete failed ${res.status}`)
+  return data
+}
+
+
 /** 单独保存模板的示例人物图 (跟完整 update 解耦). 上传完抠图直接调这个. */
 export async function adminSetSamplePerson(
   template_id: number,

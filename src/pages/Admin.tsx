@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, Users, ShoppingBag, DollarSign, BarChart3, Search, X, AlertTriangle,
   Music, Trash2, Plus, Loader2, Play, Pause, Type, Image as ImageIcon, MousePointer2,
-  Activity, Upload,
+  Activity, Upload, PencilRuler,
 } from 'lucide-react'
 import {
   adminListUsers, adminUserDetail, adminGrantSubscription, adminGrantCredits,
@@ -15,6 +15,8 @@ import {
   adminSetSamplePerson,
   adminListLandingDemos, adminAddLandingDemo, adminUpdateLandingDemo, adminDeleteLandingDemo,
   type AdminLandingDemo,
+  adminListWhiteboardBackgrounds, adminAddWhiteboardBackground, adminUpdateWhiteboardBackground, adminDeleteWhiteboardBackground,
+  type AdminWhiteboardBackground,
   adminApiUsage,
   type AdminUserRow, type AdminOrderRow, type AdminWithdrawalRow, type AdminStats,
   type AdminBgmRow, type AdminFontRow, type AdminCoverTemplate, type CoverTextField, type CoverPersonSlot,
@@ -26,7 +28,7 @@ import { loadFont, fontFamily, parseSegments } from '../utils/coverFonts'
 import { TemplatePreview } from '../components/chat/forms/TemplateCoverPicker'
 
 
-type TabKey = 'dashboard' | 'users' | 'orders' | 'withdrawals' | 'bgm' | 'fonts' | 'covers' | 'demos' | 'apiusage'
+type TabKey = 'dashboard' | 'users' | 'orders' | 'withdrawals' | 'bgm' | 'fonts' | 'covers' | 'demos' | 'whiteboardBg' | 'apiusage'
 
 const TABS: { key: TabKey; label: string; Icon: any }[] = [
   { key: 'dashboard', label: '数据看板', Icon: BarChart3 },
@@ -37,6 +39,7 @@ const TABS: { key: TabKey; label: string; Icon: any }[] = [
   { key: 'fonts', label: '字体库', Icon: Type },
   { key: 'covers', label: '封面模板', Icon: ImageIcon },
   { key: 'demos', label: '主页示例视频', Icon: Play },
+  { key: 'whiteboardBg', label: '白板背景', Icon: PencilRuler },
   { key: 'apiusage', label: 'API 用量', Icon: Activity },
 ]
 
@@ -153,6 +156,7 @@ export default function Admin() {
           {activeTab === 'fonts' && <FontLibraryTab/>}
           {activeTab === 'covers' && <CoverTemplateTab/>}
           {activeTab === 'demos' && <LandingDemosTab/>}
+          {activeTab === 'whiteboardBg' && <WhiteboardBgTab/>}
           {activeTab === 'apiusage' && <ApiUsageTab/>}
         </div>
       </div>
@@ -2490,6 +2494,255 @@ function LandingDemoUploadForm({ directBase, onClose, onAdded }: {
           <button onClick={handleSave} disabled={!videoOssKey || saving}
             className={`flex-1 py-2 rounded-lg text-sm font-medium ${
               !videoOssKey || saving
+                ? 'bg-[var(--bg-hover)] text-[var(--text-3)] cursor-not-allowed'
+                : 'bg-[var(--text)] text-[var(--bg)] hover:opacity-80 cursor-pointer'
+            }`}>
+            {saving ? '保存中...' : '保存'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+
+// ========== 白板背景库 ==========
+
+function WhiteboardBgTab() {
+  const [list, setList] = useState<AdminWhiteboardBackground[]>([])
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState('')
+  const [showForm, setShowForm] = useState(false)
+  const directBase = (import.meta as any).env?.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'
+
+  const reload = () => {
+    setLoading(true); setErr('')
+    adminListWhiteboardBackgrounds().then(r => setList(r.backgrounds || [])).catch(e => setErr(e.message)).finally(() => setLoading(false))
+  }
+  useEffect(reload, [])
+
+  const handleDelete = async (id: number, name: string) => {
+    if (!confirm(`删背景 "${name || `#${id}`}"?`)) return
+    try {
+      await adminDeleteWhiteboardBackground(id)
+      setList(prev => prev.filter(d => d.id !== id))
+    } catch (e: any) {
+      alert('删除失败: ' + e.message)
+    }
+  }
+
+  const handleToggleVisible = async (d: AdminWhiteboardBackground) => {
+    try {
+      await adminUpdateWhiteboardBackground(d.id, { visible: d.visible ? 0 : 1 })
+      setList(prev => prev.map(x => x.id === d.id ? { ...x, visible: x.visible ? 0 : 1 } : x))
+    } catch (e: any) {
+      alert('切换失败: ' + e.message)
+    }
+  }
+
+  const handleOrderChange = async (d: AdminWhiteboardBackground, newOrder: number) => {
+    try {
+      await adminUpdateWhiteboardBackground(d.id, { order_index: newOrder })
+      setList(prev => prev.map(x => x.id === d.id ? { ...x, order_index: newOrder } : x).sort((a, b) => a.order_index - b.order_index))
+    } catch (e: any) {
+      alert('排序失败: ' + e.message)
+    }
+  }
+
+  if (loading) return <div className="text-sm text-[var(--text-3)] py-8 flex items-center gap-2"><Loader2 size={14} className="animate-spin"/> 加载中...</div>
+  if (err) return <div className="text-sm text-red-400">{err}</div>
+
+  return (
+    <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] overflow-hidden">
+      <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
+        <div>
+          <div className="text-base font-semibold">白板背景库</div>
+          <div className="text-[11px] text-[var(--text-3)] mt-0.5">录屏白板背景图 (PNG/JPG). order_index 小的在前, 隐藏的用户看不到</div>
+        </div>
+        <button onClick={() => setShowForm(true)}
+          className="px-3 py-1.5 rounded-lg bg-[var(--text)] text-[var(--bg)] text-sm cursor-pointer hover:opacity-80 flex items-center gap-1">
+          <Plus size={14}/> 上传背景
+        </button>
+      </div>
+
+      {list.length === 0 ? (
+        <div className="text-center text-[var(--text-3)] py-12 text-sm">还没有背景图, 点 "上传背景" 添加</div>
+      ) : (
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 p-4">
+          {list.map(d => (
+            <div key={d.id} className={`relative rounded-lg border overflow-hidden group ${d.visible ? 'border-[var(--border)]' : 'border-[var(--border-subtle)] opacity-50'}`}>
+              <div className="aspect-[9/16] bg-white relative">
+                {d.url && <img src={d.url} alt={d.name} className="absolute inset-0 w-full h-full object-cover"/>}
+                {!d.visible && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/40 text-white text-xs">已隐藏</div>
+                )}
+              </div>
+              <div className="px-2 py-1.5 bg-[var(--bg-card)] text-xs text-[var(--text)] flex items-center gap-1">
+                <span className="flex-1 truncate">{d.name || `背景 #${d.id}`}</span>
+                <input type="number" value={d.order_index} onChange={e => handleOrderChange(d, +e.target.value)}
+                  className="w-10 bg-[var(--bg)] border border-[var(--border)] rounded px-1 py-0.5 text-[10px]"
+                  title="排序: 小的在前"/>
+              </div>
+              {d.category && (
+                <div className="px-2 pb-1.5 text-[10px] text-[var(--text-3)]">{d.category}</div>
+              )}
+              <div className="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button onClick={() => handleToggleVisible(d)}
+                  className="px-2 py-1 rounded bg-black/70 text-white text-[10px] cursor-pointer hover:bg-black/90"
+                  title={d.visible ? '隐藏' : '显示'}>
+                  {d.visible ? '隐藏' : '显示'}
+                </button>
+                <button onClick={() => handleDelete(d.id, d.name)}
+                  className="p-1 rounded bg-red-500/80 text-white cursor-pointer hover:bg-red-500">
+                  <Trash2 size={11}/>
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {showForm && (
+        <WhiteboardBgUploadForm directBase={directBase}
+          onClose={() => setShowForm(false)}
+          onAdded={() => { setShowForm(false); reload() }}/>
+      )}
+    </div>
+  )
+}
+
+
+function WhiteboardBgUploadForm({ directBase, onClose, onAdded }: {
+  directBase: string
+  onClose: () => void
+  onAdded: () => void
+}) {
+  const [name, setName] = useState('')
+  const [category, setCategory] = useState('')
+  const [orderIndex, setOrderIndex] = useState(0)
+  const [imgFile, setImgFile] = useState<File | null>(null)
+  const [imgOssKey, setImgOssKey] = useState('')
+  const [previewUrl, setPreviewUrl] = useState('')
+  const [uploading, setUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(0)
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState('')
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const handleFile = async (f: File) => {
+    if (!f.type.startsWith('image/')) { setErr('请选 PNG / JPG 图片'); return }
+    if (f.size > 20 * 1024 * 1024) { setErr('图片太大 (>20MB)'); return }
+    setImgFile(f); setErr(''); setImgOssKey('')
+    setPreviewUrl(URL.createObjectURL(f))
+    setUploading(true); setUploadProgress(0)
+    try {
+      const token = localStorage.getItem('monoi_token') || ''
+      const signRes = await fetch(directBase + '/api/oss/sign-upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ filename: f.name, content_type: f.type || 'image/png', prefix: 'whiteboard_bg' }),
+      })
+      if (!signRes.ok) {
+        const t = await signRes.text().catch(() => '')
+        throw new Error(`OSS 签名 ${signRes.status}: ${t.slice(0, 200)}`)
+      }
+      const { put_url, oss_key, content_type } = await signRes.json()
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest()
+        xhr.open('PUT', put_url)
+        xhr.setRequestHeader('Content-Type', content_type)
+        xhr.upload.onprogress = e => {
+          if (e.lengthComputable) setUploadProgress(Math.round(e.loaded / e.total * 100))
+        }
+        xhr.onload = () => xhr.status >= 200 && xhr.status < 300
+          ? resolve()
+          : reject(new Error(`OSS PUT 失败 ${xhr.status}`))
+        xhr.onerror = () => reject(new Error('OSS PUT 网络错误'))
+        xhr.send(f)
+      })
+      setImgOssKey(oss_key)
+    } catch (e: any) {
+      setErr('上传失败: ' + (e.message || e))
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const handleSave = async () => {
+    if (!imgOssKey) { setErr('请先上传图片'); return }
+    setSaving(true); setErr('')
+    try {
+      await adminAddWhiteboardBackground({
+        name: name.trim(),
+        oss_key: imgOssKey,
+        category: category.trim(),
+        order_index: orderIndex,
+        visible: 1,
+      })
+      onAdded()
+    } catch (e: any) {
+      setErr(e.message || '保存失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-[var(--bg-card)] rounded-2xl border border-[var(--border)] w-full max-w-md p-5 flex flex-col gap-3" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <div className="text-base font-semibold">上传白板背景</div>
+          <button onClick={onClose} className="text-[var(--text-3)] hover:text-[var(--text)] cursor-pointer"><X size={18}/></button>
+        </div>
+
+        <div>
+          <label className="text-xs text-[var(--text-3)]">背景图 (PNG / JPG, ≤20MB, 推荐 1080×1920)</label>
+          <input ref={fileRef} type="file" accept="image/png,image/jpeg" className="hidden"
+            onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f) }}/>
+          <button onClick={() => fileRef.current?.click()} disabled={uploading}
+            className="w-full mt-1 px-3 py-3 rounded-lg border border-dashed border-[var(--border)] text-xs text-[var(--text-2)] hover:bg-[var(--bg-hover)] cursor-pointer">
+            {uploading ? (
+              <span className="flex items-center justify-center gap-2">
+                <Loader2 size={12} className="animate-spin"/> 上传中 {uploadProgress}%
+              </span>
+            ) : imgOssKey ? (
+              <span className="text-green-500">✓ {imgFile?.name} (已上传)</span>
+            ) : imgFile ? imgFile.name : '选择图片'}
+          </button>
+          {previewUrl && (
+            <div className="mt-2 rounded-lg overflow-hidden border border-[var(--border)] aspect-[9/16] max-h-60 bg-white">
+              <img src={previewUrl} alt="预览" className="w-full h-full object-contain"/>
+            </div>
+          )}
+        </div>
+
+        <div>
+          <label className="text-xs text-[var(--text-3)]">名称 (可选, 给自己看的)</label>
+          <input value={name} onChange={e => setName(e.target.value)}
+            placeholder="例: 米色网格"
+            className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm mt-1"/>
+        </div>
+
+        <div>
+          <label className="text-xs text-[var(--text-3)]">分类标签 (可选, 例如: 网格 / 纯色 / 纸张)</label>
+          <input value={category} onChange={e => setCategory(e.target.value)}
+            placeholder="网格"
+            className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm mt-1"/>
+        </div>
+
+        <div>
+          <label className="text-xs text-[var(--text-3)]">排序 (小的在前, 默认 0)</label>
+          <input type="number" value={orderIndex} onChange={e => setOrderIndex(+e.target.value)}
+            className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm mt-1"/>
+        </div>
+
+        {err && <div className="text-xs text-red-400 bg-red-950/20 border border-red-900/30 rounded-lg px-3 py-2">{err}</div>}
+
+        <div className="flex gap-2 mt-1">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-[var(--text-2)] hover:bg-[var(--bg-hover)] rounded-lg cursor-pointer">取消</button>
+          <button onClick={handleSave} disabled={!imgOssKey || saving}
+            className={`flex-1 py-2 rounded-lg text-sm font-medium ${
+              !imgOssKey || saving
                 ? 'bg-[var(--bg-hover)] text-[var(--text-3)] cursor-not-allowed'
                 : 'bg-[var(--text)] text-[var(--bg)] hover:opacity-80 cursor-pointer'
             }`}>

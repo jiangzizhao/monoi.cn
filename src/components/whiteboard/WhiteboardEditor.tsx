@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Stage, Layer, Rect, Text as KonvaText, Image as KonvaImage, Transformer } from 'react-konva'
 import type Konva from 'konva'
-import { Type, ImagePlus, Trash2, Undo2, Redo2, Copy } from 'lucide-react'
+import { Type, ImagePlus, Trash2, Undo2, Redo2, Copy, LayoutTemplate, X, Loader2 } from 'lucide-react'
 
 export type WhiteboardItem =
   | {
@@ -68,6 +68,10 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
   const [historyIdx, setHistoryIdx] = useState(0)
   // monoi 服务器字体库 (跟 CoverGeneratorForm 用同一份). 状态指示砍掉 (用户嫌吵), debug 全走 console.
   const [serverFonts, setServerFonts] = useState<{ label: string; value: string }[]>([])
+
+  // 白板背景图 (admin 上传). 默认纯白 (bgImage = null).
+  const [bgImage, setBgImage] = useState<HTMLImageElement | null>(null)
+  const [bgPickerOpen, setBgPickerOpen] = useState(false)
 
   // 拉服务器字体 → FontFace API 加载到浏览器 → 注入到字体下拉. 失败自动重试 3 次防网络抖
   useEffect(() => {
@@ -309,6 +313,11 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
           className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs text-red-400 hover:bg-red-950/20 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
           <Trash2 size={13}/>
         </button>
+        <div className="w-px h-4 bg-[var(--border)] mx-1"/>
+        <button onClick={() => setBgPickerOpen(true)} title="换背景"
+          className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs text-[var(--text-2)] hover:bg-[var(--bg-hover)] cursor-pointer">
+          <LayoutTemplate size={13}/> 背景
+        </button>
 
         {/* 字体加载状态 — 之前有 N 个 OK / 失败提示, 用户嫌吵, 砍掉.
             真有问题 F12 → Console 看 [whiteboard] log */}
@@ -376,8 +385,17 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
             }
           }}>
           <Layer>
-            {/* 白色背景 */}
+            {/* 背景: bgImage 有就铺图 (cover 填满, 不留白边), 没图就纯白 */}
             <Rect id="bg-rect" x={0} y={0} width={width} height={height} fill="white"/>
+            {bgImage && (
+              <KonvaImage
+                id="bg-image"
+                x={0} y={0}
+                width={width} height={height}
+                image={bgImage}
+                listening={false}
+              />
+            )}
             {/* 元素 */}
             {items.map(it => {
               if (it.type === 'text') {
@@ -498,6 +516,103 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
       <p className="text-[10px] text-[var(--text-3)] text-center">
         点击元素选中 (角上拖动缩放, 顶上圆点旋转). 双击文字编辑. 拖图片文件到白板上传.
       </p>
+
+      {bgPickerOpen && (
+        <BackgroundPicker
+          onClose={() => setBgPickerOpen(false)}
+          onPick={(img) => { setBgImage(img); setBgPickerOpen(false) }}
+          onClear={() => { setBgImage(null); setBgPickerOpen(false) }}
+        />
+      )}
+    </div>
+  )
+}
+
+
+// ============== 白板背景选择器 (拉 /api/whiteboard-backgrounds) ==============
+
+interface ServerBackground {
+  id: number
+  name: string
+  url: string
+  category: string
+}
+
+function BackgroundPicker({ onClose, onPick, onClear }: {
+  onClose: () => void
+  onPick: (img: HTMLImageElement) => void
+  onClear: () => void
+}) {
+  const [list, setList] = useState<ServerBackground[]>([])
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState('')
+  const [loadingId, setLoadingId] = useState<number | null>(null)
+
+  useEffect(() => {
+    const directBase = (import.meta as any).env?.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'
+    fetch(directBase + '/api/whiteboard-backgrounds')
+      .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then(d => setList(d.backgrounds || []))
+      .catch(e => setErr(e.message || '加载失败'))
+      .finally(() => setLoading(false))
+  }, [])
+
+  const handlePick = (bg: ServerBackground) => {
+    setLoadingId(bg.id)
+    const img = new Image()
+    img.crossOrigin = 'anonymous'  // OSS 跨域 — toCanvas 需要无污染
+    img.onload = () => { onPick(img); setLoadingId(null) }
+    img.onerror = () => { setErr(`背景"${bg.name}"加载失败`); setLoadingId(null) }
+    img.src = bg.url
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-[var(--bg-card)] rounded-2xl border border-[var(--border)] w-full max-w-3xl max-h-[80vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-3 border-b border-[var(--border)]">
+          <div className="text-base font-semibold">选择白板背景</div>
+          <button onClick={onClose} className="text-[var(--text-3)] hover:text-[var(--text)] cursor-pointer"><X size={18}/></button>
+        </div>
+
+        <div className="flex-1 overflow-auto p-4">
+          {loading && (
+            <div className="text-sm text-[var(--text-3)] py-8 flex items-center justify-center gap-2">
+              <Loader2 size={14} className="animate-spin"/> 加载中...
+            </div>
+          )}
+          {err && <div className="text-xs text-red-400 bg-red-950/20 border border-red-900/30 rounded-lg px-3 py-2 mb-3">{err}</div>}
+          {!loading && (
+            <div className="grid grid-cols-3 md:grid-cols-4 gap-3">
+              {/* 纯白选项 */}
+              <button onClick={onClear}
+                className="aspect-[9/16] rounded-lg border border-[var(--border)] bg-white relative overflow-hidden hover:border-[var(--text)] cursor-pointer flex items-center justify-center">
+                <span className="text-xs text-[var(--text-2)]">纯白</span>
+              </button>
+              {list.map(bg => (
+                <button key={bg.id} onClick={() => handlePick(bg)} disabled={loadingId === bg.id}
+                  className="aspect-[9/16] rounded-lg border border-[var(--border)] bg-white relative overflow-hidden hover:border-[var(--text)] cursor-pointer">
+                  <img src={bg.url} alt={bg.name} className="absolute inset-0 w-full h-full object-cover" crossOrigin="anonymous"/>
+                  {loadingId === bg.id && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+                      <Loader2 size={16} className="animate-spin text-white"/>
+                    </div>
+                  )}
+                  {(bg.name || bg.category) && (
+                    <div className="absolute bottom-0 left-0 right-0 px-1.5 py-0.5 bg-black/50 text-white text-[10px] truncate">
+                      {bg.name || bg.category}
+                    </div>
+                  )}
+                </button>
+              ))}
+              {list.length === 0 && (
+                <div className="col-span-full text-center text-xs text-[var(--text-3)] py-6">
+                  还没有背景图. (管理员可在后台上传)
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   )
 }

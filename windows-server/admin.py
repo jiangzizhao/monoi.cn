@@ -1088,6 +1088,107 @@ def admin_delete_landing_demo(demo_id: int, request: Request):
     return {'success': True}
 
 
+# ============== 白板背景库管理 ==============
+
+
+class AddWhiteboardBackgroundRequest(BaseModel):
+    name: str = ''
+    oss_key: str                             # admin 先调 sign-upload (prefix=whiteboard_bg) 上传 PNG/JPG, 拿 key
+    category: str = ''                       # 分类标签 (网格/纯色/纸张...)
+    order_index: int = 0
+    visible: int = 1
+
+
+@router.get("/whiteboard-backgrounds")
+def admin_list_whiteboard_backgrounds(request: Request):
+    """admin 列出所有白板背景 (含隐藏的)."""
+    require_admin(request)
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT id, name, oss_key, category, order_index, visible, uploaded_by, created_at
+        FROM whiteboard_background ORDER BY order_index ASC, created_at DESC
+    """).fetchall()
+    conn.close()
+    import sys, os as _os
+    sys.path.insert(0, _os.path.dirname(__file__))
+    from oss_helper import oss_sign_get
+    items = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d['url'] = oss_sign_get(d['oss_key'], expires=3600)
+        except Exception:
+            d['url'] = ''
+        items.append(d)
+    return {'backgrounds': items}
+
+
+@router.post("/whiteboard-backgrounds")
+def admin_add_whiteboard_background(req: AddWhiteboardBackgroundRequest, request: Request):
+    """admin 添加一个白板背景图. 前端先调 /api/oss/sign-upload (prefix=whiteboard_bg) 上传 PNG/JPG, 拿 key 再调这里."""
+    admin_id = require_admin(request)
+    if not req.oss_key.strip():
+        raise HTTPException(400, 'oss_key 不能为空')
+    conn = get_db()
+    cursor = conn.execute("""
+        INSERT INTO whiteboard_background (name, oss_key, category, order_index, visible, uploaded_by, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (
+        req.name.strip(), req.oss_key.strip(), req.category.strip(),
+        req.order_index, req.visible, admin_id, time.time(),
+    ))
+    new_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return {'success': True, 'id': new_id}
+
+
+class UpdateWhiteboardBackgroundRequest(BaseModel):
+    name: Optional[str] = None
+    category: Optional[str] = None
+    order_index: Optional[int] = None
+    visible: Optional[int] = None
+
+
+@router.put("/whiteboard-backgrounds/{bg_id}")
+def admin_update_whiteboard_background(bg_id: int, req: UpdateWhiteboardBackgroundRequest, request: Request):
+    """admin 改白板背景元数据 (改不了图片本身, 想换重新创建)."""
+    require_admin(request)
+    conn = get_db()
+    exists = conn.execute("SELECT 1 FROM whiteboard_background WHERE id = ?", (bg_id,)).fetchone()
+    if not exists:
+        conn.close()
+        raise HTTPException(404, '不存在')
+    sets = []
+    vals = []
+    if req.name is not None:
+        sets.append('name = ?'); vals.append(req.name.strip())
+    if req.category is not None:
+        sets.append('category = ?'); vals.append(req.category.strip())
+    if req.order_index is not None:
+        sets.append('order_index = ?'); vals.append(req.order_index)
+    if req.visible is not None:
+        sets.append('visible = ?'); vals.append(req.visible)
+    if not sets:
+        conn.close()
+        return {'success': True}
+    vals.append(bg_id)
+    conn.execute(f"UPDATE whiteboard_background SET {', '.join(sets)} WHERE id = ?", vals)
+    conn.commit()
+    conn.close()
+    return {'success': True}
+
+
+@router.delete("/whiteboard-backgrounds/{bg_id}")
+def admin_delete_whiteboard_background(bg_id: int, request: Request):
+    require_admin(request)
+    conn = get_db()
+    conn.execute("DELETE FROM whiteboard_background WHERE id = ?", (bg_id,))
+    conn.commit()
+    conn.close()
+    return {'success': True}
+
+
 # ============== API 用量 ==============
 
 

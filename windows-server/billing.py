@@ -455,6 +455,21 @@ def init_billing_tables():
     """)
     c.execute("CREATE INDEX IF NOT EXISTS idx_landing_demo_visible ON landing_demo(visible, order_index)")
 
+    # 13. 白板背景库 — admin 上传 PNG/JPG, 用户在白板模式可以换背景 (替代纯白)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS whiteboard_background (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL DEFAULT '',            -- 背景名 (网格 / 草稿纸 / 黑板 等)
+            oss_key TEXT NOT NULL,                    -- 背景图 OSS key (whiteboard_bg/)
+            category TEXT DEFAULT '',                 -- 分类 (可选: 网格/纸张/黑板/木质 等)
+            order_index INTEGER DEFAULT 0,            -- 显示顺序
+            visible INTEGER DEFAULT 1,                -- 1=显示 0=隐藏
+            uploaded_by INTEGER,
+            created_at REAL NOT NULL
+        )
+    """)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_whiteboard_bg_visible ON whiteboard_background(visible, order_index)")
+
     # 11. 用户人物库 — 用户抠过的所有人物图, "我的人物" 列表用
     # 跟 rembg_cache 互补: rembg_cache 是字节级去重 (内部缓存), user_person_cutout 是用户视角的资产列表.
     # 同一个 user 多次抠出来的图都进这里 (即使源图字节一样, 也至少留一条 — 用户可能想多版本对比).

@@ -2268,7 +2268,7 @@ class OssSignUploadRequest(BaseModel):
 
 
 # 白名单, 防恶意客户端传随便 prefix 把文件传到非预期路径
-_ALLOWED_UPLOAD_PREFIXES = {'uploads', 'cover_templates', 'bgm_library', 'avatars', 'landing_demos'}
+_ALLOWED_UPLOAD_PREFIXES = {'uploads', 'cover_templates', 'bgm_library', 'avatars', 'landing_demos', 'whiteboard_bg'}
 
 
 @app.post("/api/oss/sign-upload")
@@ -2597,6 +2597,39 @@ def public_landing_demos():
             d['thumb_url'] = ''
         items.append(d)
     return {'demos': items}
+
+
+@app.get("/api/whiteboard-backgrounds")
+def public_whiteboard_backgrounds():
+    """公共端点: 录屏白板拉背景图库. 登录与否都能拉 (录屏免费).
+    返签好的 1h URL, 只返 visible=1 的, 按 order_index 升序."""
+    conn = get_db()
+    conn.row_factory = sqlite3.Row
+    try:
+        # 表可能还没建 (老库), 容错
+        try:
+            rows = conn.execute("""
+                SELECT id, name, oss_key, category, order_index, created_at
+                FROM whiteboard_background
+                WHERE visible = 1
+                ORDER BY order_index ASC, created_at DESC
+                LIMIT 100
+            """).fetchall()
+        except sqlite3.OperationalError:
+            return {'backgrounds': []}
+    finally:
+        conn.close()
+
+    from oss_helper import oss_sign_get
+    items = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d['url'] = oss_sign_get(d['oss_key'], expires=3600)
+        except Exception:
+            continue   # 签不到就跳过, 不让一条坏数据搞挂白板
+        items.append(d)
+    return {'backgrounds': items}
 
 
 def _extract_original_filename(request) -> Optional[str]:
