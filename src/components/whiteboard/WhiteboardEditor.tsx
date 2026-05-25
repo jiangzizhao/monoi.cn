@@ -44,7 +44,6 @@ interface Props {
   pipShape?: 'circle' | 'rounded' | 'square'
 }
 
-const TEXT_COLORS = ['#000000', '#FFFFFF', '#EF4444', '#3B82F6', '#10B981', '#F59E0B']
 const FONT_SIZES = [24, 36, 48, 72, 96, 128]
 // 默认字体: 系统默认 + 浏览器自带. monoi 服务器字体库在 mount 时拉, append 到这里
 const DEFAULT_FONT_FAMILIES = [
@@ -392,13 +391,14 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
                 className="bg-[var(--bg-input)] border border-[var(--border)] rounded px-1.5 py-0.5 text-[10px] cursor-pointer">
                 {FONT_FAMILIES.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
               </select>
-              <div className="flex items-center gap-1">
-                {TEXT_COLORS.map(c => (
-                  <button key={c} onClick={() => setFill(c)}
-                    className={`w-4 h-4 rounded-full border-2 cursor-pointer ${curFill === c ? 'border-[var(--text)]' : 'border-[var(--border)]'}`}
-                    style={{ background: c }}/>
-                ))}
-              </div>
+              <label
+                title="文字颜色"
+                className="relative w-6 h-6 rounded-full border border-[var(--border)] cursor-pointer overflow-hidden shadow-sm hover:scale-110 transition-transform"
+                style={{ background: curFill }}>
+                <input type="color" value={curFill}
+                  onChange={e => setFill(e.target.value)}
+                  className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"/>
+              </label>
             </div>
           )
         })()}
@@ -474,6 +474,15 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
               return <ImageItem key={it.id} item={it as any} onSelect={setSelectedId} onChange={handleTransform}/>
             })}
             <Transformer ref={transformerRef} rotateEnabled keepRatio={false}
+              anchorSize={12}
+              anchorCornerRadius={6}
+              anchorStroke="#3B82F6"
+              anchorFill="#FFFFFF"
+              anchorStrokeWidth={2}
+              borderStroke="#3B82F6"
+              borderStrokeWidth={1.5}
+              borderDash={[]}
+              rotateAnchorOffset={32}
               boundBoxFunc={(_oldBox, newBox) => {
                 if (newBox.width < 20 || newBox.height < 20) return _oldBox
                 return newBox
