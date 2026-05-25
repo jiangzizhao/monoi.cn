@@ -53,8 +53,11 @@ function createWindow() {
     return { action: 'deny' }
   })
 
-  // dev 模式开 DevTools
-  if (isDev) mainWin.webContents.openDevTools({ mode: 'detach' })
+  // 开 DevTools 仅在显式要 debug 时 (env OPEN_DEVTOOLS=1). 默认不开, 即使 dev 也清爽.
+  // 想看随时 F12 / Ctrl+Shift+I 打开.
+  if (process.env.OPEN_DEVTOOLS === '1') {
+    mainWin.webContents.openDevTools({ mode: 'detach' })
+  }
 
   mainWin.on('closed', () => { mainWin = null })
 }
