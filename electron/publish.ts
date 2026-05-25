@@ -52,10 +52,22 @@ export function detectEdgePath(): string | null {
   return null
 }
 
+/** 启动前清掉 Edge profile 里的 stale 单实例锁 (上次没干净退出留下的).
+ * Edge 用 SingletonLock / SingletonSocket / SingletonCookie 防止同 profile 多开,
+ * 异常退出会留下这些文件, 下次 launchPersistentContext 直接挂. */
+function cleanProfileLocks(profileDir: string) {
+  for (const name of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) {
+    try {
+      fs.unlinkSync(path.join(profileDir, name))
+    } catch { /* 不存在 / 删不掉都没事 */ }
+  }
+}
+
 /** 启动 Edge persistent context (复用 user_data_dir) */
 async function launchEdgePersistent(headless = false): Promise<BrowserContext> {
   const profileDir = getEdgeProfileDir()
   fs.mkdirSync(profileDir, { recursive: true })
+  cleanProfileLocks(profileDir)   // 先清锁, 防止上次没退干净
 
   const edgePath = detectEdgePath()
   // 优先用系统 Edge (channel=msedge 自动找). 找不到回退到 chromium.
@@ -169,11 +181,16 @@ export async function publishToXhs(req: PublishReq): Promise<PublishResult> {
     await page.waitForTimeout(5000)
 
     if (page.url().toLowerCase().includes('login')) {
-      step('✗ 跳到登录页, 你没登小红书. 在弹出的 Edge 里手动登一次, 之后会记住')
+      step('需要登录小红书: 在弹出的 Edge 里扫码 / 输手机号登一次 → 登完点小红书任意页面 → 关 Edge')
+      step('登录信息会保存, 下次发布直接进上传页, 不需要再登')
       try {
         await page.waitForEvent('close', { timeout: waitTimeout })
       } catch { /* timeout 也算结束 */ }
-      return { success: false, detail: detailMsgs.join(' | ') }
+      // 把"已登录但要重试" 当 success 返 — 用户登完再点一次就能发. 不算失败.
+      return {
+        success: false,
+        detail: '登录已保存. 请关闭这个发布结果框, 再点一次"发布到小红书" 就能直接传视频了.',
+      }
     }
 
     // 3. 喂视频
