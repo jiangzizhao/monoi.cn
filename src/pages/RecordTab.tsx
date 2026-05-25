@@ -301,13 +301,24 @@ export default function RecordTab() {
     const stream = canvasRef.current.captureStream(30)
     if (cameraStream) cameraStream.getAudioTracks().forEach(t => stream.addTrack(t))
     if (screenStream) screenStream.getAudioTracks().forEach(t => stream.addTrack(t))
-    // 编码优先级: mp4 (浏览器原生支持时) → webm vp9 → webm vp8 → 默认 webm
-    // Chrome 125+ / Safari 都支持 video/mp4;codecs=avc1, 直接出 mp4 不用后端转
+
+    // 编码优先级: 一定要选 *带音频 codec* 的 mime, 不然 MediaRecorder 会静默丢音频!
+    // 之前的 bug: 'video/mp4;codecs=avc1' (只声明视频 codec) 让 mp4 输出没声音.
+    // 现在只在浏览器明确支持 H.264 + AAC 一起时才用 mp4, 否则退 webm vp9/vp8 + opus.
     const mime = MediaRecorder.isTypeSupported('video/mp4;codecs=avc1,mp4a.40.2') ? 'video/mp4;codecs=avc1,mp4a.40.2'
-      : MediaRecorder.isTypeSupported('video/mp4;codecs=avc1') ? 'video/mp4;codecs=avc1'
+      : MediaRecorder.isTypeSupported('video/mp4;codecs=h264,aac') ? 'video/mp4;codecs=h264,aac'
       : MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus') ? 'video/webm;codecs=vp9,opus'
       : MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus') ? 'video/webm;codecs=vp8,opus'
+      : MediaRecorder.isTypeSupported('video/webm;codecs=opus') ? 'video/webm;codecs=opus'
       : 'video/webm'
+
+    const audioTracks = stream.getAudioTracks()
+    console.log('[record] mime:', mime, '| audio tracks:', audioTracks.length, audioTracks.map(t => ({ label: t.label, enabled: t.enabled, muted: t.muted, readyState: t.readyState })))
+    if (audioTracks.length === 0) {
+      setError('没接到任何音频源. 检查麦克风权限 (浏览器地址栏锁图标), 或重新点麦克风图标授权.')
+      return
+    }
+
     chunksRef.current = []
     const rec = new MediaRecorder(stream, { mimeType: mime })
     rec.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data) }
