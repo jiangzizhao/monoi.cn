@@ -172,6 +172,58 @@ def _to_simplified(text):
         return text
 
 
+def _is_hdr_video(video_path: str) -> bool:
+    """探测视频是不是 HDR (iPhone HLG / Dolby Vision / 任何 bt2020 色域).
+    SDR 视频 (Chrome MediaRecorder webm / 大部分相机) 不走 tonemap, 否则 ffmpeg zscale 算不出帧."""
+    import subprocess
+    try:
+        r = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=color_primaries,color_transfer,color_space",
+             "-of", "default=noprint_wrappers=1:nokey=0", video_path],
+            capture_output=True, text=True, timeout=30,
+        )
+        out = (r.stdout or "").lower()
+        # HDR 信号: bt2020 色域 + PQ (smpte2084) 或 HLG (arib-std-b67) 传输
+        return any(s in out for s in ("bt2020", "smpte2084", "arib-std-b67"))
+    except Exception:
+        return False   # 探测失败默认 SDR (避免 tonemap 把 SDR 搞坏)
+
+
+def _ffmpeg_convert_to_mp4(raw_path: str, out_path: str, timeout: int = 900):
+    """统一的视频转 mp4. 自动检测 HDR/SDR 走不同 filter.
+    - HDR (iPhone HLG / bt2020): tonemap zscale+hable → SDR bt709
+    - SDR (webm/普通 mp4): 直接 yuv420p (-pix_fmt 保证兼容老播放器)
+    返 subprocess.CompletedProcess (调用方检 returncode)."""
+    import subprocess
+
+    if _is_hdr_video(raw_path):
+        # HDR → SDR
+        vf = (
+            "zscale=t=linear:npl=100,"
+            "tonemap=tonemap=hable:desat=0,"
+            "zscale=p=bt709:t=bt709:m=bt709:r=tv,"
+            "format=yuv420p"
+        )
+        cmd = ["ffmpeg", "-y", "-i", raw_path,
+               "-vf", vf,
+               "-c:v", "h264_nvenc", "-preset", "p4", "-cq", "18",
+               "-g", "30", "-force_key_frames", "expr:gte(t,n_forced)",
+               "-c:a", "aac", "-b:a", "192k",
+               "-movflags", "+faststart",
+               out_path]
+    else:
+        # SDR: 直接转, 不用 zscale (zscale 对非 HDR 输入会失败)
+        cmd = ["ffmpeg", "-y", "-i", raw_path,
+               "-c:v", "h264_nvenc", "-preset", "p4", "-cq", "18",
+               "-pix_fmt", "yuv420p",
+               "-g", "30", "-force_key_frames", "expr:gte(t,n_forced)",
+               "-c:a", "aac", "-b:a", "192k",
+               "-movflags", "+faststart",
+               out_path]
+    return subprocess.run(cmd, capture_output=True, timeout=timeout)
+
+
 def _ffmpeg_silence_detect(audio_path, noise_db=-30, min_silence=0.6):
     """用 ffmpeg silencedetect 找静音段，返回 [(start, end), ...]"""
     import subprocess
@@ -436,26 +488,8 @@ async def clean_narration_video(file: UploadFile = File(...)):
     with open(raw_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
 
-    # 2. 转 mp4 (高质量 + 密集关键帧 + HDR→SDR tonemap)
-    # iPhone HLG/HDR (bt2020) 直接转 SDR 会让肤色发白过曝, 必须 tonemap (zscale + hable)
-    # -g 30 + -force_key_frames: 每秒一个 keyframe, finalize 切片精度 ≤1s
-    # 注意: 加 zscale 后必须放弃 -hwaccel cuda (GPU/CPU memory 冲突)
-    tonemap_filter = (
-        "zscale=t=linear:npl=100,"
-        "tonemap=tonemap=hable:desat=0,"
-        "zscale=p=bt709:t=bt709:m=bt709:r=tv,"
-        "format=yuv420p"
-    )
-    proc = subprocess.run(
-        ["ffmpeg", "-y", "-i", raw_path,
-         "-vf", tonemap_filter,
-         "-c:v", "h264_nvenc", "-preset", "p4", "-cq", "18",
-         "-g", "30", "-force_key_frames", "expr:gte(t,n_forced)",
-         "-c:a", "aac", "-b:a", "192k",
-         "-movflags", "+faststart",
-         video_path],
-        capture_output=True, timeout=900,
-    )
+    # 2. 转 mp4 (HDR/SDR 自动判断; 密集关键帧给后续切片用)
+    proc = _ffmpeg_convert_to_mp4(raw_path, video_path, timeout=900)
     if proc.returncode != 0:
         try: os.unlink(raw_path)
         except: pass
@@ -629,23 +663,8 @@ def clean_narration_video_oss(req: CleanVideoOssRequest):
     except Exception as e:
         raise HTTPException(400, f"OSS 下载失败: {e}")
 
-    # 2. 转 mp4 (高质量 + 密集关键帧 + HDR→SDR tonemap; iPhone HLG 不 tonemap 会过曝白)
-    tonemap_filter = (
-        "zscale=t=linear:npl=100,"
-        "tonemap=tonemap=hable:desat=0,"
-        "zscale=p=bt709:t=bt709:m=bt709:r=tv,"
-        "format=yuv420p"
-    )
-    proc = subprocess.run(
-        ["ffmpeg", "-y", "-i", raw_path,
-         "-vf", tonemap_filter,
-         "-c:v", "h264_nvenc", "-preset", "p4", "-cq", "18",
-         "-g", "30", "-force_key_frames", "expr:gte(t,n_forced)",
-         "-c:a", "aac", "-b:a", "192k",
-         "-movflags", "+faststart",
-         video_path],
-        capture_output=True, timeout=900,
-    )
+    # 2. 转 mp4 (HDR/SDR 自动判断; 密集关键帧给后续切片用)
+    proc = _ffmpeg_convert_to_mp4(raw_path, video_path, timeout=900)
     if proc.returncode != 0:
         try: os.unlink(raw_path)
         except: pass
