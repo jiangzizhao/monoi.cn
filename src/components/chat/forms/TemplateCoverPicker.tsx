@@ -169,28 +169,43 @@ export function TemplateCoverPicker({ onClose }: { onClose?: () => void } = {}) 
           <div key={cat}>
             <div className="text-[11px] text-[var(--text-3)] px-1 mb-2">{CAT_LABEL[cat] || cat} · {ts.length} 个</div>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              {ts.map(t => {
-                // 卡片用 TemplatePreview 显示底图 + 字体预览, 但是 read-only (没 onMove/onResize/onRotate)
-                // userTexts 默认 = 每个字段的 placeholder, 让缩略图能看到字
-                const cardTexts: Record<string, string> = {}
-                for (const f of t.text_fields) cardTexts[f.label] = f.placeholder || f.label
-                return (
-                  <button
-                    key={t.id}
-                    onClick={() => setSelected(t)}
-                    className="relative group rounded-lg border border-[var(--border)] overflow-hidden hover:border-[var(--text-3)] cursor-pointer transition-colors text-left"
-                  >
-                    <TemplatePreview
-                      template={t}
-                      userTexts={cardTexts}
-                      textOverrides={{}}
-                      // 缩略图: 没用户人物图时, fallback 到 admin 上传的示例人物 (让用户看到成品长啥样)
-                      personPreviewUrl={t.sample_person_url || ''}
-                    />
-                    <div className="px-2 py-1.5 bg-[var(--bg-card)] text-xs text-[var(--text)] truncate">{t.name}</div>
-                  </button>
-                )
-              })}
+              {(() => {
+                // 横屏 (16:9) 模板 2 个堆叠 = 1 个竖屏 (9:16) 高度. 不再让横屏卡片底部空白.
+                // 渲染顺序: 先 竖屏 + 方形 (各占 1 cell), 再把横屏 2 个一组塞进 1 cell.
+                const renderCard = (t: CoverTemplate) => {
+                  const cardTexts: Record<string, string> = {}
+                  for (const f of t.text_fields) cardTexts[f.label] = f.placeholder || f.label
+                  return (
+                    <button
+                      key={t.id}
+                      onClick={() => setSelected(t)}
+                      className="relative group rounded-lg border border-[var(--border)] overflow-hidden hover:border-[var(--text-3)] cursor-pointer transition-colors text-left block w-full"
+                    >
+                      <TemplatePreview
+                        template={t}
+                        userTexts={cardTexts}
+                        textOverrides={{}}
+                        personPreviewUrl={t.sample_person_url || ''}
+                      />
+                      <div className="px-2 py-1.5 bg-[var(--bg-card)] text-xs text-[var(--text)] truncate">{t.name}</div>
+                    </button>
+                  )
+                }
+                const verticalAndSquare = ts.filter(t => t.ratio !== '16:9')
+                const horizontals = ts.filter(t => t.ratio === '16:9')
+                const cells: React.ReactNode[] = []
+                verticalAndSquare.forEach(t => cells.push(<div key={`v_${t.id}`}>{renderCard(t)}</div>))
+                // 横屏 2 个一组堆叠成 1 cell, 跟竖屏 1 cell 一样高
+                for (let i = 0; i < horizontals.length; i += 2) {
+                  const pair = horizontals.slice(i, i + 2)
+                  cells.push(
+                    <div key={`hpair_${i}`} className="flex flex-col gap-3">
+                      {pair.map(renderCard)}
+                    </div>
+                  )
+                }
+                return cells
+              })()}
             </div>
           </div>
         ))}
