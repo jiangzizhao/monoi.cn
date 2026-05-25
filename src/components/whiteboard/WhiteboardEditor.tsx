@@ -15,6 +15,7 @@ export type WhiteboardItem =
       type: 'text'
       x: number
       y: number
+      width: number        // 文本框宽度. 超过这个宽度自动换行 (中文按字, 英文按词)
       text: string
       fontSize: number
       fill: string
@@ -236,11 +237,19 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
 
   // 添加文字 — 在白板某位置加空文字 + 进入编辑模式 (光标蹦, 直接打字).
   // 用 defaultTextStyle (工具栏一直显示的那套), 选中文字时改的是文字本身, 没选中时改的是这个默认值.
+  // 文本框默认宽度: 从点击点到白板右边留 40 边距, 最少 300, 最多 stage 宽 - 100
+  const calcTextWidth = (clickX: number) => {
+    const remaining = width - clickX - 40
+    return Math.max(300, Math.min(remaining, width - 100))
+  }
+
   const addTextAt = (px: number, py: number): string => {
     const id = `t_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
+    const w = calcTextWidth(px)
     const newItem: WhiteboardItem = {
       id, type: 'text',
       x: px, y: py - defaultTextStyle.fontSize / 2,
+      width: w,
       text: '',
       fontSize: defaultTextStyle.fontSize,
       fill: defaultTextStyle.fill,
@@ -252,16 +261,18 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
     setEditingId(id)  // 立刻进入编辑模式, textarea 自动聚焦
     return id
   }
-  const addText = () => addTextAt(width / 2 - 200, height / 2)
+  const addText = () => addTextAt(width * 0.1, height / 2)
 
-  // 第一次 mount: 自动在中心放一个空文字 + 进编辑模式 → 用户打开白板就能直接打字
+  // 第一次 mount: 自动在左侧靠上放一个空文字 + 进编辑模式 → 用户打开白板就能直接打字
   useEffect(() => {
     if (autoAddedRef.current) return
     autoAddedRef.current = true
     const id = `t_${Date.now()}_init`
+    const startX = width * 0.1
     setItems([{
       id, type: 'text',
-      x: width / 2 - 200, y: height / 2 - defaultTextStyle.fontSize / 2,
+      x: startX, y: height * 0.15,
+      width: calcTextWidth(startX),
       text: '',
       fontSize: defaultTextStyle.fontSize,
       fill: defaultTextStyle.fill,
@@ -591,15 +602,14 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
               if (pos) startStroke(pos.x, pos.y)
               return
             }
-            // 点击空白处: 取消选中 (如果有选中) OR 在该位置直接创建文字 (如果无选中, 类似 PPT 文本工具)
+            // 编辑中: 别打扰 (textarea 自己处理点击外 = blur)
+            if (editingId) return
+            // 点击空白处 (stage / 背景矩形 / 背景图): 永远直接出新文字 + 光标.
+            // 即使原来有别的元素被选中, 也直接进入新文字编辑 (取消选中 = 副作用).
+            // 空文字 blur 时会自动删, 所以"误点"也不会留垃圾.
             if (e.target === e.target.getStage() || e.target.attrs.id === 'bg-rect' || e.target.attrs.id === 'bg-image') {
-              if (selectedId) {
-                setSelectedId(null)
-              } else if (!editingId) {
-                // 在点击位置加空文字并立刻进编辑 — 实现"光标点哪写哪"
-                const pointerPos = e.target.getStage()?.getPointerPosition()
-                if (pointerPos) addTextAt(pointerPos.x, pointerPos.y)
-              }
+              const pointerPos = e.target.getStage()?.getPointerPosition()
+              if (pointerPos) addTextAt(pointerPos.x, pointerPos.y)
             }
           }}
           onMouseMove={(e) => {
@@ -655,6 +665,8 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
                   <KonvaText
                     key={it.id} id={it.id}
                     x={it.x} y={it.y} text={it.text}
+                    width={it.width}            // 限定宽度 → 自动换行
+                    wrap="char"                 // 按字断行 (中文友好, 英文也能断)
                     fontSize={it.fontSize} fill={it.fill}
                     fontFamily={it.fontFamily}
                     rotation={it.rotation}
@@ -667,12 +679,14 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
                     onDragEnd={(e) => handleTransform(it.id, { x: e.target.x(), y: e.target.y() })}
                     onTransformEnd={(e) => {
                       const node = e.target
-                      // Konva 缩放: text 通过 scale 实现, 我们直接调整 fontSize 保真度更好
+                      // Konva 缩放: text 通过 scale 同时改宽度和字号 (按比例放大整个文本框)
                       const scaleX = node.scaleX()
+                      const scaleY = node.scaleY()
                       handleTransform(it.id, {
                         x: node.x(), y: node.y(),
                         rotation: node.rotation(),
-                        fontSize: Math.max(8, Math.round(it.fontSize * scaleX)),
+                        width: Math.max(60, it.width * scaleX),
+                        fontSize: Math.max(8, Math.round(it.fontSize * scaleY)),
                       })
                       node.scaleX(1); node.scaleY(1)
                     }}
@@ -741,23 +755,38 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
         </Stage>
         </div>
 
-        {/* 内嵌文字编辑器 — 双击 text / mindNode 激活, 直接在白板上输入 */}
+        {/* 内嵌文字编辑器 — 双击 text / mindNode 激活, 直接在白板上输入.
+            textarea 宽度 = item.width * scale, 高度随内容自适应 (输入时算 scrollHeight). */}
         {editingId && (() => {
           const it = items.find(x => x.id === editingId)
           if (!it || (it.type !== 'text' && it.type !== 'mindNode')) return null
           const isMind = it.type === 'mindNode'
+          const itemWidth = (it as any).width as number
           const inputX = it.x * scale
           const inputY = it.y * scale
-          const inputW = isMind ? (it as any).width * scale : Math.max(200, displaySize.w - inputX - 10) * 0.6
-          const inputH = isMind ? (it as any).height * scale : (it.fontSize * scale) * 1.4
+          const inputW = itemWidth * scale
+          const lineH = (it.fontSize * scale) * 1.15  // 行高 ~1.15
+          const minH = isMind ? (it as any).height * scale : lineH
           return (
             <textarea
               autoFocus
+              ref={(el) => {
+                // mount 时撑高 textarea 到内容实际高度
+                if (el) {
+                  el.style.height = 'auto'
+                  el.style.height = Math.max(minH, el.scrollHeight) + 'px'
+                }
+              }}
               defaultValue={it.text}
+              onInput={(e) => {
+                const el = e.currentTarget
+                el.style.height = 'auto'
+                el.style.height = Math.max(minH, el.scrollHeight) + 'px'
+              }}
               onBlur={(e) => {
                 const v = e.target.value
                 if (!v.trim() && !isMind) {
-                  // 纯文字: 空内容 → 删元素. 思维导图节点保留 (允许空 label).
+                  // 纯文字: 空内容 → 删元素 (防止误点留垃圾空文本)
                   updateItems(items.filter(x => x.id !== editingId))
                   setSelectedId(null)
                 } else {
@@ -767,12 +796,13 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
               }}
               onKeyDown={(e) => {
                 if (e.key === 'Escape') { setEditingId(null); return }
+                // Shift+Enter 换行, 单 Enter 完成编辑
                 if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); (e.target as HTMLTextAreaElement).blur() }
               }}
               style={{
                 position: 'absolute',
                 left: inputX, top: inputY,
-                width: inputW, minHeight: inputH,
+                width: inputW, minHeight: minH,
                 fontSize: it.fontSize * scale,
                 fontFamily: it.fontFamily,
                 color: isMind ? (it as any).textFill : it.fill,
@@ -782,11 +812,13 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
                 caretColor: '#3B82F6',
                 padding: '0',
                 margin: '0',
-                lineHeight: isMind ? (inputH / (it.fontSize * scale)) : 1,
+                lineHeight: isMind ? (minH / (it.fontSize * scale)) : 1.15,
                 textAlign: isMind ? 'center' : 'left',
                 resize: 'none',
                 overflow: 'hidden',
-                whiteSpace: 'pre',
+                whiteSpace: 'pre-wrap',      // 自动换行 (按字断, 跟 KonvaText wrap='char' 一致显示)
+                wordBreak: 'break-word',
+                boxSizing: 'border-box',
               }}
             />
           )
