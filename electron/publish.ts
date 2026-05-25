@@ -271,11 +271,134 @@ export async function publishToXhs(req: PublishReq): Promise<PublishResult> {
   }
 }
 
+// ============== 发布到抖音 ==============
+// 跟 publishToXhs 同结构, 差异在 selector + 标题默认值清空逻辑.
+export async function publishToDouyin(req: PublishReq): Promise<PublishResult> {
+  const detailMsgs: string[] = []
+  const step = (msg: string) => { console.log(`[publish_douyin] ${msg}`); detailMsgs.push(msg) }
+  const waitTimeout = (req.wait_close_timeout || 1800) * 1000
+
+  if (!detectEdgePath()) {
+    return { success: false, detail: '没装 Edge. 请先装 Microsoft Edge (Windows 一般自带)' }
+  }
+
+  let videoPath: string
+  try {
+    step('从 OSS 下载视频...')
+    videoPath = await downloadToTemp(req.video_url)
+    const sizeMb = (fs.statSync(videoPath).size / 1024 / 1024).toFixed(1)
+    step(`视频已下载 (${sizeMb} MB)`)
+  } catch (e: any) {
+    return { success: false, detail: `视频下载失败: ${e?.message || e}` }
+  }
+
+  let context: BrowserContext | null = null
+  try {
+    step('启动 Edge (用你自己的账号 profile)...')
+    context = await launchEdgePersistent(false)
+    const page = await context.newPage()
+
+    await page.goto(PLATFORM_URLS.douyin, { waitUntil: 'domcontentloaded', timeout: 30000 })
+    await page.waitForTimeout(5000)
+
+    // 抖音登录态: URL 含 login 或 跳到主站 douyin.com
+    if (page.url().toLowerCase().includes('login') || !page.url().includes('creator.douyin.com')) {
+      step('需要登录抖音: 在弹出的 Edge 里扫码登一次 → 关 Edge')
+      step('登录信息会保存, 下次发布直接进上传页')
+      try { await page.waitForEvent('close', { timeout: waitTimeout }) } catch { /* ignore */ }
+      return {
+        success: false,
+        detail: '登录已保存. 关闭这个发布结果框, 再点一次"发布到抖音" 就能直接传视频了.',
+      }
+    }
+
+    // 1. 喂视频 (抖音 file input 是可见的, 直接 set)
+    step(`上传 ${path.basename(videoPath)}...`)
+    const fileInput = page.locator('input[type="file"]').first()
+    await fileInput.setInputFiles(videoPath)
+
+    // 2. 等表单 (跳到 /post/video 后)
+    step('等抖音处理视频 (最多 5 分钟)...')
+    const titleInput = page.locator('input[placeholder*="作品标题"]').first()
+    let formReady = false
+    try {
+      await titleInput.waitFor({ state: 'visible', timeout: 300_000 })
+      formReady = true
+      step('✓ 表单已渲染')
+    } catch {
+      step('✗ 5 分钟没等到标题框, 视频可能上传失败')
+    }
+
+    // 3. 填标题 — 抖音会自动用文件名当默认标题, 先清空
+    if (formReady && req.title) {
+      await randSleep(800, 2000)
+      await mouseJitter(page)
+      try {
+        await titleInput.click()
+        await page.keyboard.press('Control+A')
+        await sleep(200)
+        await page.keyboard.press('Delete')
+        await sleep(300)
+      } catch { /* ignore */ }
+      await humanType(titleInput, req.title)
+      step(`标题已填: ${req.title}`)
+    }
+
+    // 4. 填描述+标签 — 抖音用 editor-comp-publish contentEditable div
+    if (formReady && (req.description || (req.tags && req.tags.length > 0))) {
+      await randSleep(800, 2000)
+      const descEditor = page.locator('div.editor-comp-publish[contenteditable="true"]').first()
+      if (await descEditor.count() > 0) {
+        await descEditor.click()
+        await randSleep(300, 700)
+        let full = (req.description || '').trim()
+        if (req.tags && req.tags.length > 0) {
+          if (full) full += '\n'
+          full += req.tags.map(t => `#${t.trim()}`).filter(Boolean).join(' ')
+        }
+        for (const ch of full) {
+          if (ch === '\n') {
+            await page.keyboard.press('Enter')
+            await sleep(randInt(50, 150))
+          } else {
+            await page.keyboard.type(ch, { delay: randInt(30, 90) })
+          }
+        }
+        step(`描述+标签已填 (${full.length} 字)`)
+      } else {
+        step('✗ 没找到描述编辑器 (div.editor-comp-publish)')
+      }
+    }
+
+    // 5. 收尾
+    if (formReady) {
+      await mouseJitter(page, 2)
+      await randSleep(1000, 2000)
+      step('✓ 已停在"发布"按钮前. 在 Edge 窗口审稿 → 点"发布" → 关 Edge 窗口')
+    }
+
+    // 6. 等用户操作
+    step(`等你操作, 最多 ${Math.floor(waitTimeout / 1000 / 60)} 分钟...`)
+    try {
+      await page.waitForEvent('close', { timeout: waitTimeout })
+      step('Edge 已关, 流程结束')
+    } catch {
+      step('超时, 强制关 Edge')
+    }
+
+    return { success: true, detail: detailMsgs.join(' | ') }
+  } catch (e: any) {
+    step(`!! 异常: ${e?.name || 'Error'}: ${e?.message || e}`)
+    return { success: false, detail: detailMsgs.join(' | ') }
+  } finally {
+    try { await context?.close() } catch { /* ignore */ }
+    try { fs.unlinkSync(videoPath) } catch { /* ignore */ }
+  }
+}
+
 /** 公共入口 — 按 platform 分发 */
 export async function publish(req: PublishReq): Promise<PublishResult> {
   if (req.platform === 'xhs') return publishToXhs(req)
-  if (req.platform === 'douyin') {
-    return { success: false, detail: '抖音桌面发布还没接入 (Phase 4-3 加)' }
-  }
+  if (req.platform === 'douyin') return publishToDouyin(req)
   return { success: false, detail: `未知平台: ${req.platform}` }
 }
