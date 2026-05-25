@@ -518,12 +518,13 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
     updateItems(next)
   }
 
-  // Transformer attach to selected item
+  // Transformer attach to selected item.
+  // 编辑中 (editingId 有值) 时不画框 — 只剩光标在白板上, 用户感觉就是直接在白板上写字
   useEffect(() => {
     const stage = stageRef.current
     const transformer = transformerRef.current
     if (!stage || !transformer) return
-    if (!selectedId) {
+    if (!selectedId || editingId) {
       transformer.nodes([])
       transformer.getLayer()?.batchDraw()
       return
@@ -533,7 +534,7 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
       transformer.nodes([node])
       transformer.getLayer()?.batchDraw()
     }
-  }, [selectedId, items])
+  }, [selectedId, editingId, items])
 
   const selectedItem = items.find(it => it.id === selectedId)
   const scale = displaySize.w / width
