@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Stage, Layer, Rect, Text as KonvaText, Image as KonvaImage, Line as KonvaLine, Group, Transformer } from 'react-konva'
 import type Konva from 'konva'
-import { Type, ImagePlus, Trash2, Undo2, Redo2, Copy, LayoutTemplate, X, Loader2, Network, Pencil, ChevronDown } from 'lucide-react'
+import { Type, ImagePlus, Trash2, Undo2, Redo2, Copy, LayoutTemplate, X, Loader2, Network, Pencil, ChevronDown, Eraser, Plus } from 'lucide-react'
 
 export type WhiteboardItem =
   | {
@@ -86,12 +86,27 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
   const containerRef = useRef<HTMLDivElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
 
-  // 元素列表 + 选中 + 历史
-  const [items, setItems] = useState<WhiteboardItem[]>([])
+  // 多页白板: pages 是页面数组, 每页一个 items 列表; 历史栈也按页存
+  const [pages, setPages] = useState<WhiteboardItem[][]>([[]])
+  const [currentPage, setCurrentPage] = useState(0)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)  // 当前内嵌编辑的 text id
-  const [history, setHistory] = useState<WhiteboardItem[][]>([[]])
-  const [historyIdx, setHistoryIdx] = useState(0)
+  const [histories, setHistories] = useState<WhiteboardItem[][][]>([[[]]])  // [pageIdx][step][item]
+  const [historyIndices, setHistoryIndices] = useState<number[]>([0])
+
+  // 当前页的元素 (派生)
+  const items = pages[currentPage] || []
+  const history = histories[currentPage] || [[]]
+  const historyIdx = historyIndices[currentPage] || 0
+
+  const setItems = (newItems: WhiteboardItem[] | ((prev: WhiteboardItem[]) => WhiteboardItem[])) => {
+    setPages(prev => {
+      const next = [...prev]
+      const cur = prev[currentPage] || []
+      next[currentPage] = typeof newItems === 'function' ? (newItems as any)(cur) : newItems
+      return next
+    })
+  }
 
   // 模式: select (默认选择/拖动) | pen (画笔模式)
   const [mode, setMode] = useState<'select' | 'pen'>('select')
@@ -207,12 +222,24 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
     return () => window.removeEventListener('resize', updateSize)
   }, [width, height])
 
-  // 元素变更 → push 历史 (deep clone)
+  // 元素变更 → push 历史 (deep clone). 历史按页隔离, 每页独立 50 步上限.
   const pushHistory = (newItems: WhiteboardItem[]) => {
-    const next = history.slice(0, historyIdx + 1)
-    next.push(JSON.parse(JSON.stringify(newItems)))
-    setHistory(next.slice(-50))  // 最多 50 步
-    setHistoryIdx(Math.min(next.length - 1, 49))
+    setHistories(prev => {
+      const cur = prev[currentPage] || [[]]
+      const idx = historyIndices[currentPage] || 0
+      const next = cur.slice(0, idx + 1)
+      next.push(JSON.parse(JSON.stringify(newItems)))
+      const trimmed = next.slice(-50)
+      const copy = [...prev]
+      copy[currentPage] = trimmed
+      return copy
+    })
+    setHistoryIndices(prev => {
+      const cur = prev[currentPage] || 0
+      const next = [...prev]
+      next[currentPage] = Math.min(cur + 1, 49)
+      return next
+    })
   }
 
   const updateItems = (newItems: WhiteboardItem[], record = true) => {
@@ -223,16 +250,47 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
   const undo = () => {
     if (historyIdx <= 0) return
     const idx = historyIdx - 1
-    setHistoryIdx(idx)
+    setHistoryIndices(prev => { const n = [...prev]; n[currentPage] = idx; return n })
     setItems(JSON.parse(JSON.stringify(history[idx])))
     setSelectedId(null)
   }
   const redo = () => {
     if (historyIdx >= history.length - 1) return
     const idx = historyIdx + 1
-    setHistoryIdx(idx)
+    setHistoryIndices(prev => { const n = [...prev]; n[currentPage] = idx; return n })
     setItems(JSON.parse(JSON.stringify(history[idx])))
     setSelectedId(null)
+  }
+
+  // ============== 分页 ==============
+  const addPage = () => {
+    setPages(prev => [...prev, []])
+    setHistories(prev => [...prev, [[]]])
+    setHistoryIndices(prev => [...prev, 0])
+    setCurrentPage(pages.length)  // 跳到新页
+    setSelectedId(null); setEditingId(null)
+  }
+  const goToPage = (idx: number) => {
+    if (idx < 0 || idx >= pages.length) return
+    setCurrentPage(idx)
+    setSelectedId(null); setEditingId(null)
+  }
+  const deletePage = (idx: number) => {
+    if (pages.length <= 1) { alert('至少保留 1 页'); return }
+    if (!confirm(`删除第 ${idx + 1} 页? 该页所有内容会消失.`)) return
+    setPages(prev => prev.filter((_, i) => i !== idx))
+    setHistories(prev => prev.filter((_, i) => i !== idx))
+    setHistoryIndices(prev => prev.filter((_, i) => i !== idx))
+    setCurrentPage(Math.max(0, Math.min(currentPage, pages.length - 2)))
+    setSelectedId(null); setEditingId(null)
+  }
+
+  // 一键清屏 (清当前页)
+  const clearPage = () => {
+    if (items.length === 0) return
+    if (!confirm('清空当前页所有内容? 可用撤销恢复.')) return
+    updateItems([])
+    setSelectedId(null); setEditingId(null)
   }
 
   // 添加文字 — 在白板某位置加空文字 + 进入编辑模式 (光标蹦, 直接打字).
@@ -381,7 +439,30 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
     setMindMenuOpen(false)
   }
 
-  // v1: 加分支用现有 "复制" 按钮 (选中分支点复制 → 同父节点的同级分支自动出现)
+  // 给指定节点加一个新子节点 (右侧错落放置). 给 mindNode 上的 + 按钮用.
+  const addMindChild = (parentId: string) => {
+    const parent = items.find(it => it.id === parentId)
+    if (!parent || parent.type !== 'mindNode') return
+    const newId = `m_${Date.now()}_c${Math.random().toString(36).slice(2, 5)}`
+    const branchW = 200, branchH = 80
+    const branchFills = ['#FEF3C7', '#DBEAFE', '#DCFCE7', '#FCE7F3', '#EDE9FE']
+    // 已存在同父节点的子数量 → 用来选不同颜色 + 上下错位
+    const siblings = items.filter(it => it.type === 'mindNode' && (it as any).parentId === parentId)
+    const idx = siblings.length
+    const newItem: WhiteboardItem = {
+      id: newId, type: 'mindNode',
+      x: parent.x + parent.width + 80,
+      y: parent.y + parent.height / 2 - branchH / 2 + (idx - 1) * (branchH + 24),
+      width: branchW, height: branchH,
+      text: '新分支', fontSize: 28,
+      fill: branchFills[idx % branchFills.length], textFill: '#1F2937',
+      fontFamily: parent.fontFamily,
+      rotation: 0, isRoot: false, parentId,
+    }
+    updateItems([...items, newItem])
+    setSelectedId(newId)
+    setEditingId(newId)  // 立刻进入编辑模式, 用户可以改名
+  }
 
   // ============== 画笔 ==============
   const startStroke = (px: number, py: number) => {
@@ -535,6 +616,10 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
         <button onClick={() => setBgPickerOpen(true)} title="换背景"
           className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs text-[var(--text-2)] hover:bg-[var(--bg-hover)] cursor-pointer">
           <LayoutTemplate size={13}/> 背景
+        </button>
+        <button onClick={clearPage} title="清屏 (清空当前页)"
+          className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs text-orange-500 hover:bg-orange-950/20 cursor-pointer">
+          <Eraser size={13}/> 清屏
         </button>
 
         {/* 字体加载状态 — 之前有 N 个 OK / 失败提示, 用户嫌吵, 砍掉.
@@ -737,7 +822,11 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
               />
             )}
 
-            <Transformer ref={transformerRef} rotateEnabled keepRatio={false}
+            <Transformer ref={transformerRef}
+              rotateEnabled={selectedItem?.type !== 'mindNode'}
+              resizeEnabled={selectedItem?.type !== 'mindNode'}
+              enabledAnchors={selectedItem?.type === 'mindNode' ? [] : ['top-left','top-center','top-right','middle-left','middle-right','bottom-left','bottom-center','bottom-right']}
+              keepRatio={false}
               anchorSize={12}
               anchorCornerRadius={6}
               anchorStroke="#3B82F6"
@@ -824,6 +913,41 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
           )
         })()}
 
+        {/* 思维导图 + 按钮 — HTML overlay 叠在每个 mindNode 右侧, 点击加子分支.
+            select 模式 + 非编辑态才显示, 避免干扰画笔 / 文字编辑. */}
+        {mode === 'select' && !editingId && items.map(it => {
+          if (it.type !== 'mindNode') return null
+          const cx = (it.x + it.width) * scale + 4
+          const cy = (it.y + it.height / 2) * scale - 11
+          return (
+            <button
+              key={`plus_${it.id}`}
+              onClick={(e) => { e.stopPropagation(); addMindChild(it.id) }}
+              title="加子分支"
+              style={{
+                position: 'absolute',
+                left: cx, top: cy,
+                width: 22, height: 22,
+                borderRadius: '50%',
+                background: '#3B82F6',
+                color: 'white',
+                border: '2px solid white',
+                boxShadow: '0 2px 6px rgba(0,0,0,0.25)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                padding: 0,
+                fontSize: 14,
+                fontWeight: 700,
+                lineHeight: 1,
+                zIndex: 10,
+              }}>
+              +
+            </button>
+          )
+        })}
+
         {/* 摄像头 PIP 预览 — HTML video 叠在 Konva 上, 让用户看到人物会出现在哪 (纯 UI, 录制走主 canvas 那条路) */}
         {cameraStream && (() => {
           const pipDh = displaySize.h * pipSizePct / 100
@@ -850,10 +974,38 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
         })()}
       </div>
 
+      {/* 分页脚 — 写满了就 + 一页, 翻页切. 录制时显示的是当前页 (用户可以中途翻页) */}
+      <div className="flex items-center justify-center gap-1.5 flex-wrap py-1">
+        {pages.map((_, i) => (
+          <div key={i} className="flex items-center gap-0.5">
+            <button
+              onClick={() => goToPage(i)}
+              className={`min-w-[28px] h-7 px-2 rounded-md text-xs font-medium cursor-pointer transition-colors ${
+                i === currentPage
+                  ? 'bg-[var(--text)] text-[var(--bg)]'
+                  : 'bg-[var(--bg-card)] border border-[var(--border)] text-[var(--text-2)] hover:bg-[var(--bg-hover)]'
+              }`}
+              title={`切到第 ${i + 1} 页`}>
+              {i + 1}
+            </button>
+            {i === currentPage && pages.length > 1 && (
+              <button onClick={() => deletePage(i)} title="删除本页"
+                className="w-5 h-5 rounded text-[10px] text-red-400 hover:bg-red-950/20 cursor-pointer flex items-center justify-center">
+                <X size={11}/>
+              </button>
+            )}
+          </div>
+        ))}
+        <button onClick={addPage} title="新建一页"
+          className="flex items-center gap-0.5 h-7 px-2 rounded-md border border-dashed border-[var(--border)] text-xs text-[var(--text-3)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-2)] cursor-pointer">
+          <Plus size={12}/> 加页
+        </button>
+      </div>
+
       <p className="text-[10px] text-[var(--text-3)] text-center">
         {mode === 'pen'
           ? '画笔模式: 鼠标拖动自由画线. 再点"画笔"退出.'
-          : '点击元素选中 (角上拖缩放, 顶上点旋转). 双击文字 / 思维导图节点编辑. 拖图片到白板上传.'}
+          : '点空白处即可打字. 思维导图节点右侧 + 加子分支, 双击节点改名. 拖图片到白板上传.'}
       </p>
 
       {bgPickerOpen && (
