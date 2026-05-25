@@ -922,9 +922,10 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
                 border: 'none',
                 outline: 'none',
                 // 光标颜色: 深底用白, 浅底用黑 (auto contrast).
-                // caretShape:'block' 让支持的浏览器渲染方块光标, 比 1px 细线粗 (不支持的浏览器无影响).
+                // caretShape:'bar' = 竖线光标 (默认形状), 比 'block' 字宽方块细一半,
+                // 但因为 color 是高对比黑/白, 72px 高的字号下竖线本身也足够显眼.
                 caretColor: bgIsDark ? '#FFFFFF' : '#000000',
-                caretShape: 'block',
+                caretShape: 'bar',
                 padding: '0',
                 margin: '0',
                 lineHeight: isMind ? (minH / (it.fontSize * scale)) : 1.15,
