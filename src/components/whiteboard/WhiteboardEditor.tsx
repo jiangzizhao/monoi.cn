@@ -73,6 +73,18 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
   const [bgImage, setBgImage] = useState<HTMLImageElement | null>(null)
   const [bgPickerOpen, setBgPickerOpen] = useState(false)
 
+  // 默认文字样式 — 工具栏一直显示, 没选中文字时改这个 (应用到下一次新建文字).
+  // 选中文字时, 工具栏显示选中文字的样式, 改的是选中那条.
+  const [defaultTextStyle, setDefaultTextStyle] = useState({
+    fontSize: 72,
+    fontFamily: 'Arial, sans-serif',
+    fill: '#000000',
+  })
+
+  // 自动建文字: 第一次 mount 时在中心放一个空文字 + 进入编辑模式, 用户打开白板就能打字.
+  // 用 ref 标记防 StrictMode 双 mount.
+  const autoAddedRef = useRef(false)
+
   // 拉服务器字体 → FontFace API 加载到浏览器 → 注入到字体下拉. 失败自动重试 3 次防网络抖
   useEffect(() => {
     const directBase = (import.meta as any).env?.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'
@@ -113,6 +125,14 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
   }, [])
 
   const FONT_FAMILIES = [...DEFAULT_FONT_FAMILIES, ...serverFonts]
+
+  // serverFonts 拉到了 → 把默认字体也换成 monoi 字体库第一个 (思源黑 Heavy 之类)
+  useEffect(() => {
+    if (serverFonts.length > 0 && defaultTextStyle.fontFamily === 'Arial, sans-serif') {
+      setDefaultTextStyle(s => ({ ...s, fontFamily: serverFonts[0].value }))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverFonts])
 
   // 摄像头预览 → off-screen video
   useEffect(() => {
@@ -178,24 +198,44 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
     setSelectedId(null)
   }
 
-  // 添加文字 — 点 "+ 文字" 立刻在白板中心加空文字 + 进入编辑模式 (光标蹦, 直接打字)
-  const addText = () => {
+  // 添加文字 — 在白板某位置加空文字 + 进入编辑模式 (光标蹦, 直接打字).
+  // 用 defaultTextStyle (工具栏一直显示的那套), 选中文字时改的是文字本身, 没选中时改的是这个默认值.
+  const addTextAt = (px: number, py: number): string => {
     const id = `t_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
-    const fontSize = 72
-    // 默认字体优先用 monoi 服务器字体的第一个 (思源黑等), 没加载到 fallback 系统默认
-    const defaultFont = serverFonts.length > 0 ? serverFonts[0].value : FONT_FAMILIES[0].value
     const newItem: WhiteboardItem = {
       id, type: 'text',
-      x: width / 2 - 200, y: height / 2 - fontSize / 2,
-      text: '', fontSize, fill: '#000000',
-      fontFamily: defaultFont,
+      x: px, y: py - defaultTextStyle.fontSize / 2,
+      text: '',
+      fontSize: defaultTextStyle.fontSize,
+      fill: defaultTextStyle.fill,
+      fontFamily: defaultTextStyle.fontFamily,
       rotation: 0,
     }
-    const next = [...items, newItem]
-    updateItems(next)
+    updateItems([...items, newItem])
     setSelectedId(id)
     setEditingId(id)  // 立刻进入编辑模式, textarea 自动聚焦
+    return id
   }
+  const addText = () => addTextAt(width / 2 - 200, height / 2)
+
+  // 第一次 mount: 自动在中心放一个空文字 + 进编辑模式 → 用户打开白板就能直接打字
+  useEffect(() => {
+    if (autoAddedRef.current) return
+    autoAddedRef.current = true
+    const id = `t_${Date.now()}_init`
+    setItems([{
+      id, type: 'text',
+      x: width / 2 - 200, y: height / 2 - defaultTextStyle.fontSize / 2,
+      text: '',
+      fontSize: defaultTextStyle.fontSize,
+      fill: defaultTextStyle.fill,
+      fontFamily: defaultTextStyle.fontFamily,
+      rotation: 0,
+    }])
+    setSelectedId(id)
+    setEditingId(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // 添加图片 (file 或 base64 dataURL)
   const addImageFromFile = (file: File) => {
@@ -322,28 +362,46 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
         {/* 字体加载状态 — 之前有 N 个 OK / 失败提示, 用户嫌吵, 砍掉.
             真有问题 F12 → Console 看 [whiteboard] log */}
 
-        {/* 文字属性面板 (选中文字时显示) */}
-        {selectedItem?.type === 'text' && (
-          <div className="ml-auto flex items-center gap-2 text-[10px] flex-wrap">
-            <select value={selectedItem.fontSize}
-              onChange={e => handleTransform(selectedItem.id, { fontSize: Number(e.target.value) })}
-              className="bg-[var(--bg-input)] border border-[var(--border)] rounded px-1.5 py-0.5 text-[10px] cursor-pointer">
-              {FONT_SIZES.map(s => <option key={s} value={s}>{s}px</option>)}
-            </select>
-            <select value={selectedItem.fontFamily}
-              onChange={e => handleTransform(selectedItem.id, { fontFamily: e.target.value })}
-              className="bg-[var(--bg-input)] border border-[var(--border)] rounded px-1.5 py-0.5 text-[10px] cursor-pointer">
-              {FONT_FAMILIES.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
-            </select>
-            <div className="flex items-center gap-1">
-              {TEXT_COLORS.map(c => (
-                <button key={c} onClick={() => handleTransform(selectedItem.id, { fill: c })}
-                  className={`w-4 h-4 rounded-full border-2 cursor-pointer ${selectedItem.fill === c ? 'border-[var(--text)]' : 'border-[var(--border)]'}`}
-                  style={{ background: c }}/>
-              ))}
+        {/* 文字属性面板 — 一直显示. 选中文字 → 改的是选中文字; 没选中 → 改的是"下一次新建文字"的默认样式. */}
+        {(() => {
+          const isTextSelected = selectedItem?.type === 'text'
+          const curFontSize = isTextSelected ? selectedItem.fontSize : defaultTextStyle.fontSize
+          const curFontFamily = isTextSelected ? selectedItem.fontFamily : defaultTextStyle.fontFamily
+          const curFill = isTextSelected ? selectedItem.fill : defaultTextStyle.fill
+          const setFontSize = (v: number) => {
+            if (isTextSelected) handleTransform(selectedItem.id, { fontSize: v })
+            else setDefaultTextStyle(s => ({ ...s, fontSize: v }))
+          }
+          const setFontFamily = (v: string) => {
+            if (isTextSelected) handleTransform(selectedItem.id, { fontFamily: v })
+            else setDefaultTextStyle(s => ({ ...s, fontFamily: v }))
+          }
+          const setFill = (v: string) => {
+            if (isTextSelected) handleTransform(selectedItem.id, { fill: v })
+            else setDefaultTextStyle(s => ({ ...s, fill: v }))
+          }
+          return (
+            <div className="ml-auto flex items-center gap-2 text-[10px] flex-wrap">
+              <select value={curFontSize}
+                onChange={e => setFontSize(Number(e.target.value))}
+                className="bg-[var(--bg-input)] border border-[var(--border)] rounded px-1.5 py-0.5 text-[10px] cursor-pointer">
+                {FONT_SIZES.map(s => <option key={s} value={s}>{s}px</option>)}
+              </select>
+              <select value={curFontFamily}
+                onChange={e => setFontFamily(e.target.value)}
+                className="bg-[var(--bg-input)] border border-[var(--border)] rounded px-1.5 py-0.5 text-[10px] cursor-pointer">
+                {FONT_FAMILIES.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+              </select>
+              <div className="flex items-center gap-1">
+                {TEXT_COLORS.map(c => (
+                  <button key={c} onClick={() => setFill(c)}
+                    className={`w-4 h-4 rounded-full border-2 cursor-pointer ${curFill === c ? 'border-[var(--text)]' : 'border-[var(--border)]'}`}
+                    style={{ background: c }}/>
+                ))}
+              </div>
             </div>
-          </div>
-        )}
+          )
+        })()}
       </div>
 
 {/* Stage container — Konva 内部用原生 1080x1920 (高分辨率), CSS transform scale 缩放显示.
@@ -360,27 +418,13 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
         <Stage ref={stageRef} width={width} height={height}
           onMouseDown={(e) => {
             // 点击空白处: 取消选中 (如果有选中) OR 在该位置直接创建文字 (如果无选中, 类似 PPT 文本工具)
-            if (e.target === e.target.getStage() || e.target.attrs.id === 'bg-rect') {
+            if (e.target === e.target.getStage() || e.target.attrs.id === 'bg-rect' || e.target.attrs.id === 'bg-image') {
               if (selectedId) {
                 setSelectedId(null)
               } else if (!editingId) {
                 // 在点击位置加空文字并立刻进编辑 — 实现"光标点哪写哪"
                 const pointerPos = e.target.getStage()?.getPointerPosition()
-                if (pointerPos) {
-                  const id = `t_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
-                  const fontSize = 72
-                  const defaultFont = serverFonts.length > 0 ? serverFonts[0].value : FONT_FAMILIES[0].value
-                  const newItem: WhiteboardItem = {
-                    id, type: 'text',
-                    x: pointerPos.x, y: pointerPos.y - fontSize / 2,
-                    text: '', fontSize, fill: '#000000',
-                    fontFamily: defaultFont,
-                    rotation: 0,
-                  }
-                  updateItems([...items, newItem])
-                  setSelectedId(id)
-                  setEditingId(id)
-                }
+                if (pointerPos) addTextAt(pointerPos.x, pointerPos.y)
               }
             }
           }}>
