@@ -39,11 +39,18 @@ mac:
   target: [dmg]
   category: public.app-category.video
 
-# 发布到 GitHub Releases — electron-updater 启动时去这里查新版.
-# 不设 GH_TOKEN: 我们手动打包 + 手动 git tag + 手动上传 .exe 到 Release (不自动 publish).
-# 这里只是告诉客户端 "去这个 repo 的 Releases 找新版本".
+# 发布走 OSS (generic provider) — electron-updater 启动时去这个 URL 查 latest.yml.
+# GitHub Releases 在国内慢 + 用户看 github.com 不专业, 走 monoi 自己的 OSS 域名.
+#
+# 部署 workflow (每次发新版):
+# 1. 改 package.json version (0.1.0 → 0.2.0)
+# 2. npm run pack:win → release/monoi-Setup-0.2.0.exe + release/latest.yml
+# 3. 把这两个文件上传到 OSS desktop_release/ 目录 (ACL: 公共读)
+# 4. 改 windows-server/desktop_release.json version+url, 重启 main.py
+# 5. 已装的桌面端启动 5 秒后自动查 → 后台下载新版
+#
+# ⚠️ 改下面 url 成你真实的 OSS 域名再 pack:win, 不然 latest.yml 写的是占位地址.
 publish:
-  provider: github
-  owner: jiangzizhao
-  repo: monoi.cn
-  releaseType: release   # 只看 release, 不要 draft / prerelease
+  provider: generic
+  url: https://CHANGE-ME-bucket.oss-cn-hangzhou.aliyuncs.com/desktop_release
+  channel: latest
