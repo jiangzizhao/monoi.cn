@@ -15,6 +15,11 @@ type Phase = 'setup' | 'previewing' | 'recording' | 'done'
 type PipShape = 'circle' | 'rounded' | 'square'
 type PipPos = 'tl' | 'tc' | 'tr' | 'cl' | 'cc' | 'cr' | 'bl' | 'bc' | 'br'
 type OutputRatio = '16:9' | '9:16' | '1:1' | '3:4'
+
+// 录屏时长上限. 超过浏览器可能 OOM / blob 过大上传炸. 30 分钟覆盖 99% 用例.
+const MAX_RECORD_SECONDS = 30 * 60
+// 临近上限提示阈值: 还剩 5 分钟时开始橙色倒计时, 让用户有时间收尾.
+const WARN_SECONDS_LEFT = 5 * 60
 type BgMode = 'screen' | 'whiteboard' | 'camera_only'
 
 // 输出像素尺寸 (高度 1080 基准, 各比例都给具体宽高)
@@ -154,8 +159,17 @@ export default function RecordTab() {
   useEffect(() => {
     if (phase !== 'recording') { setElapsed(0); return }
     const start = Date.now()
-    const id = window.setInterval(() => setElapsed(Math.floor((Date.now() - start) / 1000)), 1000)
+    const id = window.setInterval(() => {
+      const e = Math.floor((Date.now() - start) / 1000)
+      setElapsed(e)
+      // 到上限自动停 (防 OOM / 上传炸). 用户能在 done 阶段重录续上.
+      if (e >= MAX_RECORD_SECONDS) {
+        setError(`已到 ${Math.floor(MAX_RECORD_SECONDS / 60)} 分钟上限, 自动停止. 想录更长请分段.`)
+        stopRecording()
+      }
+    }, 1000)
     return () => clearInterval(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase])
 
   // ===== 操作 =====
@@ -570,19 +584,26 @@ export default function RecordTab() {
                 </div>
               )}
 
-              {/* recording 时, 一个超大显眼的浮动停止按钮 + 计时 (用户找不到底部 toolbar 也能直接停) */}
-              {phase === 'recording' && (
+              {/* recording 时, 一个超大显眼的浮动停止按钮 + 计时 (用户找不到底部 toolbar 也能直接停)
+                  临近上限 (剩 < 5 分钟) 时改成橙色 + 显示倒计时, 提醒收尾. */}
+              {phase === 'recording' && (() => {
+                const remaining = Math.max(0, MAX_RECORD_SECONDS - elapsed)
+                const isWarning = remaining <= WARN_SECONDS_LEFT && remaining > 0
+                const mm = Math.floor(elapsed / 60), ss = String(elapsed % 60).padStart(2, '0')
+                const rmm = Math.floor(remaining / 60), rss = String(remaining % 60).padStart(2, '0')
+                return (
                 <div className="flex items-center justify-center gap-3 sticky bottom-4 z-50">
-                  <div className="flex items-center gap-2 bg-red-500 text-white px-4 py-2 rounded-full font-medium text-sm shadow-lg">
+                  <div className={`flex items-center gap-2 ${isWarning ? 'bg-orange-500' : 'bg-red-500'} text-white px-4 py-2 rounded-full font-medium text-sm shadow-lg`}>
                     <span className="w-2 h-2 rounded-full bg-white animate-pulse"/>
-                    录制中 {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}
+                    录制中 {mm}:{ss}{isWarning && <span className="ml-2 text-[11px] opacity-90">还剩 {rmm}:{rss}</span>}
                   </div>
                   <button onClick={stopRecording}
                     className="flex items-center gap-2 bg-[var(--text)] text-[var(--bg)] px-5 py-2 rounded-full font-medium text-sm hover:opacity-80 cursor-pointer shadow-lg">
                     <Square size={14} fill="currentColor"/> 停止录制
                   </button>
                 </div>
-              )}
+                )
+              })()}
               {phase === 'previewing' && (bgMode === 'screen') && (
                 <div className="rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-300 dark:border-amber-900/50 p-3 text-xs text-amber-800 dark:text-amber-300 leading-relaxed">
                   <div className="font-medium mb-1.5 flex items-center gap-1.5">💡 避免画面"套娃" 的 3 步操作</div>
@@ -700,18 +721,27 @@ export default function RecordTab() {
                 </button>
               </>
             )}
-            {phase === 'recording' && (
+            {phase === 'recording' && (() => {
+              const remaining = Math.max(0, MAX_RECORD_SECONDS - elapsed)
+              const isWarning = remaining <= WARN_SECONDS_LEFT && remaining > 0
+              const mm = Math.floor(elapsed / 60), ss = String(elapsed % 60).padStart(2, '0')
+              const rmm = Math.floor(remaining / 60), rss = String(remaining % 60).padStart(2, '0')
+              const colorClass = isWarning ? 'text-orange-500' : 'text-red-500'
+              const dotBg = isWarning ? 'bg-orange-500' : 'bg-red-500'
+              return (
               <>
-                <span className="flex-1 text-sm text-red-500 font-medium flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"/>
-                  录制中 {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}
+                <span className={`flex-1 text-sm ${colorClass} font-medium flex items-center gap-2`}>
+                  <span className={`w-2 h-2 rounded-full ${dotBg} animate-pulse`}/>
+                  录制中 {mm}:{ss}
+                  {isWarning && <span className="text-[11px] opacity-90 ml-1">· 还剩 {rmm}:{rss} 自动停</span>}
                 </span>
                 <button onClick={stopRecording}
                   className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[var(--text)] text-[var(--bg)] text-sm font-medium hover:opacity-80 cursor-pointer">
                   <Square size={12} fill="currentColor"/> 停止
                 </button>
               </>
-            )}
+              )
+            })()}
             {phase === 'done' && (
               <>
                 <span className="flex-1 text-sm text-green-500 font-medium">✓ 录制完成</span>
