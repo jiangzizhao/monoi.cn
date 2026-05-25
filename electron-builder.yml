@@ -52,5 +52,5 @@ mac:
 # ⚠️ 改下面 url 成你真实的 OSS 域名再 pack:win, 不然 latest.yml 写的是占位地址.
 publish:
   provider: generic
-  url: https://CHANGE-ME-bucket.oss-cn-hangzhou.aliyuncs.com/desktop_release
+  url: https://monoi-temp.oss-cn-shenzhen.aliyuncs.com/desktop_release
   channel: latest
