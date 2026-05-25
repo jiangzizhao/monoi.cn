@@ -312,9 +312,37 @@ export async function publishToDouyin(req: PublishReq): Promise<PublishResult> {
       }
     }
 
-    // 1. 喂视频 (抖音 file input 是可见的, 直接 set)
+    // 1. 喂视频 — 多 selector 兜底, file input 通常 hidden 所以用 state:'attached'
+    step(`等上传组件加载...`)
+    // 抖音 SPA 路由切换 + 重型 JS 渲染, 多等几秒
+    await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {})
+    await page.waitForTimeout(3000)
+
+    const fileInputSelectors = [
+      'input[type="file"][accept*="video"]',
+      'input[accept*="video"]',
+      'input[type="file"]',
+    ]
+    let fileInput: any = null
+    for (const sel of fileInputSelectors) {
+      const loc = page.locator(sel).first()
+      try {
+        await loc.waitFor({ state: 'attached', timeout: 10000 })
+        fileInput = loc
+        step(`✓ 用 selector: ${sel}`)
+        break
+      } catch { /* 试下一个 */ }
+    }
+    if (!fileInput) {
+      // 截图保留定位
+      const shotPath = path.join(os.tmpdir(), `monoi-douyin-upload-fail-${Date.now()}.png`)
+      try { await page.screenshot({ path: shotPath, fullPage: true }) } catch { /* ignore */ }
+      step(`✗ 找不到上传按钮. 截图: ${shotPath} (抖音可能改 UI 了, 发给 monoi 调 selector)`)
+      step('临时方案: 你在弹出的 Edge 里手动拖视频到抖音页面, 再填表单. 视频路径: ' + videoPath)
+      try { await page.waitForEvent('close', { timeout: waitTimeout }) } catch { /* ignore */ }
+      return { success: false, detail: detailMsgs.join(' | ') }
+    }
     step(`上传 ${path.basename(videoPath)}...`)
-    const fileInput = page.locator('input[type="file"]').first()
     await fileInput.setInputFiles(videoPath)
 
     // 2. 等表单 (跳到 /post/video 后)
