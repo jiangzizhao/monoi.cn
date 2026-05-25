@@ -4,6 +4,7 @@ import {
   Sparkles, ArrowRight, Play, MessageSquare, Mic, Video, Film, Scissors, Image as ImageIcon,
   Send, ChevronDown, ChevronUp, Check, PencilLine,
 } from 'lucide-react'
+import { fetchDesktopLatest, type DesktopLatest } from '../services/desktop'
 
 
 // =============== 内容数据 ===============
@@ -103,6 +104,13 @@ export default function Landing() {
   const [scrolled, setScrolled] = useState(false)
   const [openFaq, setOpenFaq] = useState<number | null>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const [desktop, setDesktop] = useState<DesktopLatest | null>(null)
+
+  // 拉桌面端最新版本 (后端 desktop_release.json), 没发布隐藏按钮
+  useEffect(() => {
+    if (typeof (window as any).monoiDesktop !== 'undefined') return  // 已经在桌面端
+    fetchDesktopLatest().then(setDesktop).catch(() => { /* 静默 */ })
+  }, [])
 
   // placeholder 轮播
   useEffect(() => {
@@ -146,11 +154,12 @@ export default function Landing() {
             <a href="#features" className="hover:text-[var(--text)]">功能</a>
             <a href="#pricing" className="hover:text-[var(--text)]">定价</a>
             <a href="#faq" className="hover:text-[var(--text)]">FAQ</a>
-            {/* 下载桌面版 — 桌面端自身不显示这个链接 (你已经装了); 普通网页显示 */}
-            {typeof (window as any).monoiDesktop === 'undefined' && (
-              <a href="https://github.com/jiangzizhao/monoi.cn/releases/latest"
-                target="_blank" rel="noopener noreferrer"
-                className="hover:text-[var(--text)] flex items-center gap-1">
+            {/* 下载桌面版 — 桌面端自身不显示 (已经装了); 后端没配也不显示 */}
+            {typeof (window as any).monoiDesktop === 'undefined' && desktop?.available && desktop.exe_url && (
+              <a href={desktop.exe_url}
+                download
+                className="hover:text-[var(--text)] flex items-center gap-1"
+                title={`v${desktop.version}${desktop.size_mb ? ` · ${desktop.size_mb} MB` : ''}`}>
                 💻 桌面版
               </a>
             )}

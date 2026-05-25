@@ -2268,7 +2268,7 @@ class OssSignUploadRequest(BaseModel):
 
 
 # 白名单, 防恶意客户端传随便 prefix 把文件传到非预期路径
-_ALLOWED_UPLOAD_PREFIXES = {'uploads', 'cover_templates', 'bgm_library', 'avatars', 'landing_demos', 'whiteboard_bg', 'recordings'}
+_ALLOWED_UPLOAD_PREFIXES = {'uploads', 'cover_templates', 'bgm_library', 'avatars', 'landing_demos', 'whiteboard_bg', 'recordings', 'desktop_release'}
 
 
 @app.post("/api/oss/sign-upload")
@@ -2630,6 +2630,36 @@ def public_whiteboard_backgrounds():
             continue   # 签不到就跳过, 不让一条坏数据搞挂白板
         items.append(d)
     return {'backgrounds': items}
+
+
+# ============== 桌面端最新版本 ==============
+
+
+@app.get("/api/desktop/latest")
+def get_desktop_latest():
+    """桌面端版本信息. 给网页 '下载桌面版' 按钮 + 用户决定要不要升级用.
+    读 main.py 同目录的 desktop_release.json (admin 每次发新版手动改).
+
+    JSON 格式:
+    {
+      "version": "0.1.0",
+      "exe_url": "https://your-bucket.oss-cn-hangzhou.aliyuncs.com/desktop_release/monoi-Setup-0.1.0.exe",
+      "size_mb": 86.5,
+      "released_at": "2026-05-26",
+      "notes": "首发: 用你自己账号发布到小红书/抖音"
+    }
+    """
+    import json
+    cfg_path = os.path.join(os.path.dirname(__file__), 'desktop_release.json')
+    if not os.path.exists(cfg_path):
+        return {"available": False, "detail": "桌面版还没发布"}
+    try:
+        with open(cfg_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        return {"available": True, **data}
+    except Exception as e:
+        print(f"[desktop/latest] 读取 desktop_release.json 失败: {e}", flush=True)
+        return {"available": False, "detail": "桌面版配置读取失败"}
 
 
 # ============== 我的录屏 ==============

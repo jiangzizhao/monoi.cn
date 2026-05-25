@@ -4,6 +4,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useChatStore } from '../../store/chatStore'
 import { getUsername, logout, isLoggedIn } from '../../lib/auth'
 import { fetchMyProfile, type UserProfile } from '../../services/billing'
+import { fetchDesktopLatest, type DesktopLatest } from '../../services/desktop'
 import { TopTabBar } from './TopTabBar'
 
 function timeAgo(ts: number) {
@@ -21,6 +22,13 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
   const username = getUsername()
   const [me, setMe] = useState<UserProfile | null>(null)
   const isAdmin = !!me?.is_admin
+  const [desktop, setDesktop] = useState<DesktopLatest | null>(null)
+
+  // 拉桌面端最新版 URL (后端 desktop_release.json), 没发布隐藏按钮
+  useEffect(() => {
+    if (typeof (window as any).monoiDesktop !== 'undefined') return
+    fetchDesktopLatest().then(setDesktop).catch(() => {})
+  }, [])
 
   // 当前 tab — 决定中间列表显示啥内容. /app 默认按 chat
   const activeTab: 'chat' | 'record' | 'voice' =
@@ -142,11 +150,12 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500 text-white">admin</span>
           </Link>
         )}
-        {/* 下载桌面版 — 已在桌面端不显示 (它自己装好了) */}
-        {typeof (window as any).monoiDesktop === 'undefined' && (
-          <a href="https://github.com/jiangzizhao/monoi.cn/releases/latest"
-            target="_blank" rel="noopener noreferrer"
-            className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-[var(--text-2)] hover:bg-[var(--bg-hover)] hover:text-[var(--text)] cursor-pointer transition-colors">
+        {/* 下载桌面版 — 已在桌面端 / 没发布都不显示 */}
+        {typeof (window as any).monoiDesktop === 'undefined' && desktop?.available && desktop.exe_url && (
+          <a href={desktop.exe_url}
+            download
+            className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-[var(--text-2)] hover:bg-[var(--bg-hover)] hover:text-[var(--text)] cursor-pointer transition-colors"
+            title={`v${desktop.version}${desktop.size_mb ? ` · ${desktop.size_mb} MB` : ''}`}>
             <Download size={14}/>
             <span className="flex-1 truncate">下载桌面版</span>
             <span className="text-[10px] text-[var(--text-3)]">用自己账号发</span>
