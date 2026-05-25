@@ -2635,31 +2635,81 @@ def public_whiteboard_backgrounds():
 # ============== 桌面端最新版本 ==============
 
 
-@app.get("/api/desktop/latest")
-def get_desktop_latest():
-    """桌面端版本信息. 给网页 '下载桌面版' 按钮 + 用户决定要不要升级用.
-    读 main.py 同目录的 desktop_release.json (admin 每次发新版手动改).
-
-    JSON 格式:
-    {
-      "version": "0.1.0",
-      "exe_url": "https://your-bucket.oss-cn-hangzhou.aliyuncs.com/desktop_release/monoi-Setup-0.1.0.exe",
-      "size_mb": 86.5,
-      "released_at": "2026-05-26",
-      "notes": "首发: 用你自己账号发布到小红书/抖音"
-    }
-    """
+def _read_desktop_release_json():
+    """读 desktop_release.json. 返 dict 或 None."""
     import json
     cfg_path = os.path.join(os.path.dirname(__file__), 'desktop_release.json')
     if not os.path.exists(cfg_path):
-        return {"available": False, "detail": "桌面版还没发布"}
+        return None
     try:
         with open(cfg_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        return {"available": True, **data}
+            return json.load(f)
     except Exception as e:
-        print(f"[desktop/latest] 读取 desktop_release.json 失败: {e}", flush=True)
-        return {"available": False, "detail": "桌面版配置读取失败"}
+        print(f"[desktop] 读 desktop_release.json 失败: {e}", flush=True)
+        return None
+
+
+@app.get("/api/desktop/latest")
+def get_desktop_latest():
+    """桌面端版本信息. exe_url 返指回 monoi 的代理 URL (后端 302 跳签名 OSS),
+    避免依赖 OSS bucket 公共读权限. 用户点 → /api/desktop/download → 302 → 真实 OSS 临时签名 URL."""
+    data = _read_desktop_release_json()
+    if not data:
+        return {"available": False, "detail": "桌面版还没发布"}
+    # 替换 exe_url 成 monoi 自己的代理 URL, 不直接给 OSS URL
+    base = os.environ.get('PUBLIC_BASE_URL', 'https://monoi.nat100.top')
+    proxied = dict(data)
+    proxied['exe_url'] = f"{base}/api/desktop/download/{data.get('version', 'latest')}"
+    proxied['original_oss_url'] = data.get('exe_url')   # debug 用, 前端可忽略
+    return {"available": True, **proxied}
+
+
+@app.get("/api/desktop/download/{version}")
+def desktop_download_redirect(version: str):
+    """桌面 .exe 下载入口. 302 跳 OSS 签名 URL (1 小时有效, 足够用户下完 80MB).
+    走代理是为了:
+    1. 不依赖 OSS bucket 公共读 ACL (RAM 子账号没权设)
+    2. URL 永久可用 (monoi 端点稳定), OSS 签名我们后端动态生成
+    3. 后期可以加下载量统计 / 限流 / 防黑产爬"""
+    from fastapi.responses import RedirectResponse
+    data = _read_desktop_release_json()
+    if not data:
+        raise HTTPException(404, "桌面版还没发布")
+    # version 暂时不校验 (我们只有 latest 一份), 之后可以做多版本
+    _ = version
+    oss_url = data.get('exe_url')
+    if not oss_url:
+        raise HTTPException(500, "exe_url 没配置")
+    # 从 OSS URL 解析 oss_key, 重新签个临时下载 URL
+    try:
+        # 形如 https://{bucket}.{endpoint}/desktop_release/monoi-Setup-0.1.0.exe
+        from urllib.parse import urlparse
+        parsed = urlparse(oss_url)
+        oss_key = parsed.path.lstrip('/')   # desktop_release/monoi-Setup-0.1.0.exe
+        from oss_helper import oss_sign_get
+        signed = oss_sign_get(oss_key, expires=3600)   # 1 小时, 够下完
+        return RedirectResponse(url=signed, status_code=302)
+    except Exception as e:
+        print(f"[desktop/download] 签名失败: {e}", flush=True)
+        raise HTTPException(500, "下载 URL 生成失败")
+
+
+@app.get("/api/desktop/update/{filename:path}")
+def desktop_update_proxy(filename: str):
+    """electron-updater 用的 — 走这个 URL 拿 latest.yml 和 blockmap.
+    跟上面 /download 类似, 302 跳 OSS 签名. updater 配 generic provider 指 /api/desktop/update."""
+    from fastapi.responses import RedirectResponse
+    # filename 可能含 / (blockmap 等), urlparse 会处理
+    if not filename or '..' in filename:
+        raise HTTPException(400, "非法 filename")
+    oss_key = f"desktop_release/{filename}"
+    try:
+        from oss_helper import oss_sign_get
+        signed = oss_sign_get(oss_key, expires=3600)
+        return RedirectResponse(url=signed, status_code=302)
+    except Exception as e:
+        print(f"[desktop/update] 签名 {filename} 失败: {e}", flush=True)
+        raise HTTPException(500, "下载 URL 生成失败")
 
 
 # ============== 我的录屏 ==============
