@@ -23,6 +23,7 @@
     "@tailwindcss/vite": "^4.2.4",
     "jsonrepair": "^3.14.0",
     "jszip": "^3.10.1",
+    "electron-updater": "^6.3.0",
     "konva": "^10.3.0",
     "lucide-react": "^1.11.0",
     "playwright-core": "^1.55.0",

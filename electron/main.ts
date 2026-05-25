@@ -5,14 +5,16 @@
 // - 客户端只是个"壳" + 本地能力扩展 (Playwright 发布 / ffmpeg 录屏 / 自动更新).
 // - 唯一不同: 桌面端 window.monoiDesktop API 暴露给 preload, 网页前端检测后走桌面增强路径.
 //
-// 后期 (Phase 4 完整版) 加:
-// - Playwright Node 集成 (本地 Edge 发布, 用户自己账号)
-// - ffmpeg 录屏 (替换浏览器 MediaRecorder)
-// - electron-updater + GitHub Releases 自动更新
+// 已集成 (Phase 4-2/3):
+// - Playwright + 本地 Edge 发布 (用户自己账号, 不再代发 admin) — electron/publish.ts
+// - electron-updater 自动更新 (GitHub Releases) — electron/updater.ts
+// 后期 (Phase 4 高级版):
+// - ffmpeg 抓屏录屏 (替换浏览器 MediaRecorder, 不限时长 + 鼠标 zoom)
 
 import { app, BrowserWindow, shell, ipcMain } from 'electron'
 import * as path from 'path'
 import { publish, detectEdgePath, type PublishReq } from './publish'
+import { initAutoUpdater, setUpdaterWindow } from './updater'
 
 // 单实例锁: 第二次启动会激活已有窗口, 而不是开第二个
 const gotLock = app.requestSingleInstanceLock()
@@ -60,7 +62,9 @@ function createWindow() {
     mainWin.webContents.openDevTools({ mode: 'detach' })
   }
 
-  mainWin.on('closed', () => { mainWin = null })
+  mainWin.on('closed', () => { mainWin = null; setUpdaterWindow(null) })
+  // 注册到 updater (它弹窗会用这个 window 作 parent)
+  setUpdaterWindow(mainWin)
 }
 
 // 第二次启动 → 激活已有窗口
@@ -81,7 +85,11 @@ ipcMain.handle('publish', async (_event: unknown, req: PublishReq) => {
   return await publish(req)
 })
 
-app.whenReady().then(createWindow)
+app.whenReady().then(() => {
+  createWindow()
+  // 启动自动更新检查 (5 秒后后台跑, 不阻塞)
+  initAutoUpdater()
+})
 
 // macOS 关掉所有窗口不退出 (Dock 还能再点); Windows / Linux 退出
 app.on('window-all-closed', () => {

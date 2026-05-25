@@ -39,5 +39,11 @@ mac:
   target: [dmg]
   category: public.app-category.video
 
-# 发布 (Phase 4 暂手动 — 不让 electron-builder 自动 publish, 手动传 GitHub Releases)
-publish: null
+# 发布到 GitHub Releases — electron-updater 启动时去这里查新版.
+# 不设 GH_TOKEN: 我们手动打包 + 手动 git tag + 手动上传 .exe 到 Release (不自动 publish).
+# 这里只是告诉客户端 "去这个 repo 的 Releases 找新版本".
+publish:
+  provider: github
+  owner: jiangzizhao
+  repo: monoi.cn
+  releaseType: release   # 只看 release, 不要 draft / prerelease
