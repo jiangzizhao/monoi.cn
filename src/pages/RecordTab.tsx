@@ -51,6 +51,9 @@ export default function RecordTab() {
   // (寻影 / iPhone Continuity / USB 外接 / Mac 内置 都在这个列表里)
   const [availableCameras, setAvailableCameras] = useState<MediaDeviceInfo[]>([])
   const [selectedCameraId, setSelectedCameraId] = useState<string>('')
+  // 麦克风也同理 (USB 铁三角 / OBSBOT / 内置). 默认非虚拟实体优先
+  const [availableMics, setAvailableMics] = useState<MediaDeviceInfo[]>([])
+  const [selectedMicId, setSelectedMicId] = useState<string>('')
 
   const screenVideoRef = useRef<HTMLVideoElement | null>(null)
   const cameraVideoRef = useRef<HTMLVideoElement | null>(null)
@@ -173,19 +176,47 @@ export default function RecordTab() {
       else setError(`获取屏幕失败: ${e.message || e}`)
     }
   }
-  /** 枚举 Chrome 看到的所有摄像头 — 调试 + 让用户切换源 (寻影 / iPhone / USB 都列). */
+  /** 枚举 Chrome 看到的所有摄像头 + 麦克风 — 调试 + 让用户切换源. */
   const refreshCameras = async (): Promise<MediaDeviceInfo[]> => {
     try {
       const devices = await navigator.mediaDevices.enumerateDevices()
       const cams = devices.filter(d => d.kind === 'videoinput')
+      const mics = devices.filter(d => d.kind === 'audioinput')
       setAvailableCameras(cams)
+      setAvailableMics(mics)
       return cams
     } catch { return [] }
   }
 
+  /** 切换麦克风源 — 不影响视频, 只换 cameraStream 里的音轨. */
+  const switchMic = async (deviceId: string) => {
+    if (!deviceId) return
+    setSelectedMicId(deviceId)
+    setError('')
+    try {
+      const newMicStream = await navigator.mediaDevices.getUserMedia({
+        video: false,
+        audio: { deviceId: { exact: deviceId }, echoCancellation: true, noiseSuppression: true },
+      })
+      // 把新音轨塞回 cameraStream (替换旧的)
+      if (cameraStream) {
+        cameraStream.getAudioTracks().forEach(t => { t.stop(); cameraStream.removeTrack(t) })
+        newMicStream.getAudioTracks().forEach(t => cameraStream.addTrack(t))
+        // 触发 React 更新 (MediaStream 是引用, 直接改 React 不重渲染 — 新建一个壳)
+        const fresh = new MediaStream([...cameraStream.getVideoTracks(), ...cameraStream.getAudioTracks()])
+        setCameraStream(fresh)
+      } else {
+        setCameraStream(newMicStream)
+      }
+      console.log('[record] mic switched to:', availableMics.find(m => m.deviceId === deviceId)?.label)
+    } catch (e: any) {
+      setError('切换麦克风失败: ' + (e?.message || e))
+    }
+  }
+
   /** 获取摄像头. deviceId 可选 (从下拉切换源用). 没传就自动优先真实摄像头.
    * 关键: 视频跟麦克风分开请求 — 虚拟摄像头 (OBS / 寻影 等) 多半不带音轨,
-   * 必须从系统默认 mic 单独取, 然后合并到同一 stream. */
+   * 必须从指定 / 系统默认 mic 单独取, 然后合并到同一 stream. */
   const requestCamera = async (deviceId?: string) => {
     setError('')
     if (deviceId && cameraStream) {
@@ -204,6 +235,15 @@ export default function RecordTab() {
       }
     }
 
+    // 选麦克风: 用户已选的 selectedMicId; 没选过就自动优先非虚拟实体麦
+    let pickedMicId = selectedMicId
+    if (!pickedMicId && availableMics.length > 1 && availableMics.some(m => m.label)) {
+      const realMic = availableMics.find(m =>
+        m.label && !/virtual|obs|loopback|stereo mix|default/i.test(m.label)
+      )
+      if (realMic) pickedMicId = realMic.deviceId
+    }
+
     try {
       // 1. 视频: 从指定摄像头拿 (不含 audio, 避免虚拟摄像头无音轨整个调用失败)
       let videoStream: MediaStream
@@ -217,10 +257,16 @@ export default function RecordTab() {
         }
       }
 
-      // 2. 麦克风: 单独从系统默认设备拿 (失败不致命, 没声音也能录无声视频)
+      // 2. 麦克风: 从指定设备拿 (没指定就系统默认). 失败不致命.
       let micStream: MediaStream | null = null
       try {
-        micStream = await tryGet({ video: false, audio: { echoCancellation: true, noiseSuppression: true } })
+        const audioConstraint: MediaTrackConstraints = pickedMicId
+          ? { deviceId: { exact: pickedMicId }, echoCancellation: true, noiseSuppression: true }
+          : { echoCancellation: true, noiseSuppression: true }
+        micStream = await tryGet({ video: false, audio: audioConstraint })
+        // 记录最终用的麦, 给 UI 下拉反显
+        const actualMicId = micStream.getAudioTracks()[0]?.getSettings().deviceId
+        if (actualMicId && actualMicId !== selectedMicId) setSelectedMicId(actualMicId)
       } catch (micErr: any) {
         console.warn('[record] mic request failed:', micErr)
         // 不抛错 — 用户摄像头有了, 麦克风不行就先无声, 后面提示
@@ -557,6 +603,20 @@ export default function RecordTab() {
                     className="flex-1 bg-[var(--bg-input)] border border-[var(--border)] rounded-lg px-2 py-1.5 text-xs text-[var(--text)] cursor-pointer">
                     {availableCameras.map(c => (
                       <option key={c.deviceId} value={c.deviceId}>{c.label || `摄像头 ${c.deviceId.slice(0, 6)}`}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* 麦克风源切换 — 用户有 USB 麦 + 内置 + 摄像头麦时显示, 单个不显示.
+                  cameraStream 存在 (说明已经走过麦克风权限) + 多个可选时才显示. */}
+              {cameraStream && availableMics.length > 1 && phase === 'previewing' && (
+                <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] p-3 flex items-center gap-3">
+                  <span className="text-xs text-[var(--text-3)] flex-shrink-0">麦克风源:</span>
+                  <select value={selectedMicId} onChange={e => switchMic(e.target.value)}
+                    className="flex-1 bg-[var(--bg-input)] border border-[var(--border)] rounded-lg px-2 py-1.5 text-xs text-[var(--text)] cursor-pointer">
+                    {availableMics.map(m => (
+                      <option key={m.deviceId} value={m.deviceId}>{m.label || `麦克风 ${m.deviceId.slice(0, 6)}`}</option>
                     ))}
                   </select>
                 </div>
