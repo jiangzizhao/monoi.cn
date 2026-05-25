@@ -69,19 +69,19 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
   // monoi 服务器字体库 (跟 CoverGeneratorForm 用同一份). 状态指示砍掉 (用户嫌吵), debug 全走 console.
   const [serverFonts, setServerFonts] = useState<{ label: string; value: string }[]>([])
 
-  // 拉服务器字体 → FontFace API 加载到浏览器 → 注入到字体下拉
+  // 拉服务器字体 → FontFace API 加载到浏览器 → 注入到字体下拉. 失败自动重试 3 次防网络抖
   useEffect(() => {
     const directBase = (import.meta as any).env?.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'
     const url = directBase + '/api/voice/cover-fonts'
-    console.log('[whiteboard] 拉字体库:', url)
-    fetch(url)
-      .then(r => {
+
+    const tryLoad = async (attempt = 1): Promise<void> => {
+      console.log(`[whiteboard] 拉字体库 (第 ${attempt} 次):`, url)
+      try {
+        const r = await fetch(url)
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
-        return r.json()
-      })
-      .then(async (d: any) => {
+        const d = await r.json()
         const list: { file: string; label: string }[] = d.fonts || []
-        console.log(`[whiteboard] 后端返 ${list.length} 个字体`, list.map(f => f.file))
+        console.log(`[whiteboard] 后端返 ${list.length} 个字体`)
         const loaded: { label: string; value: string }[] = []
         for (const f of list) {
           const family = `monoi-wb-${f.file.replace(/[^\w]/g, '')}`
@@ -95,9 +95,17 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
             console.warn('[whiteboard] font load fail', f.file, e)
           }
         }
+        console.log(`[whiteboard] 最终加载 ${loaded.length} 个字体`)
         setServerFonts(loaded)
-      })
-      .catch((e) => console.error('[whiteboard] 字体库拉取失败:', e))
+      } catch (e) {
+        console.error(`[whiteboard] 字体库拉取失败 (第 ${attempt} 次):`, e)
+        if (attempt < 3) {
+          await new Promise(r => setTimeout(r, attempt * 2000))  // 2s, 4s 间隔
+          return tryLoad(attempt + 1)
+        }
+      }
+    }
+    tryLoad()
   }, [])
 
   const FONT_FAMILIES = [...DEFAULT_FONT_FAMILIES, ...serverFonts]
@@ -342,8 +350,29 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
         }}>
         <Stage ref={stageRef} width={width} height={height}
           onMouseDown={(e) => {
+            // 点击空白处: 取消选中 (如果有选中) OR 在该位置直接创建文字 (如果无选中, 类似 PPT 文本工具)
             if (e.target === e.target.getStage() || e.target.attrs.id === 'bg-rect') {
-              setSelectedId(null)
+              if (selectedId) {
+                setSelectedId(null)
+              } else if (!editingId) {
+                // 在点击位置加空文字并立刻进编辑 — 实现"光标点哪写哪"
+                const pointerPos = e.target.getStage()?.getPointerPosition()
+                if (pointerPos) {
+                  const id = `t_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
+                  const fontSize = 72
+                  const defaultFont = serverFonts.length > 0 ? serverFonts[0].value : FONT_FAMILIES[0].value
+                  const newItem: WhiteboardItem = {
+                    id, type: 'text',
+                    x: pointerPos.x, y: pointerPos.y - fontSize / 2,
+                    text: '', fontSize, fill: '#000000',
+                    fontFamily: defaultFont,
+                    rotation: 0,
+                  }
+                  updateItems([...items, newItem])
+                  setSelectedId(id)
+                  setEditingId(id)
+                }
+              }
             }
           }}>
           <Layer>
