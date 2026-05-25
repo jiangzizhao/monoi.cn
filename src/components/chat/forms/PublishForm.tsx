@@ -94,6 +94,9 @@ export function PublishForm({ onClose }: Props) {
     setForms(f => ({ ...f, [platform]: { ...f[platform], [key]: value } }))
   }
 
+  // 检测是不是桌面端 (Electron preload 注入了 window.monoiDesktop)
+  const isDesktop = typeof (window as any).monoiDesktop !== 'undefined'
+
   const submit = async () => {
     if (!videoOssKey) {
       setError('没找到要发布的视频, 先合成或剪辑一段')
@@ -106,8 +109,39 @@ export function PublishForm({ onClose }: Props) {
     }
     setError('')
 
+    const tags = form.tags.split(/[,，]/).map(t => t.trim().replace(/^#/, '')).filter(Boolean)
+
+    // ============== 桌面端: 调本地 Edge (用户自己账号) ==============
+    if (isDesktop) {
+      if (!videoUrl) {
+        setError('视频还没拿到签名 URL, 等几秒重试')
+        return
+      }
+      const desktop = (window as any).monoiDesktop
+      // 模拟一个 jobId 让 UI 显示"发布中"状态 (跟现有 polling 兼容)
+      const fakeJobId = `desktop-${Date.now()}`
+      setJobId(fakeJobId)
+      setJobStatus({ status: 'publishing', detail: '启动本地 Edge, 用你自己账号发布...' })
+      try {
+        const res = await desktop.publish({
+          platform: activeTab,
+          video_url: videoUrl,
+          title: form.title.trim(),
+          description: form.description,
+          tags,
+        })
+        setJobStatus({
+          status: res.success ? 'completed' : 'failed',
+          detail: res.detail,
+        })
+      } catch (e: any) {
+        setJobStatus({ status: 'failed', detail: e?.message || '桌面发布失败' })
+      }
+      return
+    }
+
+    // ============== 网页 fallback: 走后端代发 (admin 账号) ==============
     try {
-      const tags = form.tags.split(/[,，]/).map(t => t.trim().replace(/^#/, '')).filter(Boolean)
       const res = await fetch(directBase + '/api/publish/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken() || ''}` },
@@ -131,9 +165,9 @@ export function PublishForm({ onClose }: Props) {
     }
   }
 
-  // 轮询 job 状态
+  // 轮询 job 状态. 桌面端 jobId 以 'desktop-' 开头, 同步阻塞拿结果, 不轮询
   useEffect(() => {
-    if (!jobId) return
+    if (!jobId || jobId.startsWith('desktop-')) return
     let cancelled = false
 
     const poll = async () => {
@@ -300,8 +334,23 @@ export function PublishForm({ onClose }: Props) {
 
             {/* 说明 */}
             <div className="text-[11px] text-[var(--text-3)] leading-relaxed bg-[var(--bg-input)] rounded-lg px-3 py-2.5">
-              点"发布到 {platformLabel}"之后, Windows 会弹一个 Edge 浏览器窗口, 自动上传视频 + 填好你这里的内容,
-              <span className="text-[var(--text-2)]"> 但不会自动点'发布'按钮</span>. 你在 Edge 里审一眼稿子 / 改改 → 自己点'发布' → 关窗口.
+              {isDesktop ? (
+                <>
+                  <span className="text-green-500 font-medium">✓ 桌面端: 用你自己的账号发</span>
+                  <br/>
+                  点"发布到 {platformLabel}" → monoi 会启动你电脑上的 Edge → 自动上传视频 + 填表 →
+                  <span className="text-[var(--text-2)]"> 停在'发布'按钮前</span> → 你审一眼 → 自己点'发布' → 关 Edge 窗口完成.
+                  <br/>
+                  <span className="opacity-70">首次需要在弹出的 Edge 里登录你的{platformLabel}账号 (登一次, 之后记住).</span>
+                </>
+              ) : (
+                <>
+                  点"发布到 {platformLabel}"之后, Windows 会弹一个 Edge 浏览器窗口, 自动上传视频 + 填好你这里的内容,
+                  <span className="text-[var(--text-2)]"> 但不会自动点'发布'按钮</span>. 你在 Edge 里审一眼稿子 / 改改 → 自己点'发布' → 关窗口.
+                  <br/>
+                  <span className="opacity-70">想用自己账号发? 装 monoi 桌面端 (设置 → 下载桌面版).</span>
+                </>
+              )}
             </div>
 
             {error && (

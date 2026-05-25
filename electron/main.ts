@@ -10,8 +10,9 @@
 // - ffmpeg 录屏 (替换浏览器 MediaRecorder)
 // - electron-updater + GitHub Releases 自动更新
 
-import { app, BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow, shell, ipcMain } from 'electron'
 import * as path from 'path'
+import { publish, detectEdgePath, type PublishReq } from './publish'
 
 // 单实例锁: 第二次启动会激活已有窗口, 而不是开第二个
 const gotLock = app.requestSingleInstanceLock()
@@ -48,9 +49,9 @@ function createWindow() {
   mainWin.loadURL(MONOI_URL)
 
   // 新窗口 / target=_blank 等弹外部浏览器, 不在 Electron 内开 (防卡死)
-  mainWin.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url)
-    return { action: 'deny' }
+  mainWin.webContents.setWindowOpenHandler((details: { url: string }) => {
+    shell.openExternal(details.url)
+    return { action: 'deny' as const }
   })
 
   // 开 DevTools 仅在显式要 debug 时 (env OPEN_DEVTOOLS=1). 默认不开, 即使 dev 也清爽.
@@ -68,6 +69,16 @@ app.on('second-instance', () => {
     if (mainWin.isMinimized()) mainWin.restore()
     mainWin.focus()
   }
+})
+
+// ============== IPC handlers (renderer → main) ==============
+
+ipcMain.handle('detect-edge', () => {
+  return { path: detectEdgePath() }
+})
+
+ipcMain.handle('publish', async (_event: unknown, req: PublishReq) => {
+  return await publish(req)
 })
 
 app.whenReady().then(createWindow)
