@@ -158,10 +158,10 @@ export default function RecordTab() {
     setError('')
     try {
       const s = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: true })
-      // 检测套娃: 用户选了 Chrome / monoi 自己 → 警告
+      // 检测套娃: 用户选了浏览器自己 → 警告
       const label = s.getVideoTracks()[0]?.label?.toLowerCase() || ''
-      if (label.includes('chrome') || label.includes('monoi') || label.includes('vercel')) {
-        setError('警告: 你选的是 Chrome / monoi 自己, 录出来会无限套娃 (画中画中画...). 建议点 "重选" 改选 PPT / Keynote / 其他应用窗口')
+      if (label.includes('chrome') || label.includes('monoi') || label.includes('vercel') || label.includes('edge') || label.includes('safari')) {
+        setError('警告: 你选的是当前浏览器, 录出来画面会无限套娃. 建议点"重选" 改选别的应用窗口 (PPT / 文档 / 笔记 等)')
       }
       setScreenStream(s)
       if (cameraStream || (!cameraStream && phase === 'setup')) setPhase('previewing')
@@ -243,44 +243,26 @@ export default function RecordTab() {
     }
   }
 
-  /** 分平台 + 分场景的错误提示 — 帮用户最快定位 */
+  /** 错误提示 — 通用文案, 不暴露内部技术 / 设备名 */
   const handleCameraError = (e: any, cams: MediaDeviceInfo[]) => {
     const name = e?.name || ''
-    const ua = typeof navigator !== 'undefined' ? navigator.userAgent : ''
-    const isMac = /Mac/i.test(ua)
-    const isWin = /Windows/i.test(ua)
-    const isChrome = /Chrome/i.test(ua) && !/Edg/i.test(ua)
-    const isEdge = /Edg/i.test(ua)
-    const isSafari = /Safari/i.test(ua) && !/Chrome/i.test(ua)
-    const browserName = isEdge ? 'Microsoft Edge' : isChrome ? 'Chrome' : isSafari ? 'Safari' : '浏览器'
-
     if (name === 'NotAllowedError') {
-      if (isMac) setError(`摄像头被拒. macOS 系统设置 → 隐私与安全 → 摄像头 → 勾选 ${browserName}, 然后完全退出 ${browserName} (Cmd+Q) 重启再试`)
-      else if (isWin) setError(`摄像头被拒. Windows 设置 → 隐私和安全性 → 摄像头 → 允许桌面应用访问 → 找到 ${browserName} 勾上`)
-      else setError(`${browserName} 拒绝了摄像头权限. 地址栏左侧锁图标里改成允许`)
+      setError('摄像头权限被拒. 浏览器地址栏左侧锁图标 → 摄像头 → 改成允许, 然后刷新页面')
       return
     }
-
     if (name === 'NotFoundError' || name === 'OverconstrainedError') {
-      // 关键判断: 系统里到底有没有摄像头硬件 (Chrome 能不能看到)
       if (cams.length === 0) {
-        // Chrome 完全看不到任何摄像头硬件
-        if (isMac) setError(`${browserName} 检测不到任何摄像头. 可能原因: 1) Mac mini 没内置摄像头, 需要插 USB 或开寻影/Continuity Camera; 2) 寻影 Mac 端没运行 (打开寻影大师 + iPhone 端寻影 app, 确认 Mac 端能看 iPhone 画面再试); 3) Continuity Camera 需要 iPhone XR+, 跟 Mac 同 Apple ID, 接力开关打开`)
-        else if (isWin) setError(`${browserName} 检测不到任何摄像头. 检查 USB 摄像头是否插好, 设备管理器里看摄像头是不是禁用了, 或重启浏览器`)
-        else setError(`${browserName} 检测不到任何摄像头. 检查硬件连接和系统权限`)
+        setError('没找到可用的摄像头. 检查摄像头是否连接, 或打开手机当摄像头的 app')
       } else {
-        // 有摄像头但请求失败 — 一般是 deviceId 失效或约束不匹配
-        setError(`${browserName} 检测到 ${cams.length} 个摄像头但都用不了, 试试下拉切换其他源`)
+        setError(`检测到 ${cams.length} 个摄像头但用不了, 下面选一个试试`)
       }
       return
     }
-
     if (name === 'NotReadableError') {
-      setError('摄像头被别的程序占用了 (Zoom / 腾讯会议 / OBS / FaceTime / 寻影 等). 关掉所有占用摄像头的 app 再试')
+      setError('摄像头被别的程序占用了. 关掉其他视频 / 录屏 app 再试')
       return
     }
-
-    setError(`获取摄像头失败 (${name}): ${e?.message || e}`)
+    setError(`获取摄像头失败: ${e?.message || e}`)
   }
 
   // 挂载时枚举一次 — 给用户看 Chrome 默认能看到啥 (没授权前 label 是空, 但能知道数量)
@@ -374,7 +356,7 @@ export default function RecordTab() {
         <div className="max-w-md text-center">
           <AlertCircle size={32} className="mx-auto text-amber-500 mb-3"/>
           <h2 className="text-lg font-semibold mb-2">你的浏览器不支持录屏</h2>
-          <p className="text-sm text-[var(--text-3)]">iOS Safari / 老版浏览器不行. 请用 PC / Android Chrome / Edge.</p>
+          <p className="text-sm text-[var(--text-3)]">当前浏览器不支持录屏. 请用电脑或安卓手机的常见浏览器试试.</p>
         </div>
       </div>
     )
@@ -421,7 +403,7 @@ export default function RecordTab() {
                       )
                     })}
                   </div>
-                  <p className="text-[10px] text-[var(--text-3)]">提示: 标"推荐"是真实摄像头, 一般直接能用. 虚拟摄像头要对应 app (OBS/寻影/WebcastMate) 在跑才有画面</p>
+                  <p className="text-[10px] text-[var(--text-3)]">提示: 标"推荐"是物理摄像头, 一般直接能用. 虚拟摄像头要对应软件在后台跑才有画面</p>
                 </div>
               ) : (
                 /* 没有备选源或没检测到摄像头 → 红 error 显示原始错误信息 */
@@ -432,7 +414,7 @@ export default function RecordTab() {
                   </div>
                   {availableCameras.length === 0 && (
                     <div className="text-[11px] text-red-300/80 border-t border-red-900/30 pt-2 mt-1">
-                      浏览器一个摄像头都检测不到. 检查 USB 是否插好 / 系统隐私是否允许浏览器
+                      没找到任何摄像头. 检查摄像头是否连接 + 系统是否允许访问
                     </div>
                   )}
                 </div>
@@ -516,9 +498,9 @@ export default function RecordTab() {
                   <ol className="list-decimal list-inside space-y-1 pl-1">
                     <li>录之前先打开你要讲的东西 (PPT / Keynote / Word / Notion / VS Code 等), <b>不能是浏览器</b></li>
                     <li>回 monoi 点底部 🖥️ 屏幕 → 浏览器弹"选择共享" 窗口</li>
-                    <li>选 <b>"应用窗口"</b> tab → 找你刚开的那个 app, <b>千万不要选 Chrome / Edge / monoi</b></li>
+                    <li>选 <b>"应用窗口"</b> 选项 → 找你刚开的那个应用, <b>不要选当前浏览器</b></li>
                   </ol>
-                  <p className="mt-2 text-[10px] opacity-80">为啥不能选浏览器: Chrome 里是 monoi, monoi canvas 又显示 Chrome → 无限套娃, 录出来啥也看不清.</p>
+                  <p className="mt-2 text-[10px] opacity-80">浏览器里就是 monoi 自己, 选它会无限套娃 (画中画中画...), 录出来啥也看不清.</p>
                 </div>
               )}
 
