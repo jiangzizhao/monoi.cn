@@ -72,7 +72,7 @@ export function PaymentDialog({ open, planId, planName, amountYuan, periodLabel,
 
   const handleConfirm = async () => {
     if (!agreed) { setError('请先同意会员服务协议'); return }
-    if (channel === 'alipay') { setError('支付宝商户审核中, 请先用微信支付'); return }
+    // 支付宝 channel 已接通 (2026-05-26), 这行拦截解除
     setCreating(true)
     setError('')
     try {

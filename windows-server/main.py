@@ -3894,6 +3894,40 @@ async def wxpay_notify(request: Request):
     return {'code': 'SUCCESS', 'message': 'OK'}
 
 
+@app.post("/api/pay/alipay/notify")
+async def alipay_notify(request: Request):
+    """支付宝支付成功回调. 验签 → 标记 paid → 开通订阅. 必须返纯文本 'success' (含小写), 否则支付宝持续重试.
+
+    支付宝 notify 是 application/x-www-form-urlencoded, 不是 JSON.
+    所有字段都在 form data 里 (trade_status / out_trade_no / trade_no / sign 等)."""
+    from fastapi.responses import PlainTextResponse
+    if not _ALIPAY_REAL:
+        # 没配 alipay 时收到 notify (异常路径), 返 success 让支付宝别重试
+        return PlainTextResponse('success')
+    try:
+        form = await request.form()
+        form_data = {k: v for k, v in form.items()}
+    except Exception as e:
+        print(f"[pay] alipay notify 解析 form 失败: {e}", flush=True)
+        return PlainTextResponse('fail')
+
+    try:
+        parsed = _alipay.verify_notify(form_data)
+    except Exception as e:
+        print(f"[pay] alipay notify 验签异常: {e}", flush=True)
+        return PlainTextResponse('fail')
+    if not parsed:
+        print("[pay] alipay notify 验签失败或非成功事件", flush=True)
+        return PlainTextResponse('fail')
+    out_trade_no = parsed.get('out_trade_no')
+    trade_no = parsed.get('trade_no')
+    if not out_trade_no:
+        return PlainTextResponse('fail')
+    _mark_order_paid_and_activate(out_trade_no, trade_no)
+    # 支付宝约定: HTTP 200 + body 'success' 字符串 (其它都会被认为失败, 8 小时内重试 7 次)
+    return PlainTextResponse('success')
+
+
 @app.get("/api/digital-human/video/{name}")
 def serve_digital_human_video(name: str):
     """提供数字人输出视频文件"""
