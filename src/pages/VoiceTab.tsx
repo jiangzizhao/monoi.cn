@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Mic, Square, Trash2, Languages, Type, AlertCircle, Copy, Check, Save, History } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { listMyAsrRecords, saveMyAsrRecord, deleteMyAsrRecord, type MyAsrRecord } from '../services/asr'
+import { Logo } from '../components/Logo'
 
 export default function VoiceTab() {
   const nav = useNavigate()
@@ -310,7 +311,7 @@ export default function VoiceTab() {
 
           {/* 头像 + 引导 (跟创作 tab WelcomeMessage 一致风格) */}
           <div className="flex items-start gap-3 msg-enter">
-            <img src="/logo.png" alt="monoi" className="w-8 h-8 rounded-xl object-contain flex-shrink-0 mt-0.5"/>
+            <Logo className="w-8 h-8 rounded-xl object-contain flex-shrink-0 mt-0.5"/>
             <div className="flex-1 min-w-0 flex flex-col gap-1.5 pt-1">
               <p className="text-[var(--text)] leading-relaxed">
                 你好! 闪说功能给你**对着麦克风说**, 实时转成文字写脚本. 录完一键进文案 / 配音 / 合成流程.

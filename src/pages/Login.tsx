@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { login, loginSms, sendSmsCode } from '../lib/auth'
 import { runCaptcha } from '../lib/captcha'
+import { Logo } from '../components/Logo'
 
 type Mode = 'email' | 'sms'
 
@@ -82,7 +83,7 @@ export default function Login() {
     <div className="min-h-screen bg-[var(--bg)] flex items-center justify-center px-4 py-8">
       <div className="w-full max-w-sm">
         <div className="flex flex-col items-center mb-8">
-          <img src="/logo.png" alt="monoi" className="w-12 h-12 mb-3 object-contain"/>
+          <Logo className="w-12 h-12 mb-3 object-contain"/>
           <h1 className="text-xl font-semibold text-[var(--text)]">登录 monoi</h1>
           <p className="text-sm text-[var(--text-3)] mt-1">继续你的创作</p>
         </div>

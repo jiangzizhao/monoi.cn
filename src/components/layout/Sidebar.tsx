@@ -5,6 +5,7 @@ import { useChatStore } from '../../store/chatStore'
 import { getUsername, logout, isLoggedIn } from '../../lib/auth'
 import { fetchMyProfile, type UserProfile } from '../../services/billing'
 import { fetchDesktopLatest, type DesktopLatest } from '../../services/desktop'
+import { Logo } from '../Logo'
 import { TopTabBar } from './TopTabBar'
 
 function timeAgo(ts: number) {
@@ -69,7 +70,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
       {/* Header (monoi logo + 当前 tab 的"新建"按钮) */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
         <div className="flex items-center gap-2">
-          <img src="/logo.png" alt="monoi" className="w-7 h-7 rounded-lg object-contain"/>
+          <Logo className="w-7 h-7 rounded-lg object-contain"/>
           <span className="text-sm font-semibold text-[var(--text)]">monoi</span>
         </div>
         {/* "+" 按钮: 只在创作 tab 显示新对话; 录屏/闪说还没历史功能, 先隐藏 */}

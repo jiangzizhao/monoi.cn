@@ -5,6 +5,7 @@
 // 跟 chat 里的 chip 选项走同一条路.
 
 import { WELCOME_OPTIONS } from '../../lib/welcomeOptions'
+import { Logo } from '../Logo'
 
 export function WelcomeMessage() {
   const pick = (id: string) => {
@@ -12,7 +13,7 @@ export function WelcomeMessage() {
   }
   return (
     <div className="flex items-start gap-3 msg-enter">
-      <img src="/logo.png" alt="monoi" className="w-8 h-8 rounded-xl object-contain flex-shrink-0 mt-0.5"/>
+      <Logo className="w-8 h-8 rounded-xl object-contain flex-shrink-0 mt-0.5"/>
       <div className="flex-1 min-w-0 flex flex-col gap-4 pt-1">
         <div className="flex flex-col gap-1.5">
           <p className="text-[var(--text)] leading-relaxed">

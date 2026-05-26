@@ -9,6 +9,7 @@ import { useNavigate } from 'react-router-dom'
 import { Camera, Monitor, Mic, Square, Download, AlertCircle, RotateCcw, Settings, Video, Scissors } from 'lucide-react'
 import type Konva from 'konva'
 import { WhiteboardEditor } from '../components/whiteboard/WhiteboardEditor'
+import { Logo } from '../components/Logo'
 import { useChatStore, makeAssistantMsg } from '../store/chatStore'
 // 转 mp4 走 OSS 临时上传 (5 分钟后让 lifecycle 清, 成本可忽略)
 // 录屏本身不再持久化到 OSS — 免费功能, 长期存储成本爆炸 (见 5/25 开发日志)
@@ -562,7 +563,7 @@ export default function RecordTab() {
           {/* === setup 阶段: 跟 WelcomeMessage 一模一样的布局: 头像 + 介绍 + 选项 grid === */}
           {phase === 'setup' && (
             <div className="flex items-start gap-3 msg-enter">
-              <img src="/logo.png" alt="monoi" className="w-8 h-8 rounded-xl object-contain flex-shrink-0 mt-0.5"/>
+              <Logo className="w-8 h-8 rounded-xl object-contain flex-shrink-0 mt-0.5"/>
               <div className="flex-1 min-w-0 flex flex-col gap-4 pt-1">
                 <div className="flex flex-col gap-1.5">
                   <p className="text-[var(--text)] leading-relaxed">

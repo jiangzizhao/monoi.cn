@@ -5,6 +5,7 @@ import {
   Send, ChevronDown, ChevronUp, Check, PencilLine,
 } from 'lucide-react'
 import { fetchDesktopLatest, type DesktopLatest } from '../services/desktop'
+import { Logo } from '../components/Logo'
 
 
 // =============== 内容数据 ===============
@@ -147,7 +148,7 @@ export default function Landing() {
       }`}>
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <img src="/logo.png" alt="monoi" className="w-8 h-8 rounded-xl object-contain"/>
+            <Logo className="w-8 h-8 rounded-xl object-contain"/>
             <span className="font-semibold">monoi</span>
           </div>
           <div className="hidden sm:flex items-center gap-6 text-sm text-[var(--text-2)]">
@@ -406,7 +407,7 @@ export default function Landing() {
         </div>
         <div className="border-t border-[var(--border-subtle)] pt-6 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <img src="/logo.png" alt="monoi" className="w-6 h-6 rounded-lg object-contain"/>
+            <Logo className="w-6 h-6 rounded-lg object-contain"/>
             <span className="text-xs text-[var(--text-3)]">© 2026 monoi · 专为中文创作者</span>
           </div>
           <div className="text-xs text-[var(--text-3)]">

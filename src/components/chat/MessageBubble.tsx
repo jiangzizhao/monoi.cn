@@ -1,4 +1,5 @@
 import { Loader2 } from 'lucide-react'
+import { Logo } from '../Logo'
 import { ChoiceButtons } from './ChoiceButtons'
 import { ScriptCard } from './ScriptCard'
 import { FootageGrid } from './FootageGrid'
@@ -182,7 +183,7 @@ export function MessageBubble({ message, ...props }: Props) {
 
   return (
     <div className="flex items-start gap-3 msg-enter">
-      <img src="/logo.png" alt="monoi" className="w-8 h-8 rounded-xl object-contain flex-shrink-0 mt-0.5"/>
+      <Logo className="w-8 h-8 rounded-xl object-contain flex-shrink-0 mt-0.5"/>
       <div className="flex-1 min-w-0 flex flex-col gap-3">
         {hasRenderableContent ? (
           message.blocks.map((block, i) => (

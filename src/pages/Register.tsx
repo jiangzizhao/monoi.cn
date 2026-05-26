@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { register, sendSmsCode } from '../lib/auth'
 import { runCaptcha } from '../lib/captcha'
+import { Logo } from '../components/Logo'
 
 export default function Register() {
   const nav = useNavigate()
@@ -92,7 +93,7 @@ export default function Register() {
     <div className="min-h-screen bg-[var(--bg)] flex items-center justify-center px-4 py-8">
       <div className="w-full max-w-sm">
         <div className="flex flex-col items-center mb-8">
-          <img src="/logo.png" alt="monoi" className="w-12 h-12 mb-3 object-contain"/>
+          <Logo className="w-12 h-12 mb-3 object-contain"/>
           <h1 className="text-xl font-semibold text-[var(--text)]">注册 monoi</h1>
           <p className="text-sm text-[var(--text-3)] mt-1">免费开始你的创作</p>
           <p className="text-xs text-amber-500 mt-2">新用户 7 天免费 · 每天送 60 积分</p>
