@@ -1,5 +1,5 @@
 """
-桌面版 .exe + latest.yml 一键上传到 OSS + 设公共读 + 输出 URL.
+桌面版 .exe + latest.yml + .blockmap 一键上传到 OSS + 设公共读 + 输出 URL.
 
 用法 (Windows):
     cd /d D:\\monoi-server
@@ -7,9 +7,12 @@
 
 会:
 1. 读 .env 拿 OSS 凭据
-2. 把 .exe 和同目录的 latest.yml 都上传到 oss://{bucket}/desktop_release/
+2. 把 .exe + latest.yml + .blockmap 三个文件一起上传到 oss://{bucket}/desktop_release/
 3. 设 public-read ACL (匿名能下)
 4. 打印公开 URL + desktop_release.json 模板
+
+.blockmap 给 electron-updater 做差量更新 (老用户升级只下 5MB 不是 80MB).
+没 blockmap 也不致命, 只是浪费流量.
 
 之后只需要把 JSON 内容写到 D:\\monoi-server\\desktop_release.json, 重启 Python.
 """
@@ -71,6 +74,15 @@ def main():
     if yml_path.exists():
         upload_one(yml_path, "desktop_release/latest.yml")
 
+    # blockmap 用于 electron-updater 差量下载 (新版只下改动的字节, 老用户升级 5MB 不是 80MB).
+    # 没传 blockmap, updater 会 fallback 下整个 .exe — 功能上能用但浪费流量.
+    blockmap_path = exe_path.parent / f"{exe_path.name}.blockmap"
+    if blockmap_path.exists():
+        upload_one(blockmap_path, f"desktop_release/{blockmap_path.name}")
+    else:
+        print(f"⚠️ blockmap 不存在: {blockmap_path}")
+        print("  没它老用户升级会下载整个 .exe (~80MB), 而不是差量 (~5MB). 不致命但费流量.")
+
     # 构造公开 URL
     endpoint = bucket.endpoint.replace("https://", "").replace("http://", "")
     public_base = f"https://{bucket.bucket_name}.{endpoint}"
@@ -87,7 +99,7 @@ def main():
         "exe_url": exe_url,
         "size_mb": round(exe_path.stat().st_size / 1024 / 1024, 1),
         "released_at": time.strftime("%Y-%m-%d"),
-        "notes": "首发版本: 用你自己账号发小红书/抖音 + 自动更新",
+        "notes": f"v{version} 更新内容 (改这里写发版说明给用户看)",
     }, ensure_ascii=False, indent=2))
     print("-" * 60)
     print("\n保存后 taskkill /F /IM python.exe + 双击 一键启动.bat, 完事.")
