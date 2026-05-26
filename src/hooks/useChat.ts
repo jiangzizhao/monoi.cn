@@ -648,7 +648,7 @@ export function useChat() {
         return
       }
 
-      // 数字人视频生成完成: 显示视频 + 引导下一步 (跟口播剪辑完成对齐)
+      // 数字人视频生成完成: 显示视频 + 引导下一步
       if (text.startsWith('__digital_human_video__')) {
         const p = JSON.parse(text.slice('__digital_human_video__'.length))
         store.updateLastAssistantBlocks(convId, [
@@ -673,9 +673,8 @@ export function useChat() {
             question: '下一步',
             options: [
               { id: '__form_cover__', label: '生成封面', description: '给视频做个发布封面图' },
+              { id: '__add_bgm_to_video__', label: '加 BGM', description: '叠背景音乐 (从 monoi BGM 库选)' },
               { id: '__form_publish__', label: '发布到平台', description: '直接发抖音 / 小红书' },
-              { id: '__auto_footage_from_video__', label: '匹配素材', description: '按句拼配套素材画面 (适合解说类)' },
-              { id: '保留这段视频, 暂不做下一步', label: '保留视频', description: '稍后再决定' },
             ],
           },
         ])
@@ -855,6 +854,15 @@ export function useChat() {
     const convId = store.activeId
     if (!convId) return
     store.chooseOption(convId, msgId, blockIdx, opt.id)
+
+    // 加 BGM 到视频 — 后端 ffmpeg 合流端点还没做, 先给用户友好提示
+    if (opt.id === '__add_bgm_to_video__') {
+      store.addMessage(convId, makeAssistantMsg([{
+        type: 'text',
+        content: '给视频后期加 BGM 还在开发中, 暂时可以:\n1. 重新发起"配音合成", 在那个流程里选 BGM (推荐)\n2. 或下载视频后用剪映 / 剪辑软件加',
+      }]))
+      return
+    }
 
     // Agentic AI: autoopen chip — 解析 form + prefill, dispatch 带 detail
     if (opt.id.startsWith('__autoopen__:')) {
