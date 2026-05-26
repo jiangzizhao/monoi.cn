@@ -15,6 +15,8 @@ export default function Login() {
   const [smsCode, setSmsCode] = useState('')
   const [error, setError] = useState('')
   const [info, setInfo] = useState('')
+  // ?kicked=1 — sessionGuard 检测到单设备被顶替后跳过来时带的标记
+  const kicked = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('kicked') === '1'
   const [loading, setLoading] = useState(false)
   const [sendingCode, setSendingCode] = useState(false)
   const [sendingElapsed, setSendingElapsed] = useState(0)   // sending 状态下的秒数, UI 显示用
@@ -87,6 +89,13 @@ export default function Login() {
           <h1 className="text-xl font-semibold text-[var(--text)]">登录 monoi</h1>
           <p className="text-sm text-[var(--text-3)] mt-1">继续你的创作</p>
         </div>
+
+        {/* 单设备被顶替 — 友好提示, 让用户知道为什么被踢回登录 */}
+        {kicked && (
+          <div className="mb-4 px-4 py-3 rounded-xl border border-amber-400/40 bg-amber-400/10 text-amber-200 text-sm text-center">
+            你的账号在其他设备登录了, 请重新登录
+          </div>
+        )}
 
         {/* 模式切换 tab */}
         <div className="flex border border-[var(--border)] rounded-xl p-0.5 mb-4 bg-[var(--bg-card)]">

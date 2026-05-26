@@ -179,11 +179,13 @@ def init_db():
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
-    # 给已有 users 表加 phone / avatar_oss_key / is_admin (老 schema 兼容, ALTER 失败说明列已存在)
+    # 给已有 users 表加 phone / avatar_oss_key / is_admin / latest_login_iat (老 schema 兼容, ALTER 失败说明列已存在)
+    # latest_login_iat: 严格单设备登录用 — JWT 带 iat, 跟这个比, 小于就是被新登录顶掉了
     for col_def in [
         "ALTER TABLE users ADD COLUMN phone TEXT",
         "ALTER TABLE users ADD COLUMN avatar_oss_key TEXT",
         "ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN latest_login_iat INTEGER DEFAULT 0",
     ]:
         try:
             conn.execute(col_def)
@@ -398,8 +400,26 @@ def get_db():
     return sqlite3.connect("monoi.db")
 
 def create_token(user_id: int, username: str):
+    """创建 JWT + 写 users.latest_login_iat. 严格单设备: 同一用户 iat 必须等于 db 里最新的, 不然 token 被顶掉.
+
+    iat (issued at) 用 int 秒级时间戳. 写 db 前 +1 防止同一秒内顶 token 失败.
+    """
+    now_ts = int(time.time())
+    # 把之前的 token 顶掉: latest_login_iat = now_ts. 之前所有 token 的 iat < now_ts → 失效
+    try:
+        conn = get_db()
+        conn.execute("UPDATE users SET latest_login_iat = ? WHERE id = ?", (now_ts, user_id))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"[create_token] 写 latest_login_iat 失败 (ignore): {e}", flush=True)
     expire = datetime.utcnow() + timedelta(days=ACCESS_TOKEN_EXPIRE_DAYS)
-    return jwt.encode({"sub": str(user_id), "username": username, "exp": expire}, SECRET_KEY, algorithm=ALGORITHM)
+    return jwt.encode({
+        "sub": str(user_id),
+        "username": username,
+        "iat": now_ts,
+        "exp": expire,
+    }, SECRET_KEY, algorithm=ALGORITHM)
 
 def row_to_dict(row: sqlite3.Row) -> dict:
     return dict(row)
@@ -688,16 +708,42 @@ def verify(payload: dict):
 
 
 def _user_id_from_request(request) -> int:
-    """从 Authorization Bearer 解 user_id (JWT). 失败抛 401."""
+    """从 Authorization Bearer 解 user_id (JWT). 失败抛 401.
+
+    严格单设备: token 里的 iat 必须 >= users.latest_login_iat, 否则说明这个 token
+    在被签发之后, 同账号又在别处登录过 (latest_login_iat 被刷新了), 老 token 作废.
+    前端通过 detail 字符串 'session_kicked' 来识别这种情况 → 弹 toast + 跳登录.
+    """
     auth = request.headers.get('authorization') or request.headers.get('Authorization') or ''
     if not auth.startswith('Bearer '):
         raise HTTPException(401, '未登录')
     token = auth[7:]
     try:
         data = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        return int(data['sub'])
+        uid = int(data['sub'])
     except Exception:
         raise HTTPException(401, '无效或过期的 token')
+
+    # 单设备校验: iat 必须不旧于 db.latest_login_iat
+    token_iat = int(data.get('iat') or 0)
+    try:
+        conn = get_db()
+        cur = conn.execute("SELECT latest_login_iat FROM users WHERE id = ?", (uid,))
+        row = cur.fetchone()
+        conn.close()
+        latest = int(row[0]) if (row and row[0] is not None) else 0
+    except Exception as _e:
+        # 查 db 失败别一刀切踢人, 放过
+        print(f"[auth] 读 latest_login_iat 失败 uid={uid} err={_e}", flush=True)
+        latest = 0
+
+    # latest=0 说明老用户/老 schema, 还没有任何后登录把这个 iat 写过 → 不强制
+    # token_iat=0 是兼容老 token (没带 iat 字段), 旧 token 一次都没用过 latest_login_iat 也是 0, 放过
+    if latest > 0 and token_iat < latest:
+        # detail 用稳定英文 code, 前端用 includes('session_kicked') 判定
+        raise HTTPException(401, 'session_kicked: 你的账号在其他设备登录了, 请重新登录')
+
+    return uid
 
 
 @app.get("/api/me")
