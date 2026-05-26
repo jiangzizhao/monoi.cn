@@ -684,16 +684,30 @@ export function useChat() {
       // 音频剪辑：直接展示清洗后的音频
       if (text.startsWith('__cleaned_audio__')) {
         const p = JSON.parse(text.slice('__cleaned_audio__'.length))
-        store.updateLastAssistantBlocks(convId, [{
-          type: 'audio_player',
-          data: {
-            audio_url: p.audio_url,
-            duration_seconds: p.duration,
-            voice_label: '剪辑后录音',
-            engine: 'narration',
-            text_preview: p.transcription?.slice(0, 80),
+        store.updateLastAssistantBlocks(convId, [
+          {
+            type: 'audio_player',
+            data: {
+              audio_url: p.audio_url,
+              duration_seconds: p.duration,
+              voice_label: '剪辑后录音',
+              engine: 'narration',
+              text_preview: p.transcription?.slice(0, 80),
+            },
           },
-        }])
+          {
+            type: 'text',
+            content: '录音剪辑完成. 想继续做啥?',
+          },
+          {
+            type: 'choices',
+            question: '下一步',
+            options: [
+              { id: '__form_footage__', label: '匹配素材', description: '按文案找配套画面, 拼成最终视频' },
+              { id: '__digital_human__', label: '做数字人视频', description: '用这段音频驱动数字人讲' },
+            ],
+          },
+        ])
         return
       }
 
@@ -764,18 +778,32 @@ export function useChat() {
           return
         }
 
-        store.updateLastAssistantBlocks(convId, [{
-          type: 'audio_player',
-          data: {
-            audio_url: finalAudioUrl,
-            duration_seconds: finalDuration,
-            preset_key: payload.voice_id,
-            voice_label: payload.voice_label,
-            speed: payload.speed,
-            engine: data.engine,
-            text_preview: script.slice(0, 80),
+        store.updateLastAssistantBlocks(convId, [
+          {
+            type: 'audio_player',
+            data: {
+              audio_url: finalAudioUrl,
+              duration_seconds: finalDuration,
+              preset_key: payload.voice_id,
+              voice_label: payload.voice_label,
+              speed: payload.speed,
+              engine: data.engine,
+              text_preview: script.slice(0, 80),
+            },
           },
-        }])
+          {
+            type: 'text',
+            content: '配音合成完成. 想继续做啥?',
+          },
+          {
+            type: 'choices',
+            question: '下一步',
+            options: [
+              { id: '__form_footage__', label: '匹配素材', description: '按文案找配套画面, 拼成最终视频' },
+              { id: '__digital_human__', label: '做数字人视频', description: '用这段音频驱动数字人讲' },
+            ],
+          },
+        ])
         return
       }
 
