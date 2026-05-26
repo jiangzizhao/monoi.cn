@@ -111,7 +111,7 @@ export function PublishForm({ onClose }: Props) {
 
     const tags = form.tags.split(/[,，]/).map(t => t.trim().replace(/^#/, '')).filter(Boolean)
 
-    // ============== 桌面端: 调本地 Edge (用户自己账号) ==============
+    // ============== 桌面端: 调本地浏览器 (用户自己账号) ==============
     if (isDesktop) {
       if (!videoUrl) {
         setError('视频还没拿到签名 URL, 等几秒重试')
@@ -121,7 +121,7 @@ export function PublishForm({ onClose }: Props) {
       // 模拟一个 jobId 让 UI 显示"发布中"状态 (跟现有 polling 兼容)
       const fakeJobId = `desktop-${Date.now()}`
       setJobId(fakeJobId)
-      setJobStatus({ status: 'publishing', detail: '启动本地 Edge, 用你自己账号发布...' })
+      setJobStatus({ status: 'publishing', detail: '启动本地浏览器, 用你自己账号发布...' })
       try {
         const res = await desktop.publish({
           platform: activeTab,
@@ -251,9 +251,9 @@ export function PublishForm({ onClose }: Props) {
 
             {isPublishing && (
               <div className="text-xs text-[var(--text-3)] leading-relaxed bg-[var(--bg-input)] rounded-lg px-3 py-2.5">
-                💡 <span className="text-[var(--text-2)]">Windows 上会弹出一个 Edge 浏览器窗口</span> 自动登录并上传视频. 表单
-                填完后会停在'<span className="text-[var(--text-2)]">发布</span>'按钮前, 你在 Edge 里审一遍稿子 →
-                觉得 OK 就<span className="text-[var(--text-2)]">点'发布'按钮</span> → 关 Edge 窗口. 这里会显示完成.
+                💡 <span className="text-[var(--text-2)]">Windows 上会弹出一个浏览器窗口</span> 自动登录并上传视频. 表单
+                填完后会停在'<span className="text-[var(--text-2)]">发布</span>'按钮前, 你在浏览器里审一遍稿子 →
+                觉得 OK 就<span className="text-[var(--text-2)]">点'发布'按钮</span> → 关上浏览器窗口. 这里会显示完成.
                 <br/>
                 <a href={creatorUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[var(--text)] hover:opacity-80 mt-2">
                   <ExternalLink size={11}/> 直接打开 {platformLabel} 创作者中心 (备用)
@@ -338,15 +338,15 @@ export function PublishForm({ onClose }: Props) {
                 <>
                   <span className="text-green-500 font-medium">✓ 桌面端: 用你自己的账号发</span>
                   <br/>
-                  点"发布到 {platformLabel}" → monoi 会启动你电脑上的 Edge → 自动上传视频 + 填表 →
-                  <span className="text-[var(--text-2)]"> 停在'发布'按钮前</span> → 你审一眼 → 自己点'发布' → 关 Edge 窗口完成.
+                  点"发布到 {platformLabel}" → monoi 会启动一个浏览器窗口 → 自动上传视频 + 填表 →
+                  <span className="text-[var(--text-2)]"> 停在'发布'按钮前</span> → 你审一眼 → 自己点'发布' → 关上浏览器窗口完成.
                   <br/>
-                  <span className="opacity-70">首次需要在弹出的 Edge 里登录你的{platformLabel}账号 (登一次, 之后记住).</span>
+                  <span className="opacity-70">首次需要在弹出的浏览器里登录你的{platformLabel}账号 (登一次, 之后记住).</span>
                 </>
               ) : (
                 <>
-                  点"发布到 {platformLabel}"之后, Windows 会弹一个 Edge 浏览器窗口, 自动上传视频 + 填好你这里的内容,
-                  <span className="text-[var(--text-2)]"> 但不会自动点'发布'按钮</span>. 你在 Edge 里审一眼稿子 / 改改 → 自己点'发布' → 关窗口.
+                  点"发布到 {platformLabel}"之后, Windows 会弹一个浏览器窗口, 自动上传视频 + 填好你这里的内容,
+                  <span className="text-[var(--text-2)]"> 但不会自动点'发布'按钮</span>. 你在浏览器里审一眼稿子 / 改改 → 自己点'发布' → 关窗口.
                   <br/>
                   <span className="opacity-70">想用自己账号发? 装 monoi 桌面端 (设置 → 下载桌面版).</span>
                 </>
