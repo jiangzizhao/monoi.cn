@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Stage, Layer, Rect, Text as KonvaText, Image as KonvaImage, Line as KonvaLine, Group, Transformer } from 'react-konva'
 import type Konva from 'konva'
-import { Type, ImagePlus, Trash2, Undo2, Redo2, Copy, LayoutTemplate, X, Loader2, Network, Pencil, ChevronDown, Eraser, Plus } from 'lucide-react'
+import { Type, ImagePlus, Trash2, Undo2, Redo2, Copy, LayoutTemplate, X, Loader2, Network, Pencil, ChevronDown, Eraser, Plus, Download } from 'lucide-react'
 
 export type WhiteboardItem =
   | {
@@ -313,6 +313,32 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
     if (!confirm('清空当前页所有内容? 可用撤销恢复.')) return
     updateItems([])
     setSelectedId(null); setEditingId(null)
+  }
+
+  // 导出当前页为 PNG 图片 (stage.toDataURL → 触发下载)
+  // 思维导图 + 文字 + 图片 + 画笔 + 背景 全部合成一张图, 用户能存档 / 发朋友圈
+  const exportPng = () => {
+    const stage = stageRef.current
+    if (!stage) return
+    // 暂时清选中, 避免 Transformer 蓝框被一起导出
+    const wasSelected = selectedId
+    setSelectedId(null)
+    // 等下一帧 transformer 清掉再导出
+    requestAnimationFrame(() => {
+      try {
+        const dataUrl = stage.toDataURL({ pixelRatio: 2, mimeType: 'image/png' })
+        const a = document.createElement('a')
+        a.href = dataUrl
+        a.download = `monoi-whiteboard-${currentPage + 1}-${Date.now()}.png`
+        document.body.appendChild(a); a.click(); document.body.removeChild(a)
+      } catch (e) {
+        console.error('[whiteboard] 导出失败:', e)
+        alert('导出失败. 可能背景图跨域 (CORS) 没设 anonymous, 或浏览器拦了 toDataURL.')
+      } finally {
+        // 恢复选中状态
+        if (wasSelected) setSelectedId(wasSelected)
+      }
+    })
   }
 
   // 添加文字 — 在白板某位置加空文字 + 进入编辑模式 (光标蹦, 直接打字).
@@ -643,6 +669,10 @@ export function WhiteboardEditor({ width, height, onStageReady, cameraStream, pi
         <button onClick={clearPage} title="清屏 (清空当前页)"
           className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs text-orange-500 hover:bg-orange-950/20 cursor-pointer">
           <Eraser size={13}/> 清屏
+        </button>
+        <button onClick={exportPng} title="把当前页导出成 PNG 图片"
+          className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs text-[var(--text-2)] hover:bg-[var(--bg-hover)] cursor-pointer">
+          <Download size={13}/> 导出
         </button>
 
         {/* 字体加载状态 — 之前有 N 个 OK / 失败提示, 用户嫌吵, 砍掉.
