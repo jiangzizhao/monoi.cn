@@ -6,7 +6,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Camera, Monitor, Mic, Square, Download, AlertCircle, RotateCcw, Settings, Video, Scissors } from 'lucide-react'
+import { Camera, Monitor, Mic, Square, Download, AlertCircle, RotateCcw, Settings, Video, Scissors, Music, X as XIcon } from 'lucide-react'
 import type Konva from 'konva'
 import { WhiteboardEditor } from '../components/whiteboard/WhiteboardEditor'
 import { Logo } from '../components/Logo'
@@ -15,6 +15,7 @@ import { useChatStore, makeAssistantMsg } from '../store/chatStore'
 // 录屏本身不再持久化到 OSS — 免费功能, 长期存储成本爆炸 (见 5/25 开发日志)
 // 用户必须当场决策: 进剪辑 / 下载 / 重录, 不能刷新走开.
 import { uploadBlobToOss, transcodeRecordingToMp4 } from '../services/recordings'
+import { listBgmLibrary, type BgmTrack } from '../services/audio'
 
 type Phase = 'setup' | 'previewing' | 'recording' | 'done'
 type PipShape = 'circle' | 'rounded' | 'square'
@@ -67,6 +68,16 @@ export default function RecordTab() {
   // 转 mp4 时的上传/转码状态 (录屏本身不上 OSS)
   const [uploadPct, setUploadPct] = useState(0)
   const [busy, setBusy] = useState<'idle' | 'uploading' | 'transcoding'>('idle')
+  // BGM: 用户在录制时混入背景音乐 (用 monoi 现有 BGM 库)
+  const [bgmList, setBgmList] = useState<BgmTrack[]>([])
+  const [selectedBgm, setSelectedBgm] = useState<BgmTrack | null>(null)
+  const [bgmVolume, setBgmVolume] = useState(0.3)            // 0-1, 默认 30% (mic 60-70% 占主导)
+  const [showBgmPanel, setShowBgmPanel] = useState(false)
+  // BGM 播放 + 合流到录制流的 ref
+  const bgmAudioElRef = useRef<HTMLAudioElement | null>(null)   // preview 阶段的预览播放
+  const bgmContextRef = useRef<AudioContext | null>(null)
+  const bgmSourceNodeRef = useRef<AudioNode | null>(null)        // BGM source (用于停止)
+  const bgmGainNodeRef = useRef<GainNode | null>(null)            // BGM 音量调节
 
   const screenVideoRef = useRef<HTMLVideoElement | null>(null)
   const cameraVideoRef = useRef<HTMLVideoElement | null>(null)
@@ -343,6 +354,31 @@ export default function RecordTab() {
     navigator.mediaDevices?.addEventListener?.('devicechange', refreshCameras)
     return () => navigator.mediaDevices?.removeEventListener?.('devicechange', refreshCameras)
   }, [])
+
+  // 拉 BGM 库 (一次, 用户展开 BGM 面板时才需要)
+  useEffect(() => {
+    if (!showBgmPanel || bgmList.length > 0) return
+    listBgmLibrary().then(d => setBgmList(d.bgms || [])).catch(e => console.warn('[record] BGM 拉取失败', e))
+  }, [showBgmPanel, bgmList.length])
+
+  // BGM 预览 — 用户选中后用 <audio> 元素自动播 (preview 阶段)
+  useEffect(() => {
+    if (!selectedBgm || phase !== 'previewing') {
+      bgmAudioElRef.current?.pause()
+      return
+    }
+    const audio = bgmAudioElRef.current
+    if (!audio) return
+    audio.src = selectedBgm.preview_url
+    audio.volume = bgmVolume
+    audio.loop = true
+    audio.play().catch(e => console.warn('[record] BGM 预览失败 (用户没交互过页面?)', e))
+  }, [selectedBgm, phase, bgmVolume])
+  // 实时音量调整
+  useEffect(() => {
+    if (bgmAudioElRef.current) bgmAudioElRef.current.volume = bgmVolume
+    if (bgmGainNodeRef.current) bgmGainNodeRef.current.gain.value = bgmVolume
+  }, [bgmVolume])
   const onPresetPick = async (preset: string) => {
     setError('')
     if (preset === 'screen_camera') {
@@ -363,12 +399,56 @@ export default function RecordTab() {
       await requestCamera()
     }
   }
-  const startRecording = () => {
+  const startRecording = async () => {
     setError('')
     if (!canvasRef.current) return
     const stream = canvasRef.current.captureStream(30)
-    if (cameraStream) cameraStream.getAudioTracks().forEach(t => stream.addTrack(t))
-    if (screenStream) screenStream.getAudioTracks().forEach(t => stream.addTrack(t))
+
+    // 音频路由:
+    // - 没选 BGM: mic / screen audio 直接加到 stream (老逻辑)
+    // - 选了 BGM: Web Audio 合流 (mic + screen + BGM) → MediaStreamAudioDestinationNode 出一个混合音轨, 加到 stream
+    if (!selectedBgm) {
+      if (cameraStream) cameraStream.getAudioTracks().forEach(t => stream.addTrack(t))
+      if (screenStream) screenStream.getAudioTracks().forEach(t => stream.addTrack(t))
+    } else {
+      try {
+        // 停掉 preview 阶段的 <audio>, 改用 Web Audio (不然双倍音量)
+        bgmAudioElRef.current?.pause()
+        const ctx = new AudioContext()
+        bgmContextRef.current = ctx
+        const dest = ctx.createMediaStreamDestination()
+        // mic 路: cameraStream / screenStream 的 audio 进 ctx → dest
+        if (cameraStream && cameraStream.getAudioTracks().length > 0) {
+          const micOnly = new MediaStream(cameraStream.getAudioTracks())
+          ctx.createMediaStreamSource(micOnly).connect(dest)
+        }
+        if (screenStream && screenStream.getAudioTracks().length > 0) {
+          const sysOnly = new MediaStream(screenStream.getAudioTracks())
+          ctx.createMediaStreamSource(sysOnly).connect(dest)
+        }
+        // BGM 路: fetch → decode → BufferSource → Gain → dest
+        const r = await fetch(selectedBgm.preview_url)
+        const arr = await r.arrayBuffer()
+        const buf = await ctx.decodeAudioData(arr)
+        const bgmSrc = ctx.createBufferSource()
+        bgmSrc.buffer = buf
+        bgmSrc.loop = true            // 录制可能比 BGM 长, 循环
+        const gain = ctx.createGain()
+        gain.gain.value = bgmVolume
+        bgmSrc.connect(gain).connect(dest)
+        // 同时也连到扬声器, 让用户能听到自己录的 (跟 preview 时一样)
+        gain.connect(ctx.destination)
+        bgmSrc.start()
+        bgmSourceNodeRef.current = bgmSrc
+        bgmGainNodeRef.current = gain
+        // 把合流的音轨加到录制 stream
+        dest.stream.getAudioTracks().forEach(t => stream.addTrack(t))
+      } catch (e: any) {
+        console.warn('[record] BGM 合流失败, 退回纯 mic:', e)
+        if (cameraStream) cameraStream.getAudioTracks().forEach(t => stream.addTrack(t))
+        if (screenStream) screenStream.getAudioTracks().forEach(t => stream.addTrack(t))
+      }
+    }
 
     // 编码优先级: 一定要选 *带音频 codec* 的 mime, 不然 MediaRecorder 会静默丢音频!
     // 之前的 bug: 'video/mp4;codecs=avc1' (只声明视频 codec) 让 mp4 输出没声音.
@@ -402,6 +482,12 @@ export default function RecordTab() {
   }
   const stopRecording = () => {
     if (recorderRef.current && recorderRef.current.state !== 'inactive') recorderRef.current.stop()
+    // 停 BGM Web Audio (合流时建的 context)
+    try { (bgmSourceNodeRef.current as AudioBufferSourceNode | null)?.stop() } catch { /* ignore */ }
+    try { bgmContextRef.current?.close() } catch { /* ignore */ }
+    bgmSourceNodeRef.current = null
+    bgmGainNodeRef.current = null
+    bgmContextRef.current = null
   }
   const resetAll = () => {
     screenStream?.getTracks().forEach(t => t.stop())
@@ -410,6 +496,14 @@ export default function RecordTab() {
     if (recordedUrl) URL.revokeObjectURL(recordedUrl)
     setRecordedBlob(null); setRecordedUrl('')
     setPhase('setup')
+    // 清 BGM 状态
+    setSelectedBgm(null)
+    bgmAudioElRef.current?.pause()
+    try { (bgmSourceNodeRef.current as AudioBufferSourceNode | null)?.stop() } catch { /* ignore */ }
+    try { bgmContextRef.current?.close() } catch { /* ignore */ }
+    bgmSourceNodeRef.current = null
+    bgmGainNodeRef.current = null
+    bgmContextRef.current = null
   }
   const downloadVideo = () => {
     if (!recordedBlob) return
@@ -676,6 +770,63 @@ export default function RecordTab() {
                 </div>
               )}
 
+              {/* BGM 选择面板 — 按 category 分组, 用户选一个 + 调音量 */}
+              {showBgmPanel && phase === 'previewing' && (
+                <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] p-4 flex flex-col gap-3 msg-enter">
+                  <div className="flex items-center justify-between">
+                    <div className="text-xs font-medium text-[var(--text-2)] flex items-center gap-1.5">
+                      <Music size={12}/> 背景音乐 (混入录制)
+                    </div>
+                    {selectedBgm && (
+                      <button onClick={() => setSelectedBgm(null)}
+                        className="text-[10px] text-[var(--text-3)] hover:text-red-400 flex items-center gap-0.5 cursor-pointer">
+                        <XIcon size={11}/> 取消选择
+                      </button>
+                    )}
+                  </div>
+                  {/* 音量条 (仅选中 BGM 时显示) */}
+                  {selectedBgm && (
+                    <div className="flex items-center gap-3 text-xs">
+                      <span className="text-[var(--text-3)] flex-shrink-0">BGM 音量:</span>
+                      <input type="range" min={0} max={1} step={0.05} value={bgmVolume}
+                        onChange={e => setBgmVolume(Number(e.target.value))}
+                        className="flex-1"/>
+                      <span className="text-[var(--text-2)] w-8 text-right">{Math.round(bgmVolume * 100)}%</span>
+                    </div>
+                  )}
+                  {/* BGM 列表 */}
+                  {bgmList.length === 0 ? (
+                    <div className="text-xs text-[var(--text-3)] text-center py-3">
+                      {bgmList === null ? '加载中...' : '还没有 BGM. (管理员可在后台 BGM 库上传)'}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-64 overflow-y-auto">
+                      {bgmList.map(bgm => {
+                        const isSelected = selectedBgm?.id === bgm.id
+                        return (
+                          <button key={bgm.id} onClick={() => setSelectedBgm(bgm)}
+                            className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs cursor-pointer transition-colors text-left ${
+                              isSelected
+                                ? 'bg-[var(--text)] text-[var(--bg)]'
+                                : 'bg-[var(--bg-hover)] text-[var(--text-2)] hover:bg-[var(--bg-input)]'
+                            }`}>
+                            <Music size={12} className="flex-shrink-0"/>
+                            <span className="flex-1 truncate">{bgm.name}</span>
+                            <span className="text-[10px] opacity-60 flex-shrink-0">{bgm.category}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                  <div className="text-[10px] text-[var(--text-3)] leading-relaxed">
+                    💡 BGM 会混入录制的音轨. 录制时建议戴耳机 (避免扬声器播 BGM 又被麦克风录进去, 造成回音).
+                  </div>
+                </div>
+              )}
+
+              {/* 预览阶段的 BGM 播放器 (隐藏, 仅控制) */}
+              <audio ref={bgmAudioElRef} className="hidden"/>
+
               {showPipSettings && (
                 <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] p-4 flex flex-col gap-3 msg-enter">
                   <div className="text-xs font-medium text-[var(--text-2)]">输出尺寸</div>
@@ -815,6 +966,14 @@ export default function RecordTab() {
             <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs ${cameraStream && cameraStream.getAudioTracks().length > 0 ? 'text-green-500' : 'text-[var(--text-3)]'}`} title="麦克风从系统默认设备取, 跟摄像头分开">
               <Mic size={14}/> 麦克风{cameraStream && cameraStream.getAudioTracks().length === 0 ? ' (无)' : ''}
             </div>
+            {/* BGM 按钮 — preview 阶段可开关, 录制中不让改避免合流出错 */}
+            {phase === 'previewing' && (
+              <button onClick={() => setShowBgmPanel(s => !s)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs transition-colors cursor-pointer ${selectedBgm ? 'text-green-500' : showBgmPanel ? 'text-[var(--text)] bg-[var(--bg-hover)]' : 'text-[var(--text-3)] hover:text-[var(--text-2)] hover:bg-[var(--bg-hover)]'}`}
+                title="加背景音乐 (从 monoi BGM 库选)">
+                <Music size={14}/> BGM{selectedBgm ? ` · ${selectedBgm.name}` : ''}
+              </button>
+            )}
             {(phase === 'previewing' || phase === 'recording') && (
               <button onClick={() => setShowPipSettings(s => !s)}
                 className={`ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs transition-colors cursor-pointer ${showPipSettings ? 'text-[var(--text)] bg-[var(--bg-hover)]' : 'text-[var(--text-3)] hover:text-[var(--text-2)] hover:bg-[var(--bg-hover)]'}`}
