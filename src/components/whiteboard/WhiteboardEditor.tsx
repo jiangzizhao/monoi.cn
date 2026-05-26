@@ -1155,6 +1155,7 @@ function BackgroundPicker({ onClose, onPick, onClear }: {
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
   const [loadingId, setLoadingId] = useState<number | null>(null)
+  const [activeCat, setActiveCat] = useState<string>('all')   // 'all' = 不筛
 
   useEffect(() => {
     const directBase = (import.meta as any).env?.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'
@@ -1164,6 +1165,16 @@ function BackgroundPicker({ onClose, onPick, onClear }: {
       .catch(e => setErr(e.message || '加载失败'))
       .finally(() => setLoading(false))
   }, [])
+
+  // 从 list 提取所有不重复的 category (admin 上传时填的: 网格/纸张/黑板等)
+  // 没有 category 的归到"未分类". 至少有 2 个不同分类时才显示筛选条 (1 个就没必要筛)
+  const categories = (() => {
+    const set = new Set<string>()
+    list.forEach(bg => { if (bg.category) set.add(bg.category) })
+    return Array.from(set).sort()
+  })()
+  const showFilter = categories.length >= 2
+  const filteredList = activeCat === 'all' ? list : list.filter(bg => bg.category === activeCat)
 
   const handlePick = (bg: ServerBackground) => {
     setLoadingId(bg.id)
@@ -1182,21 +1193,51 @@ function BackgroundPicker({ onClose, onPick, onClear }: {
           <button onClick={onClose} className="text-[var(--text-3)] hover:text-[var(--text)] cursor-pointer"><X size={18}/></button>
         </div>
 
-        <div className="flex-1 overflow-auto p-4">
+        <div className="flex-1 overflow-auto p-4 flex flex-col gap-3">
           {loading && (
             <div className="text-sm text-[var(--text-3)] py-8 flex items-center justify-center gap-2">
               <Loader2 size={14} className="animate-spin"/> 加载中...
             </div>
           )}
-          {err && <div className="text-xs text-red-400 bg-red-950/20 border border-red-900/30 rounded-lg px-3 py-2 mb-3">{err}</div>}
+          {err && <div className="text-xs text-red-400 bg-red-950/20 border border-red-900/30 rounded-lg px-3 py-2">{err}</div>}
+
+          {/* 分类筛选条 — 有 2+ 分类才显示, 1 类没必要筛 */}
+          {!loading && showFilter && (
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <button onClick={() => setActiveCat('all')}
+                className={`px-3 py-1 rounded-full text-xs cursor-pointer transition-colors ${
+                  activeCat === 'all'
+                    ? 'bg-[var(--text)] text-[var(--bg)]'
+                    : 'bg-[var(--bg-hover)] text-[var(--text-2)] hover:bg-[var(--bg-card)]'
+                }`}>
+                全部 ({list.length})
+              </button>
+              {categories.map(cat => {
+                const count = list.filter(bg => bg.category === cat).length
+                return (
+                  <button key={cat} onClick={() => setActiveCat(cat)}
+                    className={`px-3 py-1 rounded-full text-xs cursor-pointer transition-colors ${
+                      activeCat === cat
+                        ? 'bg-[var(--text)] text-[var(--bg)]'
+                        : 'bg-[var(--bg-hover)] text-[var(--text-2)] hover:bg-[var(--bg-card)]'
+                    }`}>
+                    {cat} ({count})
+                  </button>
+                )
+              })}
+            </div>
+          )}
+
           {!loading && (
             <div className="grid grid-cols-3 md:grid-cols-4 gap-3">
-              {/* 纯白选项 */}
-              <button onClick={onClear}
-                className="aspect-[9/16] rounded-lg border border-[var(--border)] bg-white relative overflow-hidden hover:border-[var(--text)] cursor-pointer flex items-center justify-center">
-                <span className="text-xs text-[var(--text-2)]">纯白</span>
-              </button>
-              {list.map(bg => (
+              {/* 纯白选项 — "全部"分类下显示, 其他分类隐藏 (避免每个分类下都有纯白干扰) */}
+              {activeCat === 'all' && (
+                <button onClick={onClear}
+                  className="aspect-[9/16] rounded-lg border border-[var(--border)] bg-white relative overflow-hidden hover:border-[var(--text)] cursor-pointer flex items-center justify-center">
+                  <span className="text-xs text-[var(--text-2)]">纯白</span>
+                </button>
+              )}
+              {filteredList.map(bg => (
                 <button key={bg.id} onClick={() => handlePick(bg)} disabled={loadingId === bg.id}
                   className="aspect-[9/16] rounded-lg border border-[var(--border)] bg-white relative overflow-hidden hover:border-[var(--text)] cursor-pointer">
                   <img src={bg.url} alt={bg.name} className="absolute inset-0 w-full h-full object-cover" crossOrigin="anonymous"/>
@@ -1215,6 +1256,11 @@ function BackgroundPicker({ onClose, onPick, onClear }: {
               {list.length === 0 && (
                 <div className="col-span-full text-center text-xs text-[var(--text-3)] py-6">
                   还没有背景图. (管理员可在后台上传)
+                </div>
+              )}
+              {list.length > 0 && filteredList.length === 0 && (
+                <div className="col-span-full text-center text-xs text-[var(--text-3)] py-6">
+                  "{activeCat}" 分类下还没有背景图.
                 </div>
               )}
             </div>
