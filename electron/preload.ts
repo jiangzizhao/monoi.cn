@@ -21,6 +21,11 @@ interface PublishResult {
   detail: string
 }
 
+interface UpdateReadyPayload {
+  version: string
+  releaseDate: string | null
+}
+
 const api = {
   /** 标志位: 网页前端检测此值判断是否在桌面端运行 */
   isDesktop: true,
@@ -37,9 +42,21 @@ const api = {
   publish: async (req: PublishReq): Promise<PublishResult> =>
     ipcRenderer.invoke('publish', req),
 
-  // TODO Phase 4-3 加:
-  // recordStart / recordStop: ffmpeg 抓屏
-  // checkUpdate / installUpdate: electron-updater
+  // ============ 自动更新 ============
+  // 主进程 update-downloaded 触发后, 通过 send 'updater:update-ready' 通知 renderer.
+  // 网页端 (UpdateAvailableCard 组件) 调 onUpdateReady 订阅, 拿到 version 后浮卡片.
+  // 点卡片 → relaunchToUpdate() → 主进程 autoUpdater.quitAndInstall().
+
+  /** 订阅"新版本已下载完成"事件. 返回取消订阅的函数. */
+  onUpdateReady: (cb: (payload: UpdateReadyPayload) => void): (() => void) => {
+    const listener = (_e: unknown, payload: UpdateReadyPayload) => cb(payload)
+    ipcRenderer.on('updater:update-ready', listener)
+    return () => ipcRenderer.removeListener('updater:update-ready', listener)
+  },
+
+  /** 用户点了"立即重启更新", 关 app + 替换 .exe + 启动新版 */
+  relaunchToUpdate: async (): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('updater:relaunch-to-update'),
 }
 
 contextBridge.exposeInMainWorld('monoiDesktop', api)
