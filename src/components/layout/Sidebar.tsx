@@ -129,13 +129,14 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
         )}
       </div>
 
-      {/* Footer: 用户 / 账户中心 / 登出 */}
-      <div className="border-t border-[var(--border)] px-2 py-2 flex flex-col gap-0.5">
+      {/* Footer: 用户 / 账户中心 / 下载 / 登出 — 每项独立卡片样式 (有边框) */}
+      <div className="border-t border-[var(--border)] px-2 py-2.5 flex flex-col gap-1.5">
         <Link to="/app/account" onClick={onClose}
-          className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-[var(--text-2)] hover:bg-[var(--bg-hover)] hover:text-[var(--text)] cursor-pointer transition-colors">
-          <div className="w-6 h-6 rounded-full bg-[var(--text)] text-[var(--bg)] flex items-center justify-center text-[10px] font-bold overflow-hidden flex-shrink-0">
+          className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm text-[var(--text-2)] hover:bg-[var(--bg-hover)] hover:text-[var(--text)] cursor-pointer transition-colors border border-[var(--border)] bg-[var(--bg-card)]">
+          <div className="w-9 h-9 rounded-full bg-[var(--text)] text-[var(--bg)] flex items-center justify-center text-sm font-bold overflow-hidden flex-shrink-0">
             {me?.avatar_url ? (
-              <img src={me.avatar_url} alt="" className="w-full h-full object-cover"/>
+              <img src={me.avatar_url} alt="" className="w-full h-full object-cover"
+                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}/>
             ) : (
               <span>{(me?.username || username)?.[0]?.toUpperCase() || 'M'}</span>
             )}
@@ -145,7 +146,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
         </Link>
         {isAdmin && (
           <Link to="/admin" onClick={onClose}
-            className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-[var(--text-2)] hover:bg-[var(--bg-hover)] hover:text-[var(--text)] cursor-pointer transition-colors">
+            className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm text-[var(--text-2)] hover:bg-[var(--bg-hover)] hover:text-[var(--text)] cursor-pointer transition-colors border border-[var(--border)] bg-[var(--bg-card)]">
             <Shield size={14}/>
             <span className="flex-1 truncate">管理后台</span>
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500 text-white">admin</span>
@@ -155,7 +156,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
         {typeof (window as any).monoiDesktop === 'undefined' && desktop?.available && desktop.exe_url && (
           <a href={desktop.exe_url}
             download
-            className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-[var(--text-2)] hover:bg-[var(--bg-hover)] hover:text-[var(--text)] cursor-pointer transition-colors"
+            className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm text-[var(--text-2)] hover:bg-[var(--bg-hover)] hover:text-[var(--text)] cursor-pointer transition-colors border border-[var(--border)] bg-[var(--bg-card)]"
             title={`v${desktop.version}${desktop.size_mb ? ` · ${desktop.size_mb} MB` : ''}`}>
             <Download size={14}/>
             <span className="flex-1 truncate">下载桌面版</span>
@@ -163,7 +164,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
           </a>
         )}
         <button onClick={handleLogout}
-          className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-[var(--text-3)] hover:bg-[var(--bg-hover)] hover:text-red-400 cursor-pointer transition-colors">
+          className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm text-[var(--text-3)] hover:bg-red-950/20 hover:text-red-400 cursor-pointer transition-colors border border-[var(--border)] bg-[var(--bg-card)]">
           <LogOut size={14}/> 退出登录
         </button>
       </div>
