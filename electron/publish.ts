@@ -156,7 +156,7 @@ export async function publishToXhs(req: PublishReq): Promise<PublishResult> {
   const waitTimeout = (req.wait_close_timeout || 1800) * 1000
 
   if (!detectEdgePath()) {
-    return { success: false, detail: '没装 Edge. 请先装 Microsoft Edge (Windows 一般自带)' }
+    return { success: false, detail: '找不到必要的浏览器组件. 请确认 Windows 系统自带的浏览器没被卸载.' }
   }
 
   // 1. 下载视频到本地
@@ -173,7 +173,7 @@ export async function publishToXhs(req: PublishReq): Promise<PublishResult> {
   // 2. 启动 Edge persistent context
   let context: BrowserContext | null = null
   try {
-    step('启动 Edge (用你自己的账号 profile)...')
+    step('启动浏览器 (用你自己的账号)...')
     context = await launchEdgePersistent(false)
     const page = await context.newPage()
 
@@ -181,7 +181,7 @@ export async function publishToXhs(req: PublishReq): Promise<PublishResult> {
     await page.waitForTimeout(5000)
 
     if (page.url().toLowerCase().includes('login')) {
-      step('需要登录小红书: 在弹出的 Edge 里扫码 / 输手机号登一次 → 登完点小红书任意页面 → 关 Edge')
+      step('需要登录小红书: 在弹出的浏览器里扫码 / 输手机号登一次 → 登完点小红书任意页面 → 关上浏览器窗口')
       step('登录信息会保存, 下次发布直接进上传页, 不需要再登')
       try {
         await page.waitForEvent('close', { timeout: waitTimeout })
@@ -247,16 +247,16 @@ export async function publishToXhs(req: PublishReq): Promise<PublishResult> {
     if (formReady) {
       await mouseJitter(page, 2)
       await randSleep(1000, 2000)
-      step('✓ 已停在发布按钮前. 你在 Edge 窗口审稿 → 点"发布" → 关 Edge 窗口')
+      step('✓ 已停在发布按钮前. 你在浏览器窗口审稿 → 点"发布" → 关上浏览器窗口')
     }
 
     // 7. 等用户操作 (关窗口结束)
     step(`等你操作, 最多 ${Math.floor(waitTimeout / 1000 / 60)} 分钟...`)
     try {
       await page.waitForEvent('close', { timeout: waitTimeout })
-      step('Edge 已关, 流程结束')
+      step('浏览器已关, 流程结束')
     } catch {
-      step(`超时, 强制关 Edge`)
+      step(`超时, 强制关闭浏览器`)
     }
 
     return { success: true, detail: detailMsgs.join(' | ') }
@@ -279,7 +279,7 @@ export async function publishToDouyin(req: PublishReq): Promise<PublishResult> {
   const waitTimeout = (req.wait_close_timeout || 1800) * 1000
 
   if (!detectEdgePath()) {
-    return { success: false, detail: '没装 Edge. 请先装 Microsoft Edge (Windows 一般自带)' }
+    return { success: false, detail: '找不到必要的浏览器组件. 请确认 Windows 系统自带的浏览器没被卸载.' }
   }
 
   let videoPath: string
@@ -294,7 +294,7 @@ export async function publishToDouyin(req: PublishReq): Promise<PublishResult> {
 
   let context: BrowserContext | null = null
   try {
-    step('启动 Edge (用你自己的账号 profile)...')
+    step('启动浏览器 (用你自己的账号)...')
     context = await launchEdgePersistent(false)
     const page = await context.newPage()
 
@@ -303,7 +303,7 @@ export async function publishToDouyin(req: PublishReq): Promise<PublishResult> {
 
     // 抖音登录态: URL 含 login 或 跳到主站 douyin.com
     if (page.url().toLowerCase().includes('login') || !page.url().includes('creator.douyin.com')) {
-      step('需要登录抖音: 在弹出的 Edge 里扫码登一次 → 关 Edge')
+      step('需要登录抖音: 在弹出的浏览器里扫码登一次 → 关上浏览器窗口')
       step('登录信息会保存, 下次发布直接进上传页')
       try { await page.waitForEvent('close', { timeout: waitTimeout }) } catch { /* ignore */ }
       return {
@@ -338,7 +338,7 @@ export async function publishToDouyin(req: PublishReq): Promise<PublishResult> {
       const shotPath = path.join(os.tmpdir(), `monoi-douyin-upload-fail-${Date.now()}.png`)
       try { await page.screenshot({ path: shotPath, fullPage: true }) } catch { /* ignore */ }
       step(`✗ 找不到上传按钮. 截图: ${shotPath} (抖音可能改 UI 了, 发给 monoi 调 selector)`)
-      step('临时方案: 你在弹出的 Edge 里手动拖视频到抖音页面, 再填表单. 视频路径: ' + videoPath)
+      step('临时方案: 你在弹出的浏览器里手动拖视频到抖音页面, 再填表单. 视频路径: ' + videoPath)
       try { await page.waitForEvent('close', { timeout: waitTimeout }) } catch { /* ignore */ }
       return { success: false, detail: detailMsgs.join(' | ') }
     }
@@ -402,16 +402,16 @@ export async function publishToDouyin(req: PublishReq): Promise<PublishResult> {
     if (formReady) {
       await mouseJitter(page, 2)
       await randSleep(1000, 2000)
-      step('✓ 已停在"发布"按钮前. 在 Edge 窗口审稿 → 点"发布" → 关 Edge 窗口')
+      step('✓ 已停在"发布"按钮前. 在浏览器窗口审稿 → 点"发布" → 关上浏览器窗口')
     }
 
     // 6. 等用户操作
     step(`等你操作, 最多 ${Math.floor(waitTimeout / 1000 / 60)} 分钟...`)
     try {
       await page.waitForEvent('close', { timeout: waitTimeout })
-      step('Edge 已关, 流程结束')
+      step('浏览器已关, 流程结束')
     } catch {
-      step('超时, 强制关 Edge')
+      step('超时, 强制关闭浏览器')
     }
 
     return { success: true, detail: detailMsgs.join(' | ') }
