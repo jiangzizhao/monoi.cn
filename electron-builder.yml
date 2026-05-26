@@ -22,10 +22,13 @@ win:
   target:
     - target: nsis            # 安装程序 (推荐, 用户双击装)
       arch: [x64]
-  # icon: build/icon.ico       # TODO: 加图标 (256x256 ico). 没图标用 Electron 默认
+  icon: build/icon.ico         # 多尺寸 16/32/48/64/128/256 合一. 任务栏 / 桌面快捷 / 装包 / 开始菜单都用这个
   artifactName: "${productName}-Setup-${version}.${ext}"
 
 nsis:
+  installerIcon: build/icon.ico      # 装包自己的图标 (用户在下载文件夹看到的)
+  uninstallerIcon: build/icon.ico    # 卸载程序图标
+  installerHeaderIcon: build/icon.ico # 装包窗口左上小图标
   oneClick: false              # 不一键装, 让用户选路径
   perMachine: false            # 装到当前用户 (不要管理员权限)
   allowToChangeInstallationDirectory: true

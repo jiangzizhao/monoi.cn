@@ -38,6 +38,9 @@ function createWindow() {
     backgroundColor: '#0a0a0a',                     // monoi 暗色主题, 防白闪
     autoHideMenuBar: true,                          // 隐藏菜单栏 (File / Edit / View 默认条)
     title: 'monoi 视频创作',
+    // 不显式设 icon — Windows 上 electron-builder 把 win.icon 嵌入 .exe,
+    // BrowserWindow / 任务栏 / Alt-Tab 自动从 .exe metadata 读取, 不用代码层指定.
+    // dev 模式没图标 (是 Electron 默认), 打包后才是 monoi 图标 — 正常.
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),  // 编译后是 .js
       contextIsolation: true,                       // 安全: 主世界 / 隔离世界分开
