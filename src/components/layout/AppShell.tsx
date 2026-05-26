@@ -5,6 +5,7 @@ import { Sidebar } from './Sidebar'
 import { useChatStore } from '../../store/chatStore'
 import { fetchMyProfile, type UserProfile } from '../../services/billing'
 import { isLoggedIn } from '../../lib/auth'
+import { UpdateAvailableCard } from '../UpdateAvailableCard'
 
 /** Layout 壳: sidebar + 顶部 tab bar + Outlet (各 tab 的内容). 不再含 chat 业务逻辑.
  * Chat 那块逻辑剥到 pages/ChatTab.tsx, 各 tab 独立 page. */
@@ -71,6 +72,9 @@ export function AppShell() {
         {/* 各 tab 内容 — 顶部 tab bar 在 Sidebar 顶部, 不在这里 */}
         <Outlet/>
       </div>
+
+      {/* 桌面端有新版本时浮在右下角 (网页端不显示 — 组件内自己判断 window.monoiDesktop) */}
+      <UpdateAvailableCard/>
     </div>
   )
 }
