@@ -2546,6 +2546,33 @@ def bgm_library_proxy():
         raise HTTPException(503, "voice-server (9001) 未启动")
 
 
+class AddBgmReq(BaseModel):
+    video_url: str
+    bgm_oss_key: str
+    volume: float = 0.3
+
+
+@app.post("/api/voice/add-bgm-to-video")
+def add_bgm_proxy(req: AddBgmReq, request: Request):
+    """给已有视频混入 BGM. 转发到 voice-server (ffmpeg amix).
+    用户已登录才能调 (扣积分留接口). 返新 video_url + oss_key."""
+    _user_id_from_request(request)   # 必须登录, 没 token 401
+    import requests as _req
+    try:
+        resp = _req.post(
+            f"{VOICE_SERVER_URL}/add-bgm-to-video",
+            json={'video_url': req.video_url, 'bgm_oss_key': req.bgm_oss_key, 'volume': req.volume},
+            timeout=600,   # 视频 + BGM 下 + ffmpeg amix, 长视频可能几分钟
+        )
+        if resp.status_code != 200:
+            raise HTTPException(resp.status_code, f"voice-server 错误: {resp.text[:300]}")
+        return resp.json()
+    except _req.exceptions.ConnectionError:
+        raise HTTPException(503, "voice-server (9001) 未启动")
+    except _req.exceptions.Timeout:
+        raise HTTPException(504, "BGM 合流超时, 可能视频太长")
+
+
 @app.get("/api/voice/cover-templates")
 def cover_templates_proxy():
     """转发到 voice-server: 封面模板库列表 (用户在合成封面时拉)"""

@@ -1376,6 +1376,95 @@ def list_bgm_library():
     return {'bgms': tracks}
 
 
+# ============== 给视频加 BGM (ffmpeg amix) ==============
+
+
+class AddBgmRequest(BaseModel):
+    video_url: str            # 现有视频的 URL (OSS 签名 URL 或公开 URL)
+    bgm_oss_key: str          # BGM 库里的 oss_key (从 /bgm-library 拿)
+    volume: float = 0.3       # BGM 音量 0-1, 默认 30% (主音占 70%)
+
+
+@app.post("/add-bgm-to-video")
+def add_bgm_to_video(req: AddBgmRequest):
+    """给一段已有视频混入 BGM. 用 ffmpeg amix:
+    1. 拉视频 + BGM 到本地临时文件
+    2. ffmpeg: video.audio + bgm (loop, volume=req.volume) → amix
+    3. 输出新 mp4 (视频流 copy, 音频重新编码 AAC)
+    4. 上传 OSS, 返新 URL
+
+    适用场景: 数字人视频 / 录屏 / 任何"已有视频想加 BGM" 的事后处理.
+    """
+    import tempfile, subprocess, urllib.request, os as _os
+    from oss_helper import oss_sign_get, oss_upload
+
+    if not req.video_url:
+        raise HTTPException(400, "video_url 不能为空")
+    if not req.bgm_oss_key:
+        raise HTTPException(400, "bgm_oss_key 不能为空")
+    volume = max(0.0, min(1.0, req.volume))
+
+    # 1. 下载视频 + BGM 到临时目录
+    src_video = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False)
+    src_bgm = tempfile.NamedTemporaryFile(suffix='.mp3', delete=False)
+    dst_path = src_video.name.rsplit('.', 1)[0] + '_bgm.mp4'
+    src_video.close(); src_bgm.close()
+
+    try:
+        # 视频: 用户给的 URL (可能是任何来源, 公开/签名)
+        print(f"[add-bgm] 下载视频: {req.video_url[:80]}...", flush=True)
+        urllib.request.urlretrieve(req.video_url, src_video.name)
+        # BGM: 从 OSS 签 URL 下
+        bgm_url = oss_sign_get(req.bgm_oss_key, expires=300)
+        print(f"[add-bgm] 下载 BGM: {req.bgm_oss_key}", flush=True)
+        urllib.request.urlretrieve(bgm_url, src_bgm.name)
+
+        # 2. ffmpeg amix 合流
+        # - aloop 让 BGM 循环 (size 给个大值 = 永远循环)
+        # - volume 调低 BGM
+        # - amix 把原音 + BGM 混合
+        # - duration=first 跟原视频时长 (BGM 多余截掉)
+        # - dropout_transition=0 防止某条音轨结束后另一条衰减
+        # - -map 选视频 + 混音音轨
+        # - -c:v copy 视频不重新编码 (快)
+        # - -c:a aac 音频重编 (因为合流后是新的)
+        filter_complex = (
+            f"[1:a]volume={volume},aloop=loop=-1:size=2000000000[bgm];"
+            f"[0:a][bgm]amix=inputs=2:duration=first:dropout_transition=0[a]"
+        )
+        cmd = [
+            'ffmpeg', '-y', '-i', src_video.name, '-i', src_bgm.name,
+            '-filter_complex', filter_complex,
+            '-map', '0:v', '-map', '[a]',
+            '-c:v', 'copy', '-c:a', 'aac', '-b:a', '128k',
+            '-movflags', '+faststart',
+            dst_path,
+        ]
+        print(f"[add-bgm] ffmpeg amix volume={volume}...", flush=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        if result.returncode != 0:
+            raise HTTPException(500, f"ffmpeg amix 失败: {result.stderr[-500:]}")
+
+        out_size = _os.path.getsize(dst_path)
+        print(f"[add-bgm] 合流完成: {out_size / 1024 / 1024:.1f} MB", flush=True)
+
+        # 3. 上传到 OSS (outputs/ 前缀, 跟其他合成产物一致)
+        dst_key = f"outputs/bgm_mix_{int(time.time())}_{uuid.uuid4().hex[:8]}.mp4"
+        oss_upload(dst_key, dst_path, content_type='video/mp4')
+        signed_url = oss_sign_get(dst_key, expires=6 * 3600)
+
+        return {
+            'success': True,
+            'video_url': signed_url,
+            'oss_key': dst_key,
+            'size_bytes': out_size,
+        }
+    finally:
+        for p in [src_video.name, src_bgm.name, dst_path]:
+            try: _os.unlink(p)
+            except Exception: pass
+
+
 # ============== 音频裁剪 (ffmpeg, 给去人声后的 BGM 用) ==============
 
 

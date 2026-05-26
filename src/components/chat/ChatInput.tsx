@@ -13,6 +13,8 @@ import { FootageMatchForm } from './forms/FootageMatchForm'
 import { CoverGeneratorForm } from './forms/CoverGeneratorForm'
 import { PublishForm } from './forms/PublishForm'
 import { CutoutForm } from './forms/CutoutForm'
+import { AddBgmDialog } from './AddBgmDialog'
+import { makeAssistantMsg } from '../../store/chatStore'
 
 // 底部入口: 只放真正"从零开始"的功能. 流程中段的 (素材/剪辑/发布/导出) 通过
 // 上一步完成后的 chat 选项按钮自然进入, 不在工具栏重复.
@@ -80,6 +82,7 @@ export function ChatInput({ moduleMenu, onModuleClick, onModuleMenuClose }: Prop
   const [publishForm, setPublishForm] = useState(false)
   const [cutoutForm, setCutoutForm] = useState(false)
   const [vocalRemoverOpen, setVocalRemoverOpen] = useState(false)
+  const [addBgmCtx, setAddBgmCtx] = useState<{ videoUrl: string; convId: string } | null>(null)
   const textRef = useRef<HTMLTextAreaElement>(null)
   const { isGenerating, conversations, activeId } = useChatStore()
   const { send, stop } = useChat()
@@ -118,6 +121,16 @@ export function ChatInput({ moduleMenu, onModuleClick, onModuleMenuClose }: Prop
     return () => window.removeEventListener('monoi:open-form', handler)
     // pickModuleOption 是组件内闭包, 不会变, 故无依赖
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // 给视频加 BGM 弹窗 — useChat 检测 __add_bgm_to_video__ chip → dispatch event → 这里开 modal
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ videoUrl: string; convId: string }>).detail
+      if (detail?.videoUrl && detail.convId) setAddBgmCtx(detail)
+    }
+    window.addEventListener('monoi:open-add-bgm', handler)
+    return () => window.removeEventListener('monoi:open-add-bgm', handler)
   }, [])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -369,6 +382,38 @@ export function ChatInput({ moduleMenu, onModuleClick, onModuleMenuClose }: Prop
 
       {/* 音乐去人声弹窗 (从工具栏直接打开, 不依赖之前的流程) */}
       <VocalRemoverDialog open={vocalRemoverOpen} onClose={() => setVocalRemoverOpen(false)}/>
+
+      {/* 给视频加 BGM 弹窗 (从 chip "加 BGM" 触发) */}
+      {addBgmCtx && (
+        <AddBgmDialog
+          videoUrl={addBgmCtx.videoUrl}
+          onClose={() => setAddBgmCtx(null)}
+          onSuccess={(newUrl) => {
+            // 在 chat 里追加一条新视频 + 下一步选项
+            const chat = useChatStore.getState()
+            chat.addMessage(addBgmCtx.convId, makeAssistantMsg([
+              {
+                type: 'video_player',
+                data: {
+                  video_url: newUrl,
+                  audio_label: 'BGM 已混入',
+                  source: 'ai_generated',
+                },
+              },
+              { type: 'text', content: 'BGM 已混入, 新视频已就绪. 下一步?' },
+              {
+                type: 'choices',
+                question: '下一步',
+                options: [
+                  { id: '__form_cover__', label: '生成封面', description: '给视频做发布封面图' },
+                  { id: '__form_publish__', label: '发布到平台', description: '直接发抖音 / 小红书' },
+                ],
+              },
+            ]))
+            setAddBgmCtx(null)
+          }}
+        />
+      )}
     </div>
     </>
   )

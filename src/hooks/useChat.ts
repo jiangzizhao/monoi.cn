@@ -883,12 +883,32 @@ export function useChat() {
     if (!convId) return
     store.chooseOption(convId, msgId, blockIdx, opt.id)
 
-    // 加 BGM 到视频 — 后端 ffmpeg 合流端点还没做, 先给用户友好提示
+    // 加 BGM 到视频 — 找最近的 video_player.video_url, 打开 AddBgmDialog
     if (opt.id === '__add_bgm_to_video__') {
-      store.addMessage(convId, makeAssistantMsg([{
-        type: 'text',
-        content: '给视频后期加 BGM 还在开发中, 暂时可以:\n1. 重新发起"配音合成", 在那个流程里选 BGM (推荐)\n2. 或下载视频后用剪映 / 剪辑软件加',
-      }]))
+      const conv = store.conversations.find(c => c.id === convId)
+      let videoUrl = ''
+      if (conv) {
+        for (let i = conv.messages.length - 1; i >= 0; i--) {
+          const msg = conv.messages[i]
+          for (const block of msg.blocks) {
+            if (block.type === 'video_player' && (block as any).data?.video_url) {
+              videoUrl = (block as any).data.video_url
+              break
+            }
+          }
+          if (videoUrl) break
+        }
+      }
+      if (!videoUrl) {
+        store.addMessage(convId, makeAssistantMsg([{
+          type: 'text',
+          content: '没找到要加 BGM 的视频, 先生成 / 上传一段视频再来.',
+        }]))
+        return
+      }
+      window.dispatchEvent(new CustomEvent('monoi:open-add-bgm', {
+        detail: { videoUrl, convId },
+      }))
       return
     }
 
