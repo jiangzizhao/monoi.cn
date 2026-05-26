@@ -648,21 +648,37 @@ export function useChat() {
         return
       }
 
-      // 数字人视频生成完成: 直接展示视频
+      // 数字人视频生成完成: 显示视频 + 引导下一步 (跟口播剪辑完成对齐)
       if (text.startsWith('__digital_human_video__')) {
         const p = JSON.parse(text.slice('__digital_human_video__'.length))
-        store.updateLastAssistantBlocks(convId, [{
-          type: 'video_player',
-          data: {
-            video_url: p.video_url,
-            duration_ms: p.duration_ms,
-            width: p.width,
-            height: p.height,
-            audio_label: p.audio_label || '数字人',
-            source: 'digital_human',
-            text_preview: p.text_preview,
+        store.updateLastAssistantBlocks(convId, [
+          {
+            type: 'video_player',
+            data: {
+              video_url: p.video_url,
+              duration_ms: p.duration_ms,
+              width: p.width,
+              height: p.height,
+              audio_label: p.audio_label || '数字人',
+              source: 'digital_human',
+              text_preview: p.text_preview,
+            },
           },
-        }])
+          {
+            type: 'text',
+            content: '数字人视频生成完成. 想继续做啥?',
+          },
+          {
+            type: 'choices',
+            question: '下一步',
+            options: [
+              { id: '__form_cover__', label: '生成封面', description: '给视频做个发布封面图' },
+              { id: '__form_publish__', label: '发布到平台', description: '直接发抖音 / 小红书' },
+              { id: '__auto_footage_from_video__', label: '匹配素材', description: '按句拼配套素材画面 (适合解说类)' },
+              { id: '保留这段视频, 暂不做下一步', label: '保留视频', description: '稍后再决定' },
+            ],
+          },
+        ])
         return
       }
 
