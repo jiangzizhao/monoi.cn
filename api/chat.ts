@@ -38,7 +38,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const apiKey = process.env.DEEPSEEK_API_KEY || ''
   if (!apiKey) return res.status(500).json({ error: 'DEEPSEEK_API_KEY not configured' })
 
-  const { system, messages, stream = false, json_mode = false } = req.body
+  const { system, messages, stream = false, json_mode = false, charge_feature } = req.body
+
+  // ============ 扣积分 (DeepSeek 调用前) ============
+  // 之前扣费走前端 chargeCredit('ai_writing', 3), 攻击者改前端代码 (注释那行) 就能绕过.
+  // 现在搬到 Vercel function 内: 调 DeepSeek 之前先 sync 调后端 /api/billing/charge.
+  // 不够 (402) → 直接返 402 给前端, AI 调用根本不发生.
+  //
+  // 价目表硬编码, 防前端篡改 amount. 不在表里的 feature → 跳过 (走老前端 chargeCredit 流程).
+  // 后续把 footage_match 等也搬过来时, 加进 PRICES 即可.
+  const SERVER_CHARGE_PRICES: Record<string, number> = {
+    ai_writing: 3,
+    ai_writing_regen: 3,
+  }
+  if (charge_feature && SERVER_CHARGE_PRICES[charge_feature] !== undefined) {
+    const amount = SERVER_CHARGE_PRICES[charge_feature]
+    const backendUrl = process.env.BACKEND_API_URL || 'https://monoi.nat100.top'
+    try {
+      const chargeRes = await fetch(`${backendUrl}/api/billing/charge`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': authHeader,
+        },
+        body: JSON.stringify({ feature: charge_feature, amount, ref_id: null }),
+      })
+      if (!chargeRes.ok) {
+        // 透传后端 detail (一般是 "积分余额不足. 当前剩 X 积分, ...")
+        const errBody: any = await chargeRes.json().catch(() => ({}))
+        return res.status(chargeRes.status).json({
+          error: errBody.detail || errBody.error || `扣费失败 (${chargeRes.status})`,
+        })
+      }
+    } catch (e: any) {
+      // 后端联系不上 — 不能默默放过 (这就是漏洞), 也不能完全卡死用户. 返 503 让前端重试
+      return res.status(503).json({ error: `扣费服务暂时不可用, 请重试 (${e.message})` })
+    }
+  }
 
   // DeepSeek uses OpenAI-compatible format: system goes as first message
   const fullMessages = [

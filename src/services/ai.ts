@@ -241,6 +241,7 @@ export async function callAI(
   // 流式 + 大段 JSON 容易丢引号 / 截断, 用户看到乱码 (参见 2026-05-21 故障).
   // 非流式没有打字机效果, 但 AI 输出保证是合法 JSON, parseBlocks 一次过.
   // 模拟流式: 拿到完整文本后, 按 30ms / 字符喂给 onChunk, 让用户感觉有打字效果.
+  // charge_feature: 'ai_writing' — Vercel function 调 DeepSeek 前会扣 3 积分 (强校验, 防绕过).
   const res = await fetchWithRetry('/api/chat', {
     method: 'POST',
     headers: authHeaders(),
@@ -249,6 +250,7 @@ export async function callAI(
       messages: toAPIMessages(messages),
       stream: false,
       json_mode: true,
+      charge_feature: 'ai_writing',
     }),
     signal,
   })
@@ -449,9 +451,12 @@ export async function callScriptAI(
   prompt: string,
   onChunk: (text: string) => void,
   signal?: AbortSignal,
-  modeOverride?: 'original' | 'rewrite' | 'dialect'
+  modeOverride?: 'original' | 'rewrite' | 'dialect',
+  chargeFeature: 'ai_writing' | 'ai_writing_regen' = 'ai_writing'
 ): Promise<string> {
   const mode = modeOverride ?? (prompt.startsWith('【仿写文案】') ? 'rewrite' : 'original')
+  // chargeFeature: 'ai_writing_regen' 用于重新生成 / 方言改写场景 (跟普通 ai_writing 价格一样,
+  // 但 credit_log feature 字段区分, admin 报表能看)
   const res = await fetchWithRetry('/api/chat', {
     method: 'POST',
     headers: authHeaders(),
@@ -459,6 +464,7 @@ export async function callScriptAI(
       system: buildScriptSystemPrompt(mode),
       messages: [{ role: 'user', content: prompt }],
       stream: true,
+      charge_feature: chargeFeature,
     }),
     signal,
   })

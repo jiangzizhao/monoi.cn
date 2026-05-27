@@ -609,10 +609,10 @@ export function useChat() {
         const promptForModel = buildDialectPrompt(dialect, script)
         const newScript = await callScriptAI(promptForModel, () => {
           store.updateLastAssistantBlocks(convId, [{ type: 'loading', label: 'AI 正在改写...' }])
-        }, ctrl.signal, 'dialect')
+        }, ctrl.signal, 'dialect', 'ai_writing_regen')
         store.updateLastAssistantBlocks(convId, [makeScriptCard(newScript)])
-        // 方言改写 → 上报扣 3 积分 (跟 regen 等同)
-        chargeCredit('ai_writing_regen', 3).catch(e => console.warn('charge dialect:', e))
+        // 扣费已搬到 Vercel function /api/chat (charge_feature: 'ai_writing_regen' 调 backend /api/billing/charge)
+        // 不再前端 chargeCredit, 防止改前端绕过.
         return
       }
 
@@ -816,14 +816,14 @@ export function useChat() {
 
       if (scriptPrompt) {
         const promptForModel = isRegenerateScript ? buildRegenerateScriptPrompt(scriptPrompt) : scriptPrompt
+        const chargeFeature = isRegenerateScript ? 'ai_writing_regen' : 'ai_writing'
         const script = await callScriptAI(promptForModel, (chunk) => {
           rawText += chunk
           store.updateLastAssistantBlocks(convId, [{ type: 'loading', label: 'AI 正在生成文案...' }])
-        }, ctrl.signal)
+        }, ctrl.signal, undefined, chargeFeature)
         store.updateLastAssistantBlocks(convId, [makeScriptCard(script)])
-        // 文案生成完成 → 上报扣 3 积分 (重新生成单独算)
-        chargeCredit(isRegenerateScript ? 'ai_writing_regen' : 'ai_writing', 3)
-          .catch(e => console.warn('charge ai_writing:', e))
+        // 扣费已搬到 Vercel function (charge_feature 传给 /api/chat, 那边 sync 调 backend /api/billing/charge)
+        // 防止改前端绕过. 老的 chargeCredit('ai_writing'/'ai_writing_regen') 不再调.
         return
       }
 
