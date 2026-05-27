@@ -2946,8 +2946,28 @@ class TranscodeReq(BaseModel):
 @app.post("/api/recording/transcode-to-mp4")
 def transcode_recording_to_mp4(req: TranscodeReq, request: Request):
     """把已上传的 webm 录屏转码成 mp4. 同步阻塞 (短视频几秒到几十秒). 返新 OSS key + URL.
-    用 ffmpeg libx264 + aac, 适配性最好. CRF 23 平衡画质/大小."""
-    _user_id_from_request(request)   # 必须登录
+    用 ffmpeg libx264 + aac, 适配性最好. CRF 23 平衡画质/大小.
+
+    配额: 免费用户每天 5 次, Pro 30 次, Max+ 不限. 防恶意刷带宽
+    (OSS 公网下行 ¥0.5/GB, mp4 200MB ≈ ¥0.1/次)."""
+    user_id = _user_id_from_request(request)   # 必须登录
+
+    # 配额校验 (前端 localStorage 限录屏次数, 这里限"真花钱的转 mp4")
+    from billing import get_user_subscription, get_daily_action_count, incr_daily_action_count
+    sub = get_user_subscription(user_id)
+    tier = sub.get('tier', 'free')
+    if tier == 'free':
+        limit = 5
+    elif tier == 'pro_monthly':
+        limit = 30
+    else:
+        limit = -1   # Max / 旗舰 不限
+    if limit > 0:
+        used = get_daily_action_count(user_id, 'transcode_mp4')
+        if used >= limit:
+            upgrade_hint = '升级 Pro 提升至 30 次/天' if tier == 'free' else '升级 Max 解除限制'
+            raise HTTPException(429, f'今日转 mp4 次数用完 ({limit}/天), {upgrade_hint}')
+
     import tempfile, subprocess, os as _os
     from oss_helper import oss_sign_get, oss_upload
 
@@ -2996,6 +3016,9 @@ def transcode_recording_to_mp4(req: TranscodeReq, request: Request):
             dst_key = 'recordings/' + dst_key.lstrip('/')
         oss_upload(dst_key, dst_tmp_path, content_type='video/mp4')
         url = oss_sign_get(dst_key, expires=3600)
+        # 转码 + 上传都成功, 才计数. 失败不扣额度 (用户体验考量)
+        try: incr_daily_action_count(user_id, 'transcode_mp4')
+        except Exception as _e: print(f"[transcode-mp4] 写计数失败 (ignore): {_e}", flush=True)
         return {'success': True, 'oss_key': dst_key, 'url': url, 'size_bytes': mp4_size}
     finally:
         try: _os.unlink(src_tmp.name)

@@ -502,6 +502,20 @@ def init_billing_tables():
     """)
     c.execute("CREATE INDEX IF NOT EXISTS idx_user_asr_record_user ON user_asr_record(user_id, created_at DESC)")
 
+    # 16. 每日动作配额计数 — 给"录屏转 mp4"这类按日限频的端点用
+    # 例如 free 用户每天能转 5 次 mp4, Pro 30 次. 后端 SQLite 强校验 (前端 localStorage 可被 bypass).
+    # (user_id, action, day) 唯一, 不存在则插入 count=1, 存在则 +1.
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS daily_action_count (
+            user_id INTEGER NOT NULL,
+            action TEXT NOT NULL,                  -- 'transcode_mp4' / future actions
+            day TEXT NOT NULL,                     -- 'YYYY-MM-DD' (本地时区)
+            count INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (user_id, action, day)
+        )
+    """)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_daily_action_user_day ON daily_action_count(user_id, day)")
+
     # 11. 用户人物库 — 用户抠过的所有人物图, "我的人物" 列表用
     # 跟 rembg_cache 互补: rembg_cache 是字节级去重 (内部缓存), user_person_cutout 是用户视角的资产列表.
     # 同一个 user 多次抠出来的图都进这里 (即使源图字节一样, 也至少留一条 — 用户可能想多版本对比).
@@ -862,6 +876,40 @@ _TIER_ORDER = ['free', 'pro_monthly', 'max_monthly', 'flagship_yearly']
 _TIER_DISPLAY = {
     'free': '免费', 'pro_monthly': 'Pro', 'max_monthly': 'Max', 'flagship_yearly': '旗舰',
 }
+
+
+def _today_str() -> str:
+    """本地时区 'YYYY-MM-DD'. 用作 daily_action_count.day."""
+    return time.strftime('%Y-%m-%d', time.localtime())
+
+
+def get_daily_action_count(user_id: int, action: str) -> int:
+    """返用户今天某动作已经做了几次. 没记录返 0."""
+    conn = get_db()
+    row = conn.execute(
+        "SELECT count FROM daily_action_count WHERE user_id = ? AND action = ? AND day = ?",
+        (user_id, action, _today_str())
+    ).fetchone()
+    conn.close()
+    return int(row[0]) if row else 0
+
+
+def incr_daily_action_count(user_id: int, action: str) -> int:
+    """+1. 返新计数. (UPSERT 写法兼容 sqlite 3.24+, 老版本要 try insert + 失败 update.)"""
+    conn = get_db()
+    try:
+        conn.execute("""
+            INSERT INTO daily_action_count (user_id, action, day, count) VALUES (?, ?, ?, 1)
+            ON CONFLICT(user_id, action, day) DO UPDATE SET count = count + 1
+        """, (user_id, action, _today_str()))
+        conn.commit()
+        row = conn.execute(
+            "SELECT count FROM daily_action_count WHERE user_id = ? AND action = ? AND day = ?",
+            (user_id, action, _today_str())
+        ).fetchone()
+        return int(row[0]) if row else 1
+    finally:
+        conn.close()
 
 
 def check_feature_tier(user_id: int, feature_name: str, min_tier: str):

@@ -16,16 +16,35 @@ import { useChatStore, makeAssistantMsg } from '../store/chatStore'
 // 用户必须当场决策: 进剪辑 / 下载 / 重录, 不能刷新走开.
 import { uploadBlobToOss, transcodeRecordingToMp4 } from '../services/recordings'
 import { listBgmLibrary, type BgmTrack } from '../services/audio'
+import { fetchMyProfile, fetchMySubscription } from '../services/billing'
+import { isLoggedIn } from '../lib/auth'
 
 type Phase = 'setup' | 'previewing' | 'recording' | 'done'
 type PipShape = 'circle' | 'rounded' | 'square'
 type PipPos = 'tl' | 'tc' | 'tr' | 'cl' | 'cc' | 'cr' | 'bl' | 'bc' | 'br'
 type OutputRatio = '16:9' | '9:16' | '1:1' | '3:4'
 
-// 录屏时长上限. 超过浏览器可能 OOM / blob 过大上传炸. 30 分钟覆盖 99% 用例.
-const MAX_RECORD_SECONDS = 30 * 60
-// 临近上限提示阈值: 还剩 5 分钟时开始橙色倒计时, 让用户有时间收尾.
-const WARN_SECONDS_LEFT = 5 * 60
+// 录屏单次时长上限: 免费策略 2 分钟. 防资源滥用, Pro 用户同样 2 分钟 (这是单次, 不是当日).
+// 超过浏览器可能 OOM / blob 过大上传炸. 2 分钟覆盖"快速 demo / 录指令"等主流轻量场景.
+const MAX_RECORD_SECONDS = 2 * 60
+// 临近上限提示阈值: 还剩 20s 时橙色倒计时 (2 分钟尺度下 5 分钟阈值无意义)
+const WARN_SECONDS_LEFT = 20
+
+// 每日录屏次数: 免费 5, Pro 30. localStorage 计数, 用户清缓存能 bypass (但 UX 上有限制感).
+// 真正花钱的"转 mp4" 在后端 SQLite 强校验, 这层只是 UX + 提示用户升级 Pro.
+const DAILY_RECORD_LIMIT_FREE = 5
+const DAILY_RECORD_LIMIT_PRO = 30
+const todayKey = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+const getRecordCountKey = (userId: number | string) => `monoi_record_count_${userId}_${todayKey()}`
+function readRecordCount(userId: number | string): number {
+  try { return Number(localStorage.getItem(getRecordCountKey(userId)) || '0') || 0 } catch { return 0 }
+}
+function incRecordCount(userId: number | string) {
+  try { localStorage.setItem(getRecordCountKey(userId), String(readRecordCount(userId) + 1)) } catch { /* localStorage 不可用 */ }
+}
 type BgMode = 'screen' | 'whiteboard' | 'camera_only'
 
 // 输出像素尺寸 (高度 1080 基准, 各比例都给具体宽高)
@@ -73,6 +92,15 @@ export default function RecordTab() {
   const [selectedBgm, setSelectedBgm] = useState<BgmTrack | null>(null)
   const [bgmVolume, setBgmVolume] = useState(0.3)            // 0-1, 默认 30% (mic 60-70% 占主导)
   const [showBgmPanel, setShowBgmPanel] = useState(false)
+
+  // 每日录屏次数限制 — 免费 5, Pro 30. 用户 id + tier 从 /api/me + /api/billing/subscription 拿
+  // (uid 用来作 localStorage key 区分用户; tier 决定额度)
+  const [userId, setUserId] = useState<number | null>(null)
+  const [isPro, setIsPro] = useState(false)
+  const [recordCountToday, setRecordCountToday] = useState(0)
+  const dailyLimit = isPro ? DAILY_RECORD_LIMIT_PRO : DAILY_RECORD_LIMIT_FREE
+  const remainingRecords = Math.max(0, dailyLimit - recordCountToday)
+  const quotaExhausted = remainingRecords === 0
   // BGM 播放 + 合流到录制流的 ref
   const bgmAudioElRef = useRef<HTMLAudioElement | null>(null)   // preview 阶段的预览播放
   const bgmContextRef = useRef<AudioContext | null>(null)
@@ -90,6 +118,24 @@ export default function RecordTab() {
 
   const isUnsupported = typeof navigator !== 'undefined'
     && !(navigator.mediaDevices?.getDisplayMedia)
+
+  // 初始化: 拿 uid + tier, 然后读 localStorage 当日录屏次数
+  useEffect(() => {
+    if (!isLoggedIn()) return
+    let alive = true
+    ;(async () => {
+      try {
+        const [me, sub] = await Promise.all([fetchMyProfile(), fetchMySubscription().catch(() => null)])
+        if (!alive) return
+        setUserId(me.id)
+        // tier: 'pro_monthly' / 'max_monthly' / 'flagship_yearly' 都算 Pro 用户 (Pro 及以上)
+        const tier = (sub as any)?.tier || 'free'
+        setIsPro(tier !== 'free')
+        setRecordCountToday(readRecordCount(me.id))
+      } catch { /* 拿不到 me 时降级到 free 配额, uid=0 (匿名 key) */ }
+    })()
+    return () => { alive = false }
+  }, [])
 
   // streams → off-screen videos
   useEffect(() => {
@@ -401,6 +447,11 @@ export default function RecordTab() {
   }
   const startRecording = async () => {
     setError('')
+    // 每日次数限制 (前端 localStorage 软校验, 真省钱的是后端 转 mp4 限频)
+    if (userId != null && quotaExhausted) {
+      setError(`今日免费录屏次数用完 (${dailyLimit}/天)${isPro ? '' : ', 升级 Pro 提升至 30 次/天'}`)
+      return
+    }
     if (!canvasRef.current) return
     const stream = canvasRef.current.captureStream(30)
 
@@ -479,6 +530,11 @@ export default function RecordTab() {
     rec.start(1000)
     recorderRef.current = rec
     setPhase('recording')
+    // 录制成功开始 → 计数 +1 (放成功路径之后, 防止 catch 前抛了 setup 错误也扣)
+    if (userId != null) {
+      incRecordCount(userId)
+      setRecordCountToday(c => c + 1)
+    }
   }
   const stopRecording = () => {
     if (recorderRef.current && recorderRef.current.state !== 'inactive') recorderRef.current.stop()
@@ -566,7 +622,13 @@ export default function RecordTab() {
       document.body.appendChild(a); a.click(); document.body.removeChild(a)
       URL.revokeObjectURL(a.href)
     } catch (e: any) {
-      setError('转 mp4 失败: ' + (e?.message || e))
+      // 后端 429: 配额已满 (msg 含 "次数用完"), 直接展示原文 (已经友好措辞)
+      const msg = e?.message || String(e)
+      if (msg.includes('次数用完')) {
+        setError(msg)
+      } else {
+        setError('转 mp4 失败: ' + msg)
+      }
     } finally {
       setBusy('idle'); setUploadPct(0)
     }
@@ -894,13 +956,26 @@ export default function RecordTab() {
           {/* 主操作区: 状态显示 + 大按钮 (相当于创作 tab 的输入框) */}
           <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-2xl px-4 py-3 flex items-center gap-3 min-h-[52px]">
             {phase === 'setup' && (
-              <span className="flex-1 text-sm text-[var(--text-3)]">点上面选一种录法, 或下面图标单独授权</span>
+              <span className="flex-1 text-sm text-[var(--text-3)] flex items-center gap-3">
+                <span>点上面选一种录法, 或下面图标单独授权</span>
+                {userId != null && (
+                  <span className={`ml-auto text-xs px-2 py-0.5 rounded-full ${quotaExhausted ? 'bg-red-500/10 text-red-400' : 'bg-[var(--bg-hover)] text-[var(--text-2)]'}`}>
+                    今日剩余 {remainingRecords}/{dailyLimit}{!isPro && quotaExhausted ? ' · 升级 Pro 不限' : ''}
+                  </span>
+                )}
+              </span>
             )}
             {phase === 'previewing' && (
               <>
-                <span className="flex-1 text-sm text-[var(--text-2)]">画面已就绪, 点 → 开始录制</span>
-                <button onClick={startRecording}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-red-500 hover:bg-red-600 text-white text-sm font-medium cursor-pointer">
+                <span className="flex-1 text-sm text-[var(--text-2)] flex items-center gap-3">
+                  <span>{quotaExhausted ? '今日次数用完, 无法录制' : '画面已就绪, 点 → 开始录制'}</span>
+                  {userId != null && !quotaExhausted && (
+                    <span className="ml-auto text-xs text-[var(--text-3)]">今日剩余 {remainingRecords}/{dailyLimit}</span>
+                  )}
+                </span>
+                <button onClick={startRecording} disabled={quotaExhausted}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-red-500 hover:bg-red-600 disabled:bg-[var(--bg-hover)] disabled:text-[var(--text-3)] disabled:cursor-not-allowed text-white text-sm font-medium cursor-pointer"
+                  title={quotaExhausted ? (isPro ? '今日 30 次额度已用完' : '今日免费 5 次已用完, 升级 Pro 提升至 30 次/天') : ''}>
                   <span className="w-2 h-2 rounded-full bg-white"/> 开始录制
                 </button>
               </>
