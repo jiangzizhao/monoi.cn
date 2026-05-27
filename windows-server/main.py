@@ -627,7 +627,9 @@ def register(req: RegisterRequest):
     return {"success": True, "message": "注册成功"}
 
 
-FREE_PLAN_INIT_CREDITS = 50    # 免费用户注册一次性送的积分
+# [已废弃] FREE_PLAN_INIT_CREDITS = 50 — 老版本送过, 现在 register endpoint 只调
+# billing.try_daily_grant() 给 day 1 的 60 积分. 不再额外送 50.
+# (历史用户 credit_log 里有 feature='free_signup' delta=50 的记录, 是老数据.)
 
 @app.post("/api/login")
 def login(req: LoginRequest, request: Request):
