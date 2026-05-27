@@ -50,6 +50,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const SERVER_CHARGE_PRICES: Record<string, number> = {
     ai_writing: 3,
     ai_writing_regen: 3,
+    footage_match: 5,
   }
   if (charge_feature && SERVER_CHARGE_PRICES[charge_feature] !== undefined) {
     const amount = SERVER_CHARGE_PRICES[charge_feature]

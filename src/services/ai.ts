@@ -562,20 +562,32 @@ export async function callFootageAIBySegments(
     segments.map((s, i) => `${i + 1}. (${s.duration.toFixed(1)}s) ${s.text}`).join('\n')
 
   // 用 json_mode (DeepSeek response_format) + 非流式, 大幅降低 JSON 解析失败概率
-  // 失败时用 jsonrepair 兜底再 parse 一次, 还失败就重试 1 次
+  // 失败时用 jsonrepair 兜底再 parse 一次, 还失败就重试 1 次.
+  // 扣费: 第一次调 /api/chat 带 charge_feature=footage_match (Vercel 扣 5), 重试不再扣.
+  // 402 (余额不足) 直接 throw 不重试.
+  let firstCharged = false
   const callOnce = async (): Promise<any> => {
+    const body: any = {
+      system: FOOTAGE_BY_SEGMENTS_PROMPT,
+      messages: [{ role: 'user', content: userMsg }],
+      stream: false,
+      json_mode: true,
+    }
+    if (!firstCharged) body.charge_feature = 'footage_match'
     const r = await fetchWithRetry('/api/chat', {
       method: 'POST',
       headers: authHeaders(),
-      body: JSON.stringify({
-        system: FOOTAGE_BY_SEGMENTS_PROMPT,
-        messages: [{ role: 'user', content: userMsg }],
-        stream: false,
-        json_mode: true,
-      }),
+      body: JSON.stringify(body),
       signal,
     })
+    if (r.status === 402) {
+      const err: any = await r.json().catch(() => ({}))
+      const e: any = new Error(err.error || '积分余额不足')
+      e.code = 402
+      throw e
+    }
     if (!r.ok) throw new Error(`API ${r.status}`)
+    firstCharged = true   // 200 返回 = Vercel 已扣 5, 后面 retry 不再扣
     const data = await r.json()
     const content = data?.choices?.[0]?.message?.content || ''
     return tryParseJsonLoose(content)
@@ -584,8 +596,9 @@ export async function callFootageAIBySegments(
   let obj: any
   try {
     obj = await callOnce()
-  } catch (e) {
-    // 重试 1 次
+  } catch (e: any) {
+    if (e?.code === 402) throw e   // 402 别 retry, 直接抛给用户
+    // 重试 1 次 (JSON parse 失败 / 网络抖动 etc)
     obj = await callOnce()
   }
   if (!Array.isArray(obj?.keywords) || obj.keywords.length === 0) {
@@ -632,19 +645,30 @@ export async function callFootageAI(
   // 改用 json_mode 非流式 + jsonrepair 兜底, 跟 callFootageAIBySegments 一致.
   // 之前 stream + naive JSON.parse 经常因为 AI 输出末尾被截断/缺逗号而炸,
   // 用户看到 'Expected ,, or }, at position 439' 完全看不懂.
+  // 扣费同 callFootageAIBySegments: 首次扣 5, retry 不扣, 402 不重试.
+  let firstCharged = false
   const callOnce = async (): Promise<any> => {
+    const body: any = {
+      system: FOOTAGE_SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: script }],
+      stream: false,
+      json_mode: true,
+    }
+    if (!firstCharged) body.charge_feature = 'footage_match'
     const r = await fetchWithRetry('/api/chat', {
       method: 'POST',
       headers: authHeaders(),
-      body: JSON.stringify({
-        system: FOOTAGE_SYSTEM_PROMPT,
-        messages: [{ role: 'user', content: script }],
-        stream: false,
-        json_mode: true,
-      }),
+      body: JSON.stringify(body),
       signal,
     })
+    if (r.status === 402) {
+      const err: any = await r.json().catch(() => ({}))
+      const e: any = new Error(err.error || '积分余额不足')
+      e.code = 402
+      throw e
+    }
     if (!r.ok) throw new Error(`API ${r.status}`)
+    firstCharged = true
     const data = await r.json()
     const content = data?.choices?.[0]?.message?.content || ''
     return tryParseJsonLoose(content)
@@ -653,7 +677,8 @@ export async function callFootageAI(
   let obj: any
   try {
     obj = await callOnce()
-  } catch (_e) {
+  } catch (e: any) {
+    if (e?.code === 402) throw e
     // 重试 1 次 — AI 偶尔抽风返回截断/畸形 JSON, 大多重试就好
     obj = await callOnce()
   }

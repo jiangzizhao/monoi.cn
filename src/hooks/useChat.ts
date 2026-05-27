@@ -1,7 +1,9 @@
 import { useRef, useCallback } from 'react'
 import { useChatStore, makeUserMsg, makeAssistantMsg } from '../store/chatStore'
 import { callAI, callScriptAI, callFootageAI, callFootageAIBySegments, isScriptPrompt, parseBlocks } from '../services/ai'
-import { chargeCredit } from '../services/billing'
+// chargeCredit 已不再 useChat.ts 调 — ai_writing / ai_writing_regen / footage_match 都搬到了
+// Vercel function 的 server-side 扣费. 其它 download 类 (cover_download/footage_download/
+// cutout_download) 仍在各自组件里调 chargeCredit, 不在这文件.
 import { searchPexels } from '../services/pexels'
 import { searchPixabay } from '../services/pixabay'
 import type { ChoiceOption, FootageSentenceItem, MessageBlock } from '../types'
@@ -497,8 +499,8 @@ export function useChat() {
         try {
           const inputs = segments.map(s => ({ text: s.text, duration: s.end - s.start }))
           const keywords = await callFootageAIBySegments(inputs, ctrl.signal)
-          // 素材匹配 AI 拆句完成 → 上报扣 5 积分 (Vercel edge function 调用)
-          chargeCredit('footage_match', 5).catch(e => console.warn('charge footage_match:', e))
+          // 扣费已搬到 Vercel function (charge_feature: 'footage_match', 首次扣 retry 不扣).
+          // 老的 chargeCredit('footage_match', 5) 不再调.
           const items: FootageSentenceItem[] = segments.map((s, i) => ({
             text: s.text,
             scene: keywords[i]?.scene || '',
@@ -557,8 +559,8 @@ export function useChat() {
         store.updateLastAssistantBlocks(convId, [{ type: 'loading', label: 'AI 正在拆句 + 提取画面词...' }])
         try {
           const sentences = await callFootageAI(script, ctrl.signal)
-          // 素材匹配 AI 拆句完成 → 上报扣 5 积分
-          chargeCredit('footage_match', 5).catch(e => console.warn('charge footage_match:', e))
+          // 扣费已搬到 Vercel function (charge_feature: 'footage_match', 首次扣 retry 不扣).
+          // 老的 chargeCredit('footage_match', 5) 不再调.
           const items: FootageSentenceItem[] = sentences.map(s => ({
             text: s.text,
             scene: s.scene,
