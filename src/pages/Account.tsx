@@ -815,8 +815,6 @@ function CreditsTab({ credits, plans, sub, onBuyPack }: {
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {plans && Object.entries(plans.credit_packs).map(([code, pack]) => {
-                const baseRate = pack.credits / pack.price_yuan
-                const bonus = Math.max(0, Math.round((baseRate / 10 - 1) * 100))
                 const isBest = code === 'pack_499'
                 return (
                   <div key={code} className={`relative p-4 rounded-xl border-2 flex flex-col gap-2 ${isBest && !isFreeUser ? 'border-amber-400 bg-[var(--bg-card)]' : 'border-[var(--border)] bg-[var(--bg-card)]'} ${isFreeUser ? 'opacity-50' : ''}`}>
@@ -824,7 +822,6 @@ function CreditsTab({ credits, plans, sub, onBuyPack }: {
                     <div className="text-xs text-[var(--text-3)]">{pack.name}</div>
                     <div className="text-2xl font-semibold">¥{pack.price_yuan}</div>
                     <div className="text-sm text-[var(--text-2)]">{pack.credits.toLocaleString()} 积分</div>
-                    {bonus > 0 && <div className="text-[10px] text-amber-500 font-medium">送 {bonus}%</div>}
                     <button onClick={() => !isFreeUser && onBuyPack(code)} disabled={isFreeUser}
                       className={`mt-1 py-2 rounded-lg text-xs ${isFreeUser ? 'bg-[var(--bg-hover)] text-[var(--text-3)] cursor-not-allowed' : 'bg-[var(--text)] text-[var(--bg)] hover:opacity-80 cursor-pointer'}`}
                       title={isFreeUser ? '免费用户不能买积分包, 先开通 Pro' : ''}>
