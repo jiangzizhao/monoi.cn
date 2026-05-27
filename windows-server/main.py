@@ -1083,8 +1083,12 @@ def transcribe_video(urls: tuple, tmpdir: str) -> str:
 
 
 @app.post("/api/fetch")
-def fetch_content(req: FetchRequest):
-    """抓取链接内容：视频链接用 Playwright+Whisper 转录，网页链接直接抓正文"""
+def fetch_content(req: FetchRequest, request: Request):
+    """抓取链接内容：视频链接用 Playwright+Whisper 转录，网页链接直接抓正文.
+
+    鉴权强制 — Playwright 抓视频 + Whisper 转录都吃 CPU + 带宽,
+    匿名用户能无限触发. Vercel /api/fetch-content 也已加 JWT, 这里是双保险."""
+    _user_id_from_request(request)
     import re
     url = extract_url(req.url)
 
@@ -1168,11 +1172,13 @@ def fetch_content(req: FetchRequest):
             raise HTTPException(500, f"页面抓取失败: {str(e)}")
 
 @app.post("/api/transcribe")
-def transcribe(req: FetchRequest):
-    return fetch_content(req)
+def transcribe(req: FetchRequest, request: Request):
+    # 别名转发到 fetch_content. 鉴权在 fetch_content 内已做, 这里透传 request.
+    return fetch_content(req, request)
 
 @app.post("/api/fetch-debug")
-def fetch_debug(req: FetchRequest):
+def fetch_debug(req: FetchRequest, request: Request):
+    _user_id_from_request(request)
     import re
     url = extract_url(req.url)
     is_douyin = bool(re.search(r"douyin\.com|v\.douyin\.com", url, re.I))
@@ -1248,7 +1254,10 @@ def get_my_clones(request: Request):
         conn.close()
 
 @app.post("/api/voice/assets")
-def create_voice_asset(req: VoiceAssetCreateRequest):
+def create_voice_asset(req: VoiceAssetCreateRequest, request: Request):
+    """录音上传记录入库. 鉴权强制 — 之前匿名也能写, 攻击者能塞垃圾数据.
+    user_id 改用 token 里的, 不再信前端 req.user_id (防一个用户假装另一个)."""
+    real_uid = _user_id_from_request(request)
     if not req.asset_name.strip():
         raise HTTPException(400, "asset_name 不能为空")
     if req.source_type not in ("upload", "recording", "reference"):
@@ -1262,7 +1271,7 @@ def create_voice_asset(req: VoiceAssetCreateRequest):
             (user_id, asset_name, source_type, file_name, file_path, duration_seconds, sample_rate, transcript, note)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            req.user_id, req.asset_name.strip(), req.source_type, req.file_name, req.file_path,
+            real_uid, req.asset_name.strip(), req.source_type, req.file_name, req.file_path,
             req.duration_seconds or 0, req.sample_rate, req.transcript, req.note
         ))
         conn.commit()
@@ -1285,19 +1294,24 @@ def list_voice_assets(user_id: Optional[int] = None):
         conn.close()
 
 @app.post("/api/voice/clones")
-def create_voice_clone(req: VoiceCloneCreateRequest):
+def create_voice_clone(req: VoiceCloneCreateRequest, request: Request):
+    """登记克隆任务. 鉴权强制 — user_id 改用 token 里的, 防伪装."""
+    real_uid = _user_id_from_request(request)
     conn = get_db()
     conn.row_factory = sqlite3.Row
     try:
         asset = conn.execute("SELECT * FROM voice_assets WHERE id = ?", (req.source_asset_id,)).fetchone()
         if not asset:
             raise HTTPException(404, "source_asset_id 不存在")
+        # 顺手校验: source_asset 必须是这个用户自己上传的, 防引用别人 asset 蹭
+        if asset['user_id'] and int(asset['user_id']) != real_uid:
+            raise HTTPException(403, "无权使用别人的音频素材")
         cursor = conn.execute("""
             INSERT INTO voice_clones
             (user_id, clone_name, engine, source_asset_id, accent, emotion_hint, status, sample_text)
             VALUES (?, ?, 'fish-speech', ?, ?, ?, 'pending', ?)
         """, (
-            req.user_id, req.clone_name.strip(), req.source_asset_id,
+            real_uid, req.clone_name.strip(), req.source_asset_id,
             req.accent, req.emotion_hint, req.sample_text
         ))
         conn.commit()
@@ -1415,8 +1429,14 @@ async def upload_clone(
 
 
 @app.delete("/api/voice/clone/{clone_key}")
-def delete_clone(clone_key: str):
-    """删除一个克隆音色"""
+def delete_clone(clone_key: str, request: Request):
+    """删除一个克隆音色.
+
+    鉴权强制 — 之前匿名能删任何 clone_key. 现在要求登录.
+    ⚠️ ownership 检查待补: voice_presets 表没 user_id 字段, 理论上知道别人 clone_key
+       的话能删别人的. 但 clone_key 是 clone_<8位随机 hex>, 不可猜 + UI 只列自己的,
+       实际风险接近 0. TODO: voice_presets 加 owner_user_id 一劳永逸."""
+    _user_id_from_request(request)
     import re as _re
     safe_key = _re.sub(r"[^a-zA-Z0-9_]", "", clone_key)
     if not safe_key.startswith("clone_"):
@@ -2346,9 +2366,14 @@ _ALLOWED_UPLOAD_PREFIXES = {'uploads', 'cover_templates', 'bgm_library', 'avatar
 
 
 @app.post("/api/oss/sign-upload")
-def oss_sign_upload(req: OssSignUploadRequest):
+def oss_sign_upload(req: OssSignUploadRequest, request: Request):
     """生成 OSS PUT 签名 URL. 前端用这个 URL 直接 PUT 文件到 OSS, 不再走 NATAPP.
-    prefix 区分 lifecycle: uploads/24h 清, cover_templates/bgm_library 永久保留."""
+    prefix 区分 lifecycle: uploads/24h 清, cover_templates/bgm_library 永久保留.
+
+    鉴权强制 — 之前没要求登录, 任何人能拿签名 URL 无限往 OSS 塞文件烧存储费.
+    严格不区分 admin/user — admin 上传模板用的 (cover_templates/bgm_library 等)
+    走的也是这个端点, admin 自己有 token 不影响."""
+    _user_id_from_request(request)   # 401 if no/invalid token
     from oss_helper import oss_make_upload_key, oss_sign_put, oss_is_configured
     if not oss_is_configured():
         raise HTTPException(503, "OSS 未配置, 请在 .env 设 OSS_ENDPOINT/OSS_BUCKET/OSS_ACCESS_KEY_ID/OSS_ACCESS_KEY_SECRET")
@@ -3569,12 +3594,31 @@ async def upload_avatar(
 
 
 @app.delete("/api/digital-human/avatars/{avatar_key}")
-def delete_avatar(avatar_key: str):
-    """删除一个数字人形象"""
+def delete_avatar(avatar_key: str, request: Request):
+    """删除一个数字人形象 (鉴权 + ownership 校验)."""
+    uid = _user_id_from_request(request)
     import re as _re
     safe_key = _re.sub(r"[^a-zA-Z0-9_]", "", avatar_key)
     if not safe_key.startswith("avatar_"):
         raise HTTPException(400, "avatar_key 格式错误")
+
+    # ownership 校验: digital_human_avatars 表有 user_id, 必须是自己的才能删 (admin 例外)
+    _conn = get_db()
+    try:
+        _row = _conn.execute(
+            "SELECT user_id FROM digital_human_avatars WHERE avatar_key = ?", (safe_key,)
+        ).fetchone()
+        if not _row:
+            raise HTTPException(404, "avatar 不存在")
+        owner_id = int(_row[0]) if _row[0] is not None else 0
+        # admin 可删任何人的 (用于内容审核)
+        _admin = _conn.execute("SELECT is_admin FROM users WHERE id = ?", (uid,)).fetchone()
+        is_admin = bool(_admin and _admin[0])
+        if not is_admin and owner_id != uid:
+            raise HTTPException(403, "无权删除别人的数字人形象")
+    finally:
+        _conn.close()
+
     file_path = os.path.join(DUIX_AVATAR_DIR, f"{safe_key}.mp4")
     if os.path.exists(file_path):
         try: os.remove(file_path)
