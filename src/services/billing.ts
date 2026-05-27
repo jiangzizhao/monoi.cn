@@ -44,12 +44,13 @@ export interface PlansResponse {
 }
 
 export interface DailyGrantInfo {
-  total_used: number             // 历史共领过几次 (0..total_cap)
-  total_cap: number              // 一辈子最多领几次 (默认 7)
-  streak_day: number             // 当前连续登录天数 (今天领了的话含今天). 中断重置成 1
+  day_in_window: number          // 今天在 7 天窗口的第几天 (1-7), 0=没领过, >7=过期
+  total_cap: number              // 窗口几天 (默认 7)
+  total_used: number             // 历史共领过几次 (0..7)
+  streak_day: number             // 当前连续登录天数 (含今天). 中断重置
   granted_today: boolean         // 今天领过没
   daily_amount: number           // 每天送多少
-  all_used_up: boolean           // total_used >= total_cap, 永久不再送
+  all_used_up: boolean           // 7 天窗口过期, 永久不再送
 }
 
 export interface CreditBalance {

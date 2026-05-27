@@ -544,10 +544,11 @@ def init_billing_tables():
 
 
 DAILY_FREE_GRANT_AMOUNT = 60       # free 用户每天送多少
-MAX_FREE_GRANTS_LIFETIME = 7       # 一辈子最多领几次 (不是日历窗口! 连续不连续都按总次数算)
+FREE_TRIAL_WINDOW_DAYS = 7         # 从第一次领起算的日历日窗口. 过期 → 永久停送.
 
-# 兼容: 老代码引用 DAILY_FREE_GRANT_DAYS 的别名 (准备移除, 但留着别立刻断)
-DAILY_FREE_GRANT_DAYS = MAX_FREE_GRANTS_LIFETIME
+# 兼容老引用 (准备移除)
+DAILY_FREE_GRANT_DAYS = FREE_TRIAL_WINDOW_DAYS
+MAX_FREE_GRANTS_LIFETIME = FREE_TRIAL_WINDOW_DAYS
 
 
 def _compute_consecutive_streak(conn, user_id: int, today_str: str) -> int:
@@ -580,16 +581,18 @@ def _compute_consecutive_streak(conn, user_id: int, today_str: str) -> int:
 
 
 def try_daily_grant(user_id: int) -> Optional[dict]:
-    """free 用户每天送 60 积分, 总共最多领 MAX_FREE_GRANTS_LIFETIME (7) 次.
+    """free 用户每天送 60 积分. 7 天**硬日历窗口**: 从第一次领的那天起算 7 天, 过期永久停送.
 
-    新规则 (2026-05-26 改):
-      - 总共最多 7 次 daily grant, 用完永远不再送
-      - streak (连续登录天数) 只是 UI 显示用 — 中断不"扣 grant", 但 streak 计数清零
-      - 付费用户不送 (有自己的 monthly 配额)
-      - 老规则 "每天清 monthly_credits" 保留 (free 状态积分当天不用就没)
+    规则 (2026-05-26 v2):
+      - 第一次领时, 窗口开始 (first_grant_date)
+      - 接下来 6 个日历日 (共 7 天) 每天能领 60
+      - 错过的天数 = 那 60 永久作废 (不补不延)
+      - 第 8 天起: 永远不再送, 即使总共只领过 1-2 次也不送 ← 修上一版漏洞
+      - streak (连续登录天数) UI 显示, 中断重置, 不影响 grant 资格
+      - 付费用户 / 曾付费过的用户 不送
 
-    Returns {granted, amount, streak_day, total_used, total_cap, reason} 或 None.
-    幂等 — 一天最多 grant 一次 (靠 UNIQUE(user_id, grant_date) 约束).
+    Returns {granted, amount, day_in_window, streak_day, total_used, reason} 或 None.
+    幂等 — 一天最多 grant 一次 (UNIQUE(user_id, grant_date)).
     """
     conn = get_db()
     try:
@@ -632,31 +635,47 @@ def try_daily_grant(user_id: int) -> Optional[dict]:
             )
             conn.commit()
 
-        # ============== Phase 2: 总配额检查 ==============
-        # 数 daily_credit_grant 表里这用户历史拿过几次 grant. >= 7 直接停送.
+        # ============== Phase 2: 窗口检查 (硬 7 天日历窗口) ==============
+        # 查用户第一次领 grant 的日期. 没有 → 今天就是第一次, 窗口从今天开始.
+        first_row = conn.execute(
+            "SELECT MIN(grant_date) FROM daily_credit_grant WHERE user_id = ?",
+            (user_id,)
+        ).fetchone()
+        first_grant_date = first_row[0] if first_row and first_row[0] else None
+
         total_used = conn.execute(
             "SELECT COUNT(*) FROM daily_credit_grant WHERE user_id = ?",
             (user_id,)
         ).fetchone()[0] or 0
-
-        # 算 streak (今天发 grant 前的)
         streak_ending_yesterday = _compute_consecutive_streak(conn, user_id, today)
 
         if ever_paid:
             return {
                 'granted': False, 'amount': 0,
+                'day_in_window': 0,
                 'streak_day': streak_ending_yesterday, 'total_used': total_used,
-                'total_cap': MAX_FREE_GRANTS_LIFETIME,
+                'total_cap': FREE_TRIAL_WINDOW_DAYS,
                 'expired_yesterday': old_monthly if last_reset_day != today else 0,
                 'reason': 'ever_paid',
             }
-        if total_used >= MAX_FREE_GRANTS_LIFETIME:
+
+        # 今天在窗口的第几天? 第一次领的话, 今天 = day 1
+        import datetime as _dt
+        if first_grant_date:
+            days_since_first = (_dt.date.fromisoformat(today) - _dt.date.fromisoformat(first_grant_date)).days
+            day_in_window = days_since_first + 1   # day 1 = first_grant_date 当天
+        else:
+            day_in_window = 1   # 今天就是第一次领
+
+        if day_in_window > FREE_TRIAL_WINDOW_DAYS:
+            # 7 天窗口过了 — 永久停送, 即使总次数没到 7
             return {
                 'granted': False, 'amount': 0,
+                'day_in_window': day_in_window,
                 'streak_day': streak_ending_yesterday, 'total_used': total_used,
-                'total_cap': MAX_FREE_GRANTS_LIFETIME,
+                'total_cap': FREE_TRIAL_WINDOW_DAYS,
                 'expired_yesterday': old_monthly if last_reset_day != today else 0,
-                'reason': 'free_trial_used_up',
+                'reason': 'window_expired',
             }
 
         # ============== Phase 3: 今天还没送过 → 送 60 ==============
@@ -667,8 +686,9 @@ def try_daily_grant(user_id: int) -> Optional[dict]:
         if already:
             return {
                 'granted': False, 'amount': 0,
+                'day_in_window': day_in_window,
                 'streak_day': streak_ending_yesterday, 'total_used': total_used,
-                'total_cap': MAX_FREE_GRANTS_LIFETIME,
+                'total_cap': FREE_TRIAL_WINDOW_DAYS,
                 'reason': 'already_today',
             }
 
@@ -681,21 +701,23 @@ def try_daily_grant(user_id: int) -> Optional[dict]:
         except sqlite3.IntegrityError:
             return {
                 'granted': False, 'amount': 0,
+                'day_in_window': day_in_window,
                 'streak_day': streak_ending_yesterday, 'total_used': total_used,
-                'total_cap': MAX_FREE_GRANTS_LIFETIME,
+                'total_cap': FREE_TRIAL_WINDOW_DAYS,
                 'reason': 'race',
             }
     finally:
         conn.close()
 
-    # 加今天的 grant (放 monthly_credits). 今天 streak_day = 昨天 streak + 1
+    # 加今天的 grant (放 monthly_credits)
     add_credits(user_id, DAILY_FREE_GRANT_AMOUNT, 'daily_free_grant',
                 ref_id=today, to_monthly=True, feature='daily_free_grant')
     return {
         'granted': True, 'amount': DAILY_FREE_GRANT_AMOUNT,
+        'day_in_window': day_in_window,
         'streak_day': streak_ending_yesterday + 1,
         'total_used': total_used + 1,
-        'total_cap': MAX_FREE_GRANTS_LIFETIME,
+        'total_cap': FREE_TRIAL_WINDOW_DAYS,
         'expired_yesterday': old_monthly if last_reset_day != today else 0,
     }
 
@@ -753,14 +775,14 @@ def get_balance(user_id: int) -> dict:
 
     daily_grant_info = None
     if tier == 'free':
-        # free 用户 quota = 7 × 60 = 420 (总送额), used = 累计已发 - 当前剩余
+        # free 用户 quota = 7 × 60 = 420 (理论总送额), used = 累计已发 - 当前剩余
         granted_total = conn.execute(
             "SELECT COALESCE(SUM(amount), 0) FROM daily_credit_grant WHERE user_id = ?",
             (user_id,)
         ).fetchone()[0] or 0
-        quota = DAILY_FREE_GRANT_AMOUNT * MAX_FREE_GRANTS_LIFETIME
+        quota = DAILY_FREE_GRANT_AMOUNT * FREE_TRIAL_WINDOW_DAYS
         used = max(0, granted_total - monthly)
-        # 算今天领没领 + streak (新规则: 总计 7 次, 连续登录天数只是 UI 显示)
+
         today = time.strftime('%Y-%m-%d', time.localtime())
         granted_today = conn.execute(
             "SELECT 1 FROM daily_credit_grant WHERE user_id = ? AND grant_date = ?",
@@ -770,16 +792,33 @@ def get_balance(user_id: int) -> dict:
             "SELECT COUNT(*) FROM daily_credit_grant WHERE user_id = ?",
             (user_id,)
         ).fetchone()[0] or 0
-        # streak: 截至昨天的连续登录天数, 今天领了 +1
+        first_row = conn.execute(
+            "SELECT MIN(grant_date) FROM daily_credit_grant WHERE user_id = ?",
+            (user_id,)
+        ).fetchone()
+        first_grant_date = first_row[0] if first_row and first_row[0] else None
+
+        import datetime as _dt
+        if first_grant_date:
+            days_since_first = (_dt.date.fromisoformat(today) - _dt.date.fromisoformat(first_grant_date)).days
+            day_in_window = days_since_first + 1
+        else:
+            day_in_window = 0   # 还没领过, 不在窗口里 (今天领是 day 1)
+
+        window_expired = first_grant_date is not None and day_in_window > FREE_TRIAL_WINDOW_DAYS
+
+        # streak: 含今天 (今天领了 +1)
         streak_yest = _compute_consecutive_streak(conn, user_id, today)
         streak_day = streak_yest + 1 if granted_today else streak_yest
+
         daily_grant_info = {
+            'day_in_window': day_in_window,             # 0 = 没领过; 1-7 = 在窗口; >7 = 过期
+            'total_cap': FREE_TRIAL_WINDOW_DAYS,        # 7
             'total_used': total_used,
-            'total_cap': MAX_FREE_GRANTS_LIFETIME,
             'streak_day': streak_day,
             'granted_today': granted_today,
             'daily_amount': DAILY_FREE_GRANT_AMOUNT,
-            'all_used_up': total_used >= MAX_FREE_GRANTS_LIFETIME,
+            'all_used_up': window_expired,
         }
     else:
         quota = int(sub.get('monthly_credits', 0) or 0)
