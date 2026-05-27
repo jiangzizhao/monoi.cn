@@ -894,6 +894,18 @@ def get_daily_action_count(user_id: int, action: str) -> int:
     return int(row[0]) if row else 0
 
 
+def get_monthly_action_count(user_id: int, action: str) -> int:
+    """返用户本月某动作累计次数. 同表查 (day 字段前缀匹配 'YYYY-MM-')."""
+    month_prefix = time.strftime('%Y-%m-', time.localtime())
+    conn = get_db()
+    row = conn.execute(
+        "SELECT SUM(count) FROM daily_action_count WHERE user_id = ? AND action = ? AND day LIKE ?",
+        (user_id, action, month_prefix + '%')
+    ).fetchone()
+    conn.close()
+    return int(row[0]) if (row and row[0]) else 0
+
+
 def incr_daily_action_count(user_id: int, action: str) -> int:
     """+1. 返新计数. (UPSERT 写法兼容 sqlite 3.24+, 老版本要 try insert + 失败 update.)"""
     conn = get_db()
