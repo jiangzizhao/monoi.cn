@@ -10,6 +10,20 @@ function authHeaders(): Record<string, string> {
     : { 'Content-Type': 'application/json' }
 }
 
+/** 解 /api/chat 响应错误 — 优先取 body.error / body.detail 做友好提示, 没就回 "API ${status}".
+ * 同时把 status 挂到 err.code 上, 方便上层 catch 区分 402 (不重试).
+ * 用法: if (!r.ok) throw await chatHttpError(r) */
+async function chatHttpError(r: Response): Promise<Error> {
+  let detail = ''
+  try {
+    const body: any = await r.clone().json()
+    detail = body.error || body.detail || ''
+  } catch { /* body 不是 JSON 就降级 */ }
+  const e: any = new Error(detail || `API ${r.status}`)
+  e.code = r.status
+  return e
+}
+
 export const SYSTEM_PROMPT = `【重要】你的每一条回复必须且只能是一个合法的 JSON 对象，格式为 {"blocks":[...]}。禁止在 JSON 外添加任何文字，禁止使用 markdown 代码块包裹（不要有反引号符号）。
 
 你是 monoi，一个专为中文自媒体创作者设计的口播视频全流程生产助手。
@@ -255,7 +269,7 @@ export async function callAI(
     signal,
   })
 
-  if (!res.ok) throw new Error(`API ${res.status}`)
+  if (!res.ok) throw await chatHttpError(res)
   const data = await res.json()
   // 兼容两种返回形式: OpenAI 风格 choices[0].message.content / 自定义 text 字段
   const full: string = data.choices?.[0]?.message?.content || data.text || data.content || ''
@@ -469,7 +483,7 @@ export async function callScriptAI(
     signal,
   })
 
-  if (!res.ok) throw new Error(`API ${res.status}`)
+  if (!res.ok) throw await chatHttpError(res)
 
   const reader = res.body!.getReader()
   const decoder = new TextDecoder()
@@ -580,13 +594,7 @@ export async function callFootageAIBySegments(
       body: JSON.stringify(body),
       signal,
     })
-    if (r.status === 402) {
-      const err: any = await r.json().catch(() => ({}))
-      const e: any = new Error(err.error || '积分余额不足')
-      e.code = 402
-      throw e
-    }
-    if (!r.ok) throw new Error(`API ${r.status}`)
+    if (!r.ok) throw await chatHttpError(r)   // 402 / 503 等都带 e.code 抛出
     firstCharged = true   // 200 返回 = Vercel 已扣 5, 后面 retry 不再扣
     const data = await r.json()
     const content = data?.choices?.[0]?.message?.content || ''
@@ -661,13 +669,7 @@ export async function callFootageAI(
       body: JSON.stringify(body),
       signal,
     })
-    if (r.status === 402) {
-      const err: any = await r.json().catch(() => ({}))
-      const e: any = new Error(err.error || '积分余额不足')
-      e.code = 402
-      throw e
-    }
-    if (!r.ok) throw new Error(`API ${r.status}`)
+    if (!r.ok) throw await chatHttpError(r)
     firstCharged = true
     const data = await r.json()
     const content = data?.choices?.[0]?.message?.content || ''
