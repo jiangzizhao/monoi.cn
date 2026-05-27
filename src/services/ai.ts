@@ -1,5 +1,14 @@
 import type { MessageBlock, ChatMessage } from '../types'
 import { jsonrepair } from 'jsonrepair'
+import { getToken } from '../lib/auth'
+
+// /api/chat 现在要求登录 (Vercel function 验 JWT). 没 token = 401, 用户不登录用不了 AI 对话.
+function authHeaders(): Record<string, string> {
+  const token = getToken()
+  return token
+    ? { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }
+    : { 'Content-Type': 'application/json' }
+}
 
 export const SYSTEM_PROMPT = `【重要】你的每一条回复必须且只能是一个合法的 JSON 对象，格式为 {"blocks":[...]}。禁止在 JSON 外添加任何文字，禁止使用 markdown 代码块包裹（不要有反引号符号）。
 
@@ -234,7 +243,7 @@ export async function callAI(
   // 模拟流式: 拿到完整文本后, 按 30ms / 字符喂给 onChunk, 让用户感觉有打字效果.
   const res = await fetchWithRetry('/api/chat', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders(),
     body: JSON.stringify({
       system: SYSTEM_PROMPT,
       messages: toAPIMessages(messages),
@@ -445,7 +454,7 @@ export async function callScriptAI(
   const mode = modeOverride ?? (prompt.startsWith('【仿写文案】') ? 'rewrite' : 'original')
   const res = await fetchWithRetry('/api/chat', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders(),
     body: JSON.stringify({
       system: buildScriptSystemPrompt(mode),
       messages: [{ role: 'user', content: prompt }],
@@ -551,7 +560,7 @@ export async function callFootageAIBySegments(
   const callOnce = async (): Promise<any> => {
     const r = await fetchWithRetry('/api/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders(),
       body: JSON.stringify({
         system: FOOTAGE_BY_SEGMENTS_PROMPT,
         messages: [{ role: 'user', content: userMsg }],
@@ -620,7 +629,7 @@ export async function callFootageAI(
   const callOnce = async (): Promise<any> => {
     const r = await fetchWithRetry('/api/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders(),
       body: JSON.stringify({
         system: FOOTAGE_SYSTEM_PROMPT,
         messages: [{ role: 'user', content: script }],

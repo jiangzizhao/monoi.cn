@@ -1,7 +1,40 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
+import { createHmac } from 'node:crypto'
+
+/**
+ * JWT 验签 (HS256). 跟后端 main.py: SECRET_KEY 一致.
+ * 没用 jsonwebtoken 包是因为不想引依赖, 手撸 base64url + HMAC 就够.
+ * Returns payload object or null (无效 / 过期 / 签名错).
+ */
+function verifyJWT(token: string, secret: string): { sub?: string; iat?: number; exp?: number } | null {
+  try {
+    const parts = token.split('.')
+    if (parts.length !== 3) return null
+    const [headerB64, payloadB64, sigB64] = parts
+    const expected = createHmac('sha256', secret).update(`${headerB64}.${payloadB64}`).digest()
+    const expectedB64 = expected.toString('base64url')
+    if (expectedB64 !== sigB64) return null
+    const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf-8'))
+    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null
+    return payload
+  } catch {
+    return null
+  }
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).end()
+
+  // ============ 鉴权: 没 token / token 无效 / 过期 → 401 ============
+  // 之前这里没鉴权, 任何人 (包括没注册的) 都能调 DeepSeek, 严重薅羊毛漏洞.
+  // chat 本身不扣积分 (UX 性质, 用户要靠它问 monoi 怎么用), 但必须是已登录用户.
+  const authHeader = String(req.headers.authorization || req.headers.Authorization || '')
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : ''
+  if (!token) return res.status(401).json({ error: 'Unauthorized: 请登录' })
+  const secret = process.env.JWT_SECRET_KEY || 'monoi-secret-key-2025'
+  const payload = verifyJWT(token, secret)
+  if (!payload || !payload.sub) return res.status(401).json({ error: 'Unauthorized: token 无效或已过期' })
+
   const apiKey = process.env.DEEPSEEK_API_KEY || ''
   if (!apiKey) return res.status(500).json({ error: 'DEEPSEEK_API_KEY not configured' })
 

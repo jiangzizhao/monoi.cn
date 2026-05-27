@@ -1682,7 +1682,8 @@ def _run_tts_task(task_id: str, server_url: str, payload: dict, audio_url_path_p
             progress=100,
         )
         # 任务成功 → 扣积分 (按实际合成时长, 0.5 积分/秒 预设音色)
-        # 注意: voice-server 已经合成完, 不够积分也不退合成成本 — 后续可以改成"预估扣 + 对账"
+        # 后扣 (按真实时长): /api/voice/synthesize 端点已经做了预扣校验, 这里只补齐差额.
+        # 如果余额不够也只能记日志 — 合成已经完成. 但因为有预扣, 这种情况极少 (除非预估误差大).
         try:
             _conn = get_db()
             _conn.row_factory = sqlite3.Row
@@ -1694,10 +1695,10 @@ def _run_tts_task(task_id: str, server_url: str, payload: dict, audio_url_path_p
                 rate = 1.5 if (_row['preset_key'] and _row['preset_key'].startswith('clone_')) else 0.5
                 amount = max(1, round(duration_s * rate))
                 consume_credits(_row['user_id'], 'tts', amount, ref_id=task_id)
-                print(f"[tts-credit] 扣 {amount} 积分 (user={_row['user_id']} duration={duration_s:.1f}s rate={rate})", flush=True)
+                print(f"[tts-credit] 后扣 {amount} 积分 (user={_row['user_id']} duration={duration_s:.1f}s rate={rate})", flush=True)
         except Exception as _ce:
-            # 扣费失败不影响合成结果 (用户已经能用了), 记日志后续 admin 手动对账
-            print(f"[tts-credit] 扣积分失败但合成已成功 task={task_id}: {_ce}", flush=True)
+            # 后扣失败 (积分耗尽 / db 锁) 也只能记日志 — 合成已成功不能撤销. 预扣已防大头.
+            print(f"[tts-credit] 后扣失败 (预扣已生效, 仅日志) task={task_id}: {_ce}", flush=True)
     except _req.exceptions.ConnectionError:
         _update_tts_task(task_id, status="failed", error_message=f"{server_label} 未启动")
     except _req.exceptions.Timeout:
@@ -1871,11 +1872,36 @@ def synthesize_voice(req: VoiceSynthesizeRequest, request: Request):
     if not req.preset_key and not req.clone_id:
         raise HTTPException(400, "preset_key 和 clone_id 至少要传一个")
 
-    # 拿 user_id (后续给 _create_tts_task 用, 任务完成时按 user_id 扣积分)
+    # 鉴权强制 — 之前 except Exception: _uid = None 允许匿名调用 + 后续扣费失败也放过
+    # 整个 TTS 是免费送的, 这是大薅羊毛漏洞. 现在必须登录.
+    _uid = _user_id_from_request(request)
+
+    # 预扣 (合成前校验余额) — 按字数预估积分, 实际合成完成后会再调一次按真实时长扣
+    # 预估公式: 跟 _run_tts_task 后扣对齐 — 预设 0.5/s, 克隆 1.5/s, 字数 / 6 ≈ 秒数
+    # 字数 60 ≈ 10 秒 ≈ 5 积分 (预设), 15 积分 (克隆)
     try:
-        _uid = _user_id_from_request(request)
-    except Exception:
-        _uid = None
+        from billing import consume_credits, get_user_subscription
+        from sqlite3 import Row as _Row
+        text_len = len(req.text.strip())
+        est_seconds = max(1, text_len / 6.0)
+        is_clone = bool(req.preset_key and req.preset_key.startswith('clone_'))
+        rate = 1.5 if is_clone else 0.5
+        est_amount = max(1, int(round(est_seconds * rate)))
+        # 只校验余额够不够, 不真的扣 — 后扣会在 _run_tts_task 用真实时长重算
+        _conn = get_db()
+        _conn.row_factory = sqlite3.Row
+        _bal = _conn.execute(
+            "SELECT monthly_credits, purchased_credits FROM credit_balance WHERE user_id = ?",
+            (_uid,)
+        ).fetchone()
+        _conn.close()
+        _total = int((_bal['monthly_credits'] or 0) if _bal else 0) + int((_bal['purchased_credits'] or 0) if _bal else 0)
+        if _total < est_amount:
+            raise HTTPException(402, f"积分余额不足 (需要约 {est_amount}, 当前剩 {_total}). 升级套餐或购买积分包.")
+    except HTTPException:
+        raise
+    except Exception as _ce:
+        print(f"[tts-precheck] 跳过预扣 (ignore): {_ce}", flush=True)
 
     # 拒绝: 克隆音色 + 粤语. 引导用户改用粤语预设音色.
     if req.preset_key:
@@ -3168,10 +3194,13 @@ async def cover_remove_bg_proxy(request: Request):
         data = resp.json()
 
         # 只有真跑了 rembg (cached!=True) + 有登录用户 才扣 2 积分
+        # 之前 except Exception 把 402 也吞了, 0 积分用户照样抠图. 现在 402 透传到前端阻断后续.
         if data.get('success') and not data.get('cached') and _uid:
             try:
                 from billing import consume_credits
                 consume_credits(_uid, 'cover_remove_bg', 2, ref_id=data.get('oss_key', ''))
+            except HTTPException:
+                raise
             except Exception as _ce:
                 print(f"[cover-remove-bg-credit] 跳过扣费: {_ce}", flush=True)
 
