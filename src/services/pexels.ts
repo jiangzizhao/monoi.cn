@@ -1,4 +1,5 @@
 import type { VideoAsset } from '../types'
+import { getToken } from '../lib/auth'
 
 // 从 video_files 选最佳 mp4: 优先 hd, 然后挑宽度最接近 1920 但不超过的, 最后退回 sd
 // 目标: 拿原素材最高清晰度版本, 避免合成时升采样模糊
@@ -14,7 +15,10 @@ function pickBestVideoFile(files: any[] | undefined): string | undefined {
 }
 
 export async function searchPexels(query: string, perPage = 6): Promise<VideoAsset[]> {
-  const res = await fetch(`/api/pexels?query=${encodeURIComponent(query)}&per_page=${perPage}`)
+  const token = getToken()
+  const res = await fetch(`/api/pexels?query=${encodeURIComponent(query)}&per_page=${perPage}`, {
+    headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+  })
   if (!res.ok) return []
   const data = await res.json()
   return (data.videos || []).map((v: any) => ({

@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { Loader2, AlertCircle, Upload } from 'lucide-react'
 import { consumePrefill } from '../../../lib/formPrefill'
+import { getToken } from '../../../lib/auth'
 
 const PLATFORMS = ['抖音', '视频号', '小红书', 'B站', 'YouTube', 'Reels']
 const STYLES = ['案例启发型', '避坑指南型', '反常认知型', '共鸣观点型', '问题解决型']
@@ -96,9 +97,13 @@ function GuidedForm({ mode, onSubmit, onClose }: { mode: 'original' | 'rewrite';
     setFetching(true)
     setFetchError('')
     try {
+      const token = getToken()
       const res = await fetch('/api/fetch-content', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({ url: inputVal.trim() }),
       })
       const data = await res.json()

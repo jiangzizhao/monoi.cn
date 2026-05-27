@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
+import { requireAuth } from './_lib/auth'
 
 function extractUrl(text: string): string {
   const match = text.match(/https?:\/\/[^\s，。！？、]+/)
@@ -13,6 +14,10 @@ const INTL_VIDEO = /youtube\.com|youtu\.be|instagram\.com\/reel/i
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).end()
+
+  // 之前没鉴权, 攻击者能用我的后端抓取任意 URL (转推 / 转录, 烧带宽 + 计算).
+  // 加 JWT 拦截.
+  if (!requireAuth(req, res)) return
 
   const { url: rawInput } = req.body
   if (!rawInput) return res.status(400).json({ error: '缺少 url 参数' })

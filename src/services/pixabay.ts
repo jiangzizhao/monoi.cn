@@ -1,7 +1,11 @@
 import type { VideoAsset } from '../types'
+import { getToken } from '../lib/auth'
 
 export async function searchPixabay(query: string, perPage = 6): Promise<VideoAsset[]> {
-  const res = await fetch(`/api/pixabay?query=${encodeURIComponent(query)}&per_page=${perPage}`)
+  const token = getToken()
+  const res = await fetch(`/api/pixabay?query=${encodeURIComponent(query)}&per_page=${perPage}`, {
+    headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+  })
   if (!res.ok) return []
   const data = await res.json()
   return (data.hits || []).map((v: any) => ({

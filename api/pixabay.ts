@@ -1,6 +1,10 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
+import { requireAuth } from './_lib/auth'
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // 之前没鉴权, 攻击者能用我的 PIXABAY_API_KEY 烧月配额. 必须登录.
+  if (!requireAuth(req, res)) return
+
   const apiKey = process.env.PIXABAY_API_KEY || ''
   if (!apiKey) return res.status(500).json({ error: 'PIXABAY_API_KEY not configured' })
 
