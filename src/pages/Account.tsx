@@ -607,7 +607,7 @@ function MembershipTab({ sub, plans, credits, onUpgrade }: {
             {credits?.daily_grant && (
               <div className="space-y-2.5">
                 <UsageBar
-                  label={`新人 7 天体验 (第 ${credits.daily_grant.day_index}/${credits.daily_grant.total_days} 天)`}
+                  label={`新人体验 · 已领 ${credits.daily_grant.total_used}/${credits.daily_grant.total_cap} 次免费积分`}
                   used={credits.monthly_used}
                   total={credits.monthly_quota}
                   unit="积分"
@@ -615,12 +615,12 @@ function MembershipTab({ sub, plans, credits, onUpgrade }: {
                 />
                 <div className="flex items-center justify-between text-[11px] text-[var(--text-3)]">
                   <span>
-                    {credits.daily_grant.days_remaining > 0 ? (
-                      credits.daily_grant.granted_today
-                        ? `今日已领 ${credits.daily_grant.daily_amount} 积分 · 还能领 ${credits.daily_grant.days_remaining - 1} 天`
-                        : `今日可领 ${credits.daily_grant.daily_amount} 积分 (打开页面自动到账)`
+                    {credits.daily_grant.all_used_up ? (
+                      <span className="text-amber-500">免费体验已用完 ({credits.daily_grant.total_cap}/{credits.daily_grant.total_cap}), 升级套餐继续享受积分</span>
+                    ) : credits.daily_grant.granted_today ? (
+                      `今日已领 ${credits.daily_grant.daily_amount} 积分 · 连续登录 ${credits.daily_grant.streak_day} 天 · 还可领 ${credits.daily_grant.total_cap - credits.daily_grant.total_used} 次`
                     ) : (
-                      <span className="text-amber-500">7 天体验已结束, 升级套餐继续享受月度积分</span>
+                      `今日可领 ${credits.daily_grant.daily_amount} 积分 (打开页面自动到账) · 已领 ${credits.daily_grant.total_used}/${credits.daily_grant.total_cap}`
                     )}
                   </span>
                 </div>

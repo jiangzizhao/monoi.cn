@@ -544,13 +544,51 @@ def init_billing_tables():
 
 
 DAILY_FREE_GRANT_AMOUNT = 60       # free 用户每天送多少
-DAILY_FREE_GRANT_DAYS = 7          # 送几天 (注册起算)
+MAX_FREE_GRANTS_LIFETIME = 7       # 一辈子最多领几次 (不是日历窗口! 连续不连续都按总次数算)
+
+# 兼容: 老代码引用 DAILY_FREE_GRANT_DAYS 的别名 (准备移除, 但留着别立刻断)
+DAILY_FREE_GRANT_DAYS = MAX_FREE_GRANTS_LIFETIME
+
+
+def _compute_consecutive_streak(conn, user_id: int, today_str: str) -> int:
+    """返用户截至昨天的连续登录天数 (含昨天). 没昨天的 grant 返 0.
+
+    例: 用户在 5/24, 5/25, 5/26 都领了 grant. 今天是 5/27.
+        → grant_dates desc: ['5/26', '5/25', '5/24']
+        → expected = 5/26 (昨天) → match → streak=1, expected=5/25
+        → match → streak=2, expected=5/24
+        → match → streak=3
+        返 3 (今天领是 day 4).
+    """
+    import datetime as _dt
+    yesterday = (_dt.date.fromisoformat(today_str) - _dt.timedelta(days=1)).isoformat()
+    rows = conn.execute(
+        "SELECT grant_date FROM daily_credit_grant WHERE user_id = ? AND grant_date < ? ORDER BY grant_date DESC LIMIT ?",
+        (user_id, today_str, MAX_FREE_GRANTS_LIFETIME + 1)
+    ).fetchall()
+    if not rows or rows[0][0] != yesterday:
+        return 0
+    streak = 0
+    expected = _dt.date.fromisoformat(yesterday)
+    for r in rows:
+        d = _dt.date.fromisoformat(r[0])
+        if d != expected:
+            break
+        streak += 1
+        expected = expected - _dt.timedelta(days=1)
+    return streak
 
 
 def try_daily_grant(user_id: int) -> Optional[dict]:
-    """free 用户每天送 60 积分, 注册起 7 天后停.
+    """free 用户每天送 60 积分, 总共最多领 MAX_FREE_GRANTS_LIFETIME (7) 次.
 
-    Returns {granted: bool, amount, day_index, days_remaining} 或 None (拿不到 user).
+    新规则 (2026-05-26 改):
+      - 总共最多 7 次 daily grant, 用完永远不再送
+      - streak (连续登录天数) 只是 UI 显示用 — 中断不"扣 grant", 但 streak 计数清零
+      - 付费用户不送 (有自己的 monthly 配额)
+      - 老规则 "每天清 monthly_credits" 保留 (free 状态积分当天不用就没)
+
+    Returns {granted, amount, streak_day, total_used, total_cap, reason} 或 None.
     幂等 — 一天最多 grant 一次 (靠 UNIQUE(user_id, grant_date) 约束).
     """
     conn = get_db()
@@ -558,47 +596,23 @@ def try_daily_grant(user_id: int) -> Optional[dict]:
         user_row = conn.execute("SELECT created_at FROM users WHERE id = ?", (user_id,)).fetchone()
         if not user_row:
             return None
-        # created_at 兼容: 老用户可能存的是 ISO 字符串, 新用户是 Unix 时间戳 float.
-        # 拿不到合法时间戳直接跳 grant, 不抠这个 (admin 自己看哪些用户存错了再补).
-        raw_created = user_row['created_at']
-        try:
-            if isinstance(raw_created, (int, float)):
-                created_at = float(raw_created)
-            elif isinstance(raw_created, str):
-                # 尝试 1: 字符串里就是数字
-                try:
-                    created_at = float(raw_created)
-                except ValueError:
-                    # 尝试 2: ISO 8601 格式 "2024-05-19T10:00:00" 之类
-                    import datetime as _dt
-                    created_at = _dt.datetime.fromisoformat(raw_created.replace('Z', '+00:00')).timestamp()
-            else:
-                return None
-        except Exception:
-            return None
-        # 注册的几天后了 (注册当天 = day 1)
-        days_since = (time.time() - created_at) / 86400
-        day_index = int(days_since) + 1     # 1..N
 
-        # 只 free 用户走 (付费用户的月送积分不该每天清)
+        # 只 free 用户走 (付费用户有自己的 monthly 配额, 不掺和 daily grant 也不每天清积分)
         sub_row = conn.execute(
             "SELECT tier, current_period_end FROM user_subscription WHERE user_id = ?",
             (user_id,)
         ).fetchone()
         is_free = (not sub_row) or (sub_row['current_period_end'] or 0) < time.time()
         if not is_free:
-            return {'granted': False, 'amount': 0, 'day_index': day_index, 'days_remaining': max(0, DAILY_FREE_GRANT_DAYS - day_index)}
+            return {'granted': False, 'amount': 0, 'reason': 'paid_user',
+                    'streak_day': 0, 'total_used': 0, 'total_cap': MAX_FREE_GRANTS_LIFETIME}
 
         # 曾经付费过 (user_subscription 有 row 就算曾经付过, 哪怕现在过期) → 不再发 daily grant
-        # 但 Phase 1 清零照旧, 用户明确选择 "过期回 free 积分也清"
         ever_paid = sub_row is not None
 
         today = time.strftime('%Y-%m-%d', time.localtime())
 
-        # ============== Phase 1: 只要当前是 free, 每天清 monthly_credits ==============
-        # 用户规则: free 状态下积分 "当天不用就没". 不管 free 是因为新注册还是付费过期 — 一视同仁.
-        # 付费过期回 free 后, 剩余的积分也会被这里清零 (用户明确选择的策略).
-        # monthly_credits_reset_at 防一天清多次.
+        # ============== Phase 1: free 状态, 每天清昨天没用的 monthly_credits ==============
         cb_row = conn.execute(
             "SELECT monthly_credits, monthly_credits_reset_at FROM credit_balance WHERE user_id = ?",
             (user_id,)
@@ -618,14 +632,31 @@ def try_daily_grant(user_id: int) -> Optional[dict]:
             )
             conn.commit()
 
-        # ============== Phase 2: 超过 7 天 / 曾经付费过 → 不送新积分 ==============
-        # daily grant 只送给"首次注册" 的全新用户. 付费过的 (即使现在过期) 不再发.
-        if day_index > DAILY_FREE_GRANT_DAYS or ever_paid:
+        # ============== Phase 2: 总配额检查 ==============
+        # 数 daily_credit_grant 表里这用户历史拿过几次 grant. >= 7 直接停送.
+        total_used = conn.execute(
+            "SELECT COUNT(*) FROM daily_credit_grant WHERE user_id = ?",
+            (user_id,)
+        ).fetchone()[0] or 0
+
+        # 算 streak (今天发 grant 前的)
+        streak_ending_yesterday = _compute_consecutive_streak(conn, user_id, today)
+
+        if ever_paid:
             return {
                 'granted': False, 'amount': 0,
-                'day_index': day_index, 'days_remaining': 0,
+                'streak_day': streak_ending_yesterday, 'total_used': total_used,
+                'total_cap': MAX_FREE_GRANTS_LIFETIME,
                 'expired_yesterday': old_monthly if last_reset_day != today else 0,
-                'reason': 'ever_paid' if ever_paid else 'past_7_days',
+                'reason': 'ever_paid',
+            }
+        if total_used >= MAX_FREE_GRANTS_LIFETIME:
+            return {
+                'granted': False, 'amount': 0,
+                'streak_day': streak_ending_yesterday, 'total_used': total_used,
+                'total_cap': MAX_FREE_GRANTS_LIFETIME,
+                'expired_yesterday': old_monthly if last_reset_day != today else 0,
+                'reason': 'free_trial_used_up',
             }
 
         # ============== Phase 3: 今天还没送过 → 送 60 ==============
@@ -634,7 +665,12 @@ def try_daily_grant(user_id: int) -> Optional[dict]:
             (user_id, today)
         ).fetchone()
         if already:
-            return {'granted': False, 'amount': 0, 'day_index': day_index, 'days_remaining': DAILY_FREE_GRANT_DAYS - day_index, 'reason': 'already_today'}
+            return {
+                'granted': False, 'amount': 0,
+                'streak_day': streak_ending_yesterday, 'total_used': total_used,
+                'total_cap': MAX_FREE_GRANTS_LIFETIME,
+                'reason': 'already_today',
+            }
 
         try:
             conn.execute("""
@@ -643,16 +679,23 @@ def try_daily_grant(user_id: int) -> Optional[dict]:
             """, (user_id, today, DAILY_FREE_GRANT_AMOUNT, time.time()))
             conn.commit()
         except sqlite3.IntegrityError:
-            return {'granted': False, 'amount': 0, 'day_index': day_index, 'days_remaining': DAILY_FREE_GRANT_DAYS - day_index, 'reason': 'race'}
+            return {
+                'granted': False, 'amount': 0,
+                'streak_day': streak_ending_yesterday, 'total_used': total_used,
+                'total_cap': MAX_FREE_GRANTS_LIFETIME,
+                'reason': 'race',
+            }
     finally:
         conn.close()
 
-    # 加今天的 grant (放 monthly_credits)
+    # 加今天的 grant (放 monthly_credits). 今天 streak_day = 昨天 streak + 1
     add_credits(user_id, DAILY_FREE_GRANT_AMOUNT, 'daily_free_grant',
                 ref_id=today, to_monthly=True, feature='daily_free_grant')
     return {
         'granted': True, 'amount': DAILY_FREE_GRANT_AMOUNT,
-        'day_index': day_index, 'days_remaining': DAILY_FREE_GRANT_DAYS - day_index,
+        'streak_day': streak_ending_yesterday + 1,
+        'total_used': total_used + 1,
+        'total_cap': MAX_FREE_GRANTS_LIFETIME,
         'expired_yesterday': old_monthly if last_reset_day != today else 0,
     }
 
@@ -715,24 +758,29 @@ def get_balance(user_id: int) -> dict:
             "SELECT COALESCE(SUM(amount), 0) FROM daily_credit_grant WHERE user_id = ?",
             (user_id,)
         ).fetchone()[0] or 0
-        quota = DAILY_FREE_GRANT_AMOUNT * DAILY_FREE_GRANT_DAYS
+        quota = DAILY_FREE_GRANT_AMOUNT * MAX_FREE_GRANTS_LIFETIME
         used = max(0, granted_total - monthly)
-        # 算今天能不能领 + 还能领几天
-        user_row = conn.execute("SELECT created_at FROM users WHERE id = ?", (user_id,)).fetchone()
-        if user_row:
-            day_index = int((time.time() - user_row['created_at']) / 86400) + 1
-            today = time.strftime('%Y-%m-%d', time.localtime())
-            granted_today = conn.execute(
-                "SELECT 1 FROM daily_credit_grant WHERE user_id = ? AND grant_date = ?",
-                (user_id, today)
-            ).fetchone() is not None
-            daily_grant_info = {
-                'day_index': day_index,
-                'days_remaining': max(0, DAILY_FREE_GRANT_DAYS - day_index + 1),
-                'granted_today': granted_today,
-                'daily_amount': DAILY_FREE_GRANT_AMOUNT,
-                'total_days': DAILY_FREE_GRANT_DAYS,
-            }
+        # 算今天领没领 + streak (新规则: 总计 7 次, 连续登录天数只是 UI 显示)
+        today = time.strftime('%Y-%m-%d', time.localtime())
+        granted_today = conn.execute(
+            "SELECT 1 FROM daily_credit_grant WHERE user_id = ? AND grant_date = ?",
+            (user_id, today)
+        ).fetchone() is not None
+        total_used = conn.execute(
+            "SELECT COUNT(*) FROM daily_credit_grant WHERE user_id = ?",
+            (user_id,)
+        ).fetchone()[0] or 0
+        # streak: 截至昨天的连续登录天数, 今天领了 +1
+        streak_yest = _compute_consecutive_streak(conn, user_id, today)
+        streak_day = streak_yest + 1 if granted_today else streak_yest
+        daily_grant_info = {
+            'total_used': total_used,
+            'total_cap': MAX_FREE_GRANTS_LIFETIME,
+            'streak_day': streak_day,
+            'granted_today': granted_today,
+            'daily_amount': DAILY_FREE_GRANT_AMOUNT,
+            'all_used_up': total_used >= MAX_FREE_GRANTS_LIFETIME,
+        }
     else:
         quota = int(sub.get('monthly_credits', 0) or 0)
         used = max(0, quota - monthly)
