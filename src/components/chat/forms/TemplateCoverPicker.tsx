@@ -124,7 +124,27 @@ export function TemplateCoverPicker({ onClose }: { onClose?: () => void } = {}) 
         person_oss_key: personOssKey || undefined,
         person_slot_override: Object.keys(personSlotOverride).length > 0 ? personSlotOverride : undefined,
       })
-      setResult({ download_url: r.download_url, width: r.width, height: r.height })
+      // 生成成功 → 直接发到对话 + 关弹窗 (之前停在弹窗底部的预览, 用户看不到也不知道成没成功)
+      const convId = chatStore.activeId
+      if (convId) {
+        chatStore.addMessage(convId, makeAssistantMsg([
+          { type: 'text', content: `✓ 已用模板 "${selected.name}" 生成封面` },
+          { type: 'cover_result', data: { covers: [{ ratio: selected.ratio, url: r.download_url }] } },
+          {
+            type: 'choices',
+            question: '下一步',
+            options: [
+              { id: '__form_publish__', label: '去发布', description: '上传到小红书 / 抖音' },
+              { id: '帮我生成各平台的发布文案', label: '生成发布文案', description: 'AI 给每平台写标题/描述/标签' },
+              { id: '保留封面, 暂不做下一步', label: '保留封面', description: '稍后再决定' },
+            ],
+          } as any,
+        ]))
+        onClose?.()
+      } else {
+        // 没活跃对话(极少) → 退回弹窗里展示预览, 让用户手动发
+        setResult({ download_url: r.download_url, width: r.width, height: r.height })
+      }
     } catch (e: any) {
       setGenErr(e.message || '生成失败')
     } finally {
