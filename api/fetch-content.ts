@@ -1,5 +1,29 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { requireAuth } from './_lib/auth'
+import { createHmac } from 'node:crypto'
+
+// 内联 JWT 鉴权 — 原共享 api/_lib/auth.ts 在 Vercel 上 (api/ 下 _ 开头目录被排除) import 即崩, 改自包含
+function requireAuth(req: VercelRequest, res: VercelResponse): boolean {
+  const authHeader = String(req.headers.authorization || req.headers.Authorization || '')
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : ''
+  if (!token) {
+    res.status(401).json({ error: 'Unauthorized: 请登录' })
+    return false
+  }
+  try {
+    const [h, p, s] = token.split('.')
+    if (!h || !p || !s) throw new Error('format')
+    const secret = process.env.JWT_SECRET_KEY || 'monoi-secret-key-2025'
+    const expected = createHmac('sha256', secret).update(`${h}.${p}`).digest().toString('base64url')
+    if (expected !== s) throw new Error('sig')
+    const payload = JSON.parse(Buffer.from(p, 'base64url').toString('utf-8'))
+    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) throw new Error('exp')
+    if (!payload.sub) throw new Error('sub')
+  } catch {
+    res.status(401).json({ error: 'Unauthorized: token 无效或已过期' })
+    return false
+  }
+  return true
+}
 
 function extractUrl(text: string): string {
   const match = text.match(/https?:\/\/[^\s，。！？、]+/)
