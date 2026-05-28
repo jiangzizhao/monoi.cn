@@ -59,44 +59,44 @@ def _get_rembg_session():
     return _rembg_session
 
 
+def add_stroke_to_image(img, stroke_color: str = '#FFFFFF', stroke_width: int = 12):
+    """给已抠好的透明 PNG (RGBA Image) 加描边, 返 RGBA Image.
+
+    描边实现: alpha 通道用 MaxFilter 膨胀 → 拿膨胀外圈 → 染色叠到原图底下.
+    给"人物库只存光图、生成封面时按模板 person_slot 配置加描边"用."""
+    img = img.convert('RGBA')
+    if stroke_width <= 0:
+        return img
+    alpha = img.split()[-1]
+    # MaxFilter 一次膨胀 ~ filter_size//2 像素, 多次迭代
+    grown = alpha
+    for _ in range(int(stroke_width)):
+        grown = grown.filter(ImageFilter.MaxFilter(3))
+    stroke_rgb = _hex_to_rgb(stroke_color)
+    stroke_layer = Image.new('RGBA', img.size, stroke_rgb + (0,))
+    stroke_layer.putalpha(grown)
+    # 原图叠在描边层上 (原图盖中心, 描边只剩外圈)
+    return Image.alpha_composite(stroke_layer, img)
+
+
 def remove_bg_with_stroke(
     input_bytes: bytes,
     stroke_enabled: bool = True,
     stroke_color: str = '#FFFFFF',
     stroke_width: int = 12,
 ) -> bytes:
-    """rembg 抠图 → (可选) 加描边 → 返透明 PNG bytes.
-
-    描边实现: alpha 通道形态学膨胀 → 拿膨胀后比原 alpha 多出的环 → 染色叠到底."""
+    """rembg 抠图 → (可选) 加描边 → 返透明 PNG bytes."""
     from rembg import remove
 
-    # 1. rembg 抠图 (输入任意格式, 输出 PNG bytes with alpha)
+    # rembg 抠图 (输入任意格式, 输出 PNG bytes with alpha)
     output_bytes = remove(input_bytes, session=_get_rembg_session())
     img = Image.open(BytesIO(output_bytes)).convert('RGBA')
 
-    if not stroke_enabled or stroke_width <= 0:
-        out = BytesIO()
-        img.save(out, format='PNG')
-        return out.getvalue()
-
-    # 2. 加描边: 把 alpha 通道用 MaxFilter 膨胀, 拿膨胀外圈
-    alpha = img.split()[-1]
-    # MaxFilter 一次膨胀 ~ filter_size//2 像素, 多次迭代
-    grown = alpha
-    for _ in range(stroke_width):
-        grown = grown.filter(ImageFilter.MaxFilter(3))
-
-    # 描边色填充 — 拿 grown 比 alpha 多的区域 (差集)
-    # 描边图层: grown 大小, 全是 stroke_color, 用 grown 作 alpha
-    stroke_rgb = _hex_to_rgb(stroke_color)
-    stroke_layer = Image.new('RGBA', img.size, stroke_rgb + (0,))
-    stroke_layer.putalpha(grown)
-
-    # 把原图叠在描边层上 (原图盖在中心, 描边只剩外圈)
-    final = Image.alpha_composite(stroke_layer, img)
+    if stroke_enabled and stroke_width > 0:
+        img = add_stroke_to_image(img, stroke_color, stroke_width)
 
     out = BytesIO()
-    final.save(out, format='PNG')
+    img.save(out, format='PNG')
     return out.getvalue()
 
 
@@ -298,6 +298,10 @@ def render_cover(
     # 1. 人物坑 — 支持 rotation (PIL rotate + center align)
     if person_slot and person_png_path and os.path.exists(person_png_path):
         person_img = Image.open(person_png_path).convert('RGBA')
+        # 描边跟模板走: 人物库存的是光图, 这里按模板 person_slot 配置加描边
+        # (在抠图原尺寸上加再 fit, 跟 admin 示例人物的描边缩放一致)
+        if person_slot.get('stroke_enabled') and int(person_slot.get('stroke_width') or 0) > 0:
+            person_img = add_stroke_to_image(person_img, person_slot.get('stroke_color') or '#FFFFFF', int(person_slot.get('stroke_width')))
         fitted = _fit_person(person_img, person_slot)
         person_rotation = float(person_slot.get('rotation') or 0)
         if abs(person_rotation) > 0.01:

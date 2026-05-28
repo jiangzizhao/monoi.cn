@@ -2214,9 +2214,9 @@ async def cover_remove_bg(
     if len(raw) < 100:
         raise HTTPException(400, '文件太小, 可能空文件')
 
-    # 1. 查缓存 — 同图同 stroke 直接复用
+    # 1. 查缓存 — 现在人物库只存"光图"(描边改成生成封面时按模板加), 缓存只按图内容
     file_hash = _hash.sha256(raw).hexdigest()
-    cache_key = f"{file_hash}:{int(stroke_enabled)}:{stroke_color}:{stroke_width}"
+    cache_key = f"{file_hash}:raw"
     db_path = _find_monoi_db()
     cached_oss_key = None
     try:
@@ -2262,12 +2262,9 @@ async def cover_remove_bg(
     t_rembg = time.time()
     try:
         from cover_compositor import remove_bg_with_stroke
-        out_png = remove_bg_with_stroke(
-            raw,
-            stroke_enabled=stroke_enabled,
-            stroke_color=stroke_color,
-            stroke_width=stroke_width,
-        )
+        # 只存光图, 不烤描边. 描边在 /render-cover-from-template 里按模板 person_slot 加,
+        # 这样同一个人物放进任何模板都能自动带上那个模板该有的描边.
+        out_png = remove_bg_with_stroke(raw, stroke_enabled=False)
     except ImportError as e:
         raise HTTPException(500, f'rembg 没装: {e}. venv 跑: pip install rembg[cpu]')
     except Exception as e:
