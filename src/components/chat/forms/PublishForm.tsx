@@ -1,10 +1,12 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { X, Send, Loader2, CheckCircle2, AlertCircle, ExternalLink } from 'lucide-react'
+import { X, Send, Loader2, CheckCircle2, AlertCircle, ExternalLink, Download, Monitor } from 'lucide-react'
 import { useChatStore } from '../../../store/chatStore'
 import type { PlatformCopyResult } from '../../../types'
-import { getToken } from '../../../lib/auth'
 import { consumePrefill } from '../../../lib/formPrefill'
+import { fetchMyCredits } from '../../../services/billing'
+import { fetchDesktopLatest, type DesktopLatest } from '../../../services/desktop'
+import { UpgradeGate } from '../../UpgradeGate'
 
 interface Props {
   onClose: () => void
@@ -97,6 +99,16 @@ export function PublishForm({ onClose }: Props) {
   // 检测是不是桌面端 (Electron preload 注入了 window.monoiDesktop)
   const isDesktop = typeof (window as any).monoiDesktop !== 'undefined'
 
+  // 网页版发布门槛: 自动发布要在桌面版里用, 桌面版自动发布 Max 套餐起可用.
+  const [myTier, setMyTier] = useState<string>('free')
+  const [gate, setGate] = useState<'upgrade' | 'desktop' | null>(null)
+  const [desktopInfo, setDesktopInfo] = useState<DesktopLatest | null>(null)
+  useEffect(() => {
+    if (isDesktop) return
+    fetchMyCredits().then(c => setMyTier(c.tier)).catch(() => {})
+    fetchDesktopLatest().then(setDesktopInfo).catch(() => {})
+  }, [isDesktop])
+
   const submit = async () => {
     if (!videoOssKey) {
       setError('没找到要发布的视频, 先合成或剪辑一段')
@@ -140,29 +152,11 @@ export function PublishForm({ onClose }: Props) {
       return
     }
 
-    // ============== 网页 fallback: 走后端代发 (admin 账号) ==============
-    try {
-      const res = await fetch(directBase + '/api/publish/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken() || ''}` },
-        body: JSON.stringify({
-          platform: activeTab,
-          video_oss_key: videoOssKey,
-          title: form.title.trim(),
-          description: form.description,
-          tags,
-        }),
-      })
-      const data = await res.json()
-      if (!res.ok || !data.job_id) {
-        setError(data.detail || data.error || `提交失败 (${res.status})`)
-        return
-      }
-      setJobId(data.job_id)
-      setJobStatus({ status: 'pending', detail: '任务已创建, 等待 Windows 后端处理...' })
-    } catch (e: any) {
-      setError(e.message || '提交失败')
-    }
+    // ============== 网页版: 不能自动发布 (浏览器安全限制), 引导用桌面版 ==============
+    // 桌面版自动发布 Max 套餐起可用. Max+ → 提示下载桌面版; Free/Pro → 升级 Max.
+    const TIER_ORDER = ['free', 'pro_monthly', 'max_monthly', 'flagship_yearly']
+    const canDesktopPublish = TIER_ORDER.indexOf(myTier) >= TIER_ORDER.indexOf('max_monthly')
+    setGate(canDesktopPublish ? 'desktop' : 'upgrade')
   }
 
   // 轮询 job 状态. 桌面端 jobId 以 'desktop-' 开头, 同步阻塞拿结果, 不轮询
@@ -345,10 +339,9 @@ export function PublishForm({ onClose }: Props) {
                 </>
               ) : (
                 <>
-                  点"发布到 {platformLabel}"之后, Windows 会弹一个浏览器窗口, 自动上传视频 + 填好你这里的内容,
-                  <span className="text-[var(--text-2)]"> 但不会自动点'发布'按钮</span>. 你在浏览器里审一眼稿子 / 改改 → 自己点'发布' → 关窗口.
+                  网页版没法自动发布 (浏览器安全限制, 无法操控本地浏览器). <span className="text-[var(--text-2)]">自动发布需要装 monoi 桌面版</span>, 在桌面版里用你自己的账号一键发到 {platformLabel}.
                   <br/>
-                  <span className="opacity-70">想用自己账号发? 装 monoi 桌面端 (设置 → 下载桌面版).</span>
+                  <span className="opacity-70">桌面版自动发布 Max 套餐起可用. 点下面"发布"按钮可下载.</span>
                 </>
               )}
             </div>
@@ -385,5 +378,38 @@ export function PublishForm({ onClose }: Props) {
     </div>
   )
 
-  return createPortal(modal, document.body)
+  return (
+    <>
+      {createPortal(modal, document.body)}
+      {gate === 'upgrade' && (
+        <UpgradeGate
+          featureName="自动发布"
+          minTier="Max"
+          onClose={() => setGate(null)}
+          freeAlternative="自动发布需要 monoi 桌面版 (浏览器无法直接操控本地浏览器发布), 且 Max 套餐起可用."
+        />
+      )}
+      {gate === 'desktop' && createPortal(
+        <div className="fixed inset-0 z-[210] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={() => setGate(null)}>
+          <div onClick={e => e.stopPropagation()} className="relative bg-[var(--bg-card)] border border-[var(--border)] rounded-2xl shadow-ios-lg w-full max-w-sm p-6 flex flex-col gap-4">
+            <button onClick={() => setGate(null)} className="absolute top-4 right-4 p-1 rounded text-[var(--text-3)] hover:bg-[var(--bg-hover)] cursor-pointer"><X size={14}/></button>
+            <div className="flex items-center gap-2"><Monitor size={18}/><div className="text-base font-semibold">自动发布请用桌面版</div></div>
+            <p className="text-sm text-[var(--text-2)] leading-relaxed">
+              浏览器没法直接操控本地浏览器发布, 自动发布需要在 <b>monoi 桌面版</b> 里用你自己的账号发. 装好后在桌面版里打开同一个项目, 点发布即可.
+            </p>
+            {desktopInfo?.available && desktopInfo.exe_url ? (
+              <a href={desktopInfo.exe_url} target="_blank" rel="noopener noreferrer"
+                className="py-2.5 rounded-xl bg-[var(--text)] text-[var(--bg)] text-sm font-medium hover:opacity-80 cursor-pointer flex items-center justify-center gap-2">
+                <Download size={14}/> 下载桌面版{desktopInfo.version ? ` v${desktopInfo.version}` : ''}{desktopInfo.size_mb ? ` · ${desktopInfo.size_mb} MB` : ''}
+              </a>
+            ) : (
+              <div className="text-xs text-[var(--text-3)] bg-[var(--bg-hover)] rounded-lg p-3 leading-relaxed">桌面版下载暂时不可用, 左下角 "下载桌面版" 也能获取, 或稍后再试.</div>
+            )}
+            <button onClick={() => setGate(null)} className="text-xs text-[var(--text-3)] hover:text-[var(--text-2)] cursor-pointer self-center">知道了</button>
+          </div>
+        </div>,
+        document.body,
+      )}
+    </>
+  )
 }
