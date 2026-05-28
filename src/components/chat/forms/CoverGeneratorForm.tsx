@@ -194,7 +194,7 @@ export function CoverGeneratorForm({ defaultVideoOssKey, defaultVideoUrl, onClos
     try {
       const signRes = await fetch(directBase + '/api/oss/sign-upload', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken() || ''}` },
         body: JSON.stringify({ filename: file.name, content_type: file.type }),
       })
       if (!signRes.ok) throw new Error('签名失败')

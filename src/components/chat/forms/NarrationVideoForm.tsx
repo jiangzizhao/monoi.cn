@@ -82,7 +82,7 @@ export function NarrationVideoForm({ onSubmit, onClose }: Props) {
       // 1. 找后端要 OSS PUT 签名 URL
       const signRes = await fetch(directBase + '/api/oss/sign-upload', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken() || ''}` },
         body: JSON.stringify({
           filename: videoFile.name,
           content_type: videoFile.type || 'video/mp4',

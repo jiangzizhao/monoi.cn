@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { Loader2, X, Play, Pause, AudioLines, Check, Plus, Trash2 } from 'lucide-react'
 import { useChatStore } from '../../../store/chatStore'
 import { consumePrefill } from '../../../lib/formPrefill'
+import { getToken } from '../../../lib/auth'
 import type { AudioResult, ChatMessage } from '../../../types'
 
 interface Props {
@@ -162,6 +163,7 @@ export function DigitalHumanForm({ onSubmit, onClose }: Props) {
       // 直传 NATAPP, 视频文件可能 > 4.5MB
       const res = await fetch(directBase() + '/api/digital-human/avatars', {
         method: 'POST',
+        headers: { Authorization: `Bearer ${getToken() || ''}` },
         body: fd,
       })
       const data = await res.json()
@@ -311,6 +313,7 @@ export function DigitalHumanForm({ onSubmit, onClose }: Props) {
 
       const res = await fetch(directBase() + '/api/digital-human/submit', {
         method: 'POST',
+        headers: { Authorization: `Bearer ${getToken() || ''}` },
         body: fd,
       })
       const data = await res.json()

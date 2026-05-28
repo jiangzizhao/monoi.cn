@@ -44,7 +44,7 @@ export interface TrimAudioResp {
 export async function trimAudio(oss_key: string, start_seconds: number, end_seconds: number): Promise<TrimAudioResp> {
   const res = await fetch(directBase + '/api/voice/trim-audio', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken() || ''}` },
     body: JSON.stringify({ oss_key, start_seconds, end_seconds }),
   })
   const data = await res.json().catch(() => ({}))

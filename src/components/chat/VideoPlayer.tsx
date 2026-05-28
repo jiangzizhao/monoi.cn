@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Play, Pause, Download, Loader2, FileBox, FolderOpen, CheckCircle2 } from 'lucide-react'
 import type { VideoResult } from '../../types'
+import { getToken } from '../../lib/auth'
 import {
   isFileSystemAPISupported,
   pickAndSaveDraftDir,
@@ -59,7 +60,7 @@ export function VideoPlayer({ data }: { data: VideoResult }) {
     const directBase = import.meta.env.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'
     const res = await fetch(directBase + '/api/voice/compose-jianying-draft', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken() || ''}` },
       body: JSON.stringify(data.jianying_payload),
     })
     const j = await res.json()
