@@ -59,12 +59,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
-  // DeepSeek uses OpenAI-compatible format: system goes as first message
-  const fullMessages = [
-    { role: 'system', content: system },
-    ...messages,
-  ]
-
   try {
     const upstream = await fetch('https://api.deepseek.com/chat/completions', {
       method: 'POST',

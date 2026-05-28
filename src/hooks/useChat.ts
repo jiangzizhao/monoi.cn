@@ -9,6 +9,7 @@ import { searchPixabay } from '../services/pixabay'
 import type { ChoiceOption, FootageSentenceItem, MessageBlock } from '../types'
 import { matchIntent, encodeAutoOpenId, decodeAutoOpenId, AUTOOPEN_DISMISS_ID } from '../lib/intentMatcher'
 import { isGreetingOrHelp, WELCOME_OPTIONS } from '../lib/welcomeOptions'
+import { getToken } from '../lib/auth'
 
 /**
  * 把一个 ASR segment 按 word-level 停顿二次拆分.
@@ -727,7 +728,7 @@ export function useChat() {
         const synthBase = import.meta.env.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'
         const res = await fetch(synthBase + '/api/voice/synthesize', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken() || ''}` },
           body: JSON.stringify({
             text: script,
             preset_key: payload.voice_id,
