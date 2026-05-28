@@ -16,6 +16,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const { system, messages, stream = false, json_mode = false, charge_feature } = req.body
 
+  // DeepSeek OpenAI 兼容格式: system 作为第一条 message
+  const fullMessages = [
+    { role: 'system', content: system },
+    ...messages,
+  ]
+
   // ============ 扣积分 (DeepSeek 调用前) ============
   // 之前扣费走前端 chargeCredit('ai_writing', 3), 攻击者改前端代码 (注释那行) 就能绕过.
   // 现在搬到 Vercel function 内: 调 DeepSeek 之前先 sync 调后端 /api/billing/charge.
