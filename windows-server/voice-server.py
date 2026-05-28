@@ -10,6 +10,10 @@ import uuid
 import asyncio
 from typing import Optional
 
+# 国内连不上 huggingface.co (faster-whisper 加载模型时会去校验/下载), 统一走国内镜像.
+# 必须在 import faster_whisper / huggingface_hub 之前设置.
+os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 COSYVOICE_DIR = r"D:\monoi-server\models\cosyvoice"
 sys.path.insert(0, COSYVOICE_DIR)
@@ -146,7 +150,13 @@ def get_whisper():
     if _WHISPER_MODEL is None:
         from faster_whisper import WhisperModel
         print("Loading Whisper small (GPU)...", flush=True)
-        _WHISPER_MODEL = WhisperModel("small", device="cuda", compute_type="float16")
+        try:
+            # 优先只用本地缓存, 完全不连网 — 之前下载过就秒加载, 不受 huggingface.co / 镜像抽风影响
+            _WHISPER_MODEL = WhisperModel("small", device="cuda", compute_type="float16", local_files_only=True)
+        except Exception:
+            # 本地没缓存 → 走国内镜像 (HF_ENDPOINT=hf-mirror.com) 下载一次
+            print("本地无 Whisper 缓存, 走国内镜像下载...", flush=True)
+            _WHISPER_MODEL = WhisperModel("small", device="cuda", compute_type="float16")
         print("Whisper loaded.", flush=True)
     return _WHISPER_MODEL
 
