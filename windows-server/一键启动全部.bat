@@ -114,13 +114,15 @@ start "index-server" cmd /k "D:\monoi-server\index-server-watchdog.bat"
 timeout /t 3 /nobreak >nul
 
 echo [5/5] 启动 HeyGem 数字人容器...
+rem 空 env 文件: 让 docker compose 别去读后端 .env (那里有带 + 的多行密钥, 会解析报错)
+if not exist "D:\monoi-server\heygem.empty.env" type nul > "D:\monoi-server\heygem.empty.env"
 docker info >nul 2>&1
 if errorlevel 1 (
     echo   Docker 未启动, 跳过 HeyGem
     echo   请打开 Docker Desktop 后手动跑:
-    echo     docker compose -f D:\monoi-server\heygem.docker-compose.yml up -d
+    echo     docker compose --env-file D:\monoi-server\heygem.empty.env -f D:\monoi-server\heygem.docker-compose.yml up -d
 ) else (
-    docker compose -f D:\monoi-server\heygem.docker-compose.yml up -d
+    docker compose --env-file D:\monoi-server\heygem.empty.env -f D:\monoi-server\heygem.docker-compose.yml up -d
     echo   HeyGem 容器已启动
 )
 
