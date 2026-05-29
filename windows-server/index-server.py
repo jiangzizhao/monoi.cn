@@ -14,7 +14,10 @@ from typing import Optional
 os.environ.setdefault('HF_HUB_OFFLINE', '1')
 os.environ.setdefault('TRANSFORMERS_OFFLINE', '1')
 
-INDEX_DIR = r"D:\monoi-server\models\index-tts"
+THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+# index-server.py 放在 IndexTTS 仓库目录里 (Win: D:\monoi-server\models\index-tts,
+# Linux 云: /data/monoi-server/models/index-tts), 默认用脚本自身目录, 可用环境变量覆盖.
+INDEX_DIR = os.environ.get("INDEX_DIR", THIS_DIR)
 sys.path.insert(0, INDEX_DIR)
 
 import torch
@@ -62,7 +65,8 @@ except ImportError:
 
 CHECKPOINTS_DIR = os.path.join(INDEX_DIR, "checkpoints")
 OUTPUT_DIR = os.path.join(INDEX_DIR, "outputs")
-PROMPTS_DIR = r"D:\monoi-server\models\cosyvoice\voice_prompts"  # 复用同一目录
+# 复用 cosyvoice 的 voice_prompts (models/ 下 index-tts 与 cosyvoice 同级, Win/Linux 都成立)
+PROMPTS_DIR = os.environ.get("VOICE_PROMPTS_DIR", os.path.join(os.path.dirname(INDEX_DIR), "cosyvoice", "voice_prompts"))  # 复用同一目录
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 print("Loading IndexTTS model...", flush=True)
