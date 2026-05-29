@@ -25,6 +25,15 @@ if errorlevel 1 (
     echo   OK voice-server.py
 )
 
+curl -s --fail --max-time 30 -o "D:\monoi-server\models\cosyvoice\cover_compositor.py.tmp" https://raw.githubusercontent.com/jiangzizhao/monoi.cn/main/windows-server/cover_compositor.py
+if errorlevel 1 (
+    echo   X cover_compositor.py 下载失败, 保留旧版
+    if exist "D:\monoi-server\models\cosyvoice\cover_compositor.py.tmp" del "D:\monoi-server\models\cosyvoice\cover_compositor.py.tmp"
+) else (
+    move /y "D:\monoi-server\models\cosyvoice\cover_compositor.py.tmp" "D:\monoi-server\models\cosyvoice\cover_compositor.py" >nul
+    echo   OK cover_compositor.py
+)
+
 curl -s --fail --max-time 30 -o "D:\monoi-server\models\index-tts\index-server.py.tmp" https://raw.githubusercontent.com/jiangzizhao/monoi.cn/main/windows-server/index-server.py
 if errorlevel 1 (
     echo   X index-server.py 下载失败, 保留旧版
