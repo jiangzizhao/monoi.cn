@@ -37,11 +37,16 @@ def _try_load_env():
         os.path.join(here, ".env"),                  # oss_helper 同目录
         os.path.join(here, "..", "..", ".env"),      # cosyvoice 往上 2 层 → monoi-server/
         os.path.join(here, "..", ".env"),            # 上 1 层
-        r"D:\monoi-server\.env",                     # 硬编码兜底
+        os.environ.get("MONOI_ENV_FILE", ""),        # 环境变量显式指定
+        "/data/monoi-server/.env",                   # Linux 云 (阿里云 ECS) 兜底
+        "/data/.env",                                # Linux 云 兜底2
+        r"D:\monoi-server\.env",                     # Windows 硬编码兜底
     ]
     for path in candidates:
+        if not path:
+            continue
         path = os.path.abspath(path)
-        if not os.path.exists(path):
+        if not os.path.isfile(path):
             continue
         try:
             with open(path, "r", encoding="utf-8") as f:

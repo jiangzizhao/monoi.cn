@@ -15,7 +15,9 @@ from typing import Optional
 os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-COSYVOICE_DIR = r"D:\monoi-server\models\cosyvoice"
+# voice-server.py 就放在 CosyVoice 仓库目录里 (Windows: D:\monoi-server\models\cosyvoice,
+# Linux 云: /data/cosyvoice), 所以默认用脚本自身所在目录; 需要时可用环境变量覆盖.
+COSYVOICE_DIR = os.environ.get("COSYVOICE_DIR", THIS_DIR)
 sys.path.insert(0, COSYVOICE_DIR)
 sys.path.insert(0, os.path.join(COSYVOICE_DIR, "third_party", "Matcha-TTS"))
 
