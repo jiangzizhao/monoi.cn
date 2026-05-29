@@ -7,6 +7,7 @@ import { Mic, Square, Trash2, Languages, Type, AlertCircle, Copy, Check, Save, H
 import { useNavigate } from 'react-router-dom'
 import { listMyAsrRecords, saveMyAsrRecord, deleteMyAsrRecord, type MyAsrRecord } from '../services/asr'
 import { Logo } from '../components/Logo'
+import { getToken } from '../lib/auth'
 
 export default function VoiceTab() {
   const nav = useNavigate()
@@ -216,7 +217,7 @@ export default function VoiceTab() {
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken() || ''}` },
         body: JSON.stringify({
           system: '你是中英翻译, 把用户的中文翻译成自然地道的英文. 只输出翻译结果, 不要解释.',
           messages: [{ role: 'user', content: finalText }],
@@ -224,6 +225,10 @@ export default function VoiceTab() {
         }),
       })
       const data = await res.json()
+      if (!res.ok) {
+        setError(`翻译失败: ${data.error || data.detail || `HTTP ${res.status}`}`)
+        return
+      }
       const translated = data.choices?.[0]?.message?.content || data.text || data.content || ''
       setTranslatedText(translated.trim())
     } catch (e: any) {
