@@ -624,6 +624,15 @@ export function TemplateCoverPicker({ onClose }: { onClose?: () => void } = {}) 
 // 特殊 label 给人物用 (跟用户字段 label 不冲突, 因为字段不允许 __ 开头)
 const PERSON_LABEL = '__person__'
 
+// 人物预览描边: 人物库只存光图, 描边在生成封面时按模板加. 预览这里用多向 drop-shadow 近似那圈描边,
+// 让编辑器看到的跟成品基本一致. 偏移用 cqw (预览容器有 containerType:inline-size), 跟字体描边同量纲.
+function personStrokeFilter(color: string, widthPx: number, tplW: number): string {
+  if (!tplW || widthPx <= 0) return 'none'
+  const o = widthPx / tplW * 100  // cqw
+  const dirs: [number, number][] = [[1, 0], [-1, 0], [0, 1], [0, -1], [0.7, 0.7], [0.7, -0.7], [-0.7, 0.7], [-0.7, -0.7]]
+  return dirs.map(([dx, dy]) => `drop-shadow(${(dx * o).toFixed(3)}cqw ${(dy * o).toFixed(3)}cqw 0 ${color})`).join(' ')
+}
+
 export function TemplatePreview({ template, userTexts, textOverrides, extraFields, hiddenLabels, personPreviewUrl, personSlotOverride, onMoveField, onResizeField, onRotateField }: {
   template: CoverTemplate
   userTexts: Record<string, string>
@@ -767,7 +776,10 @@ export function TemplatePreview({ template, userTexts, textOverrides, extraField
           >
             <img src={personPreviewUrl} alt=""
               className="w-full h-full object-cover pointer-events-none"
-              draggable={false}/>
+              draggable={false}
+              style={personSlot.stroke_enabled && (personSlot.stroke_width || 0) > 0
+                ? { filter: personStrokeFilter(personSlot.stroke_color || '#FFFFFF', personSlot.stroke_width || 0, tplW) }
+                : undefined}/>
 
             {/* 选中时显示手柄 (跟字段一样, 但用粉色区分) */}
             {isPersonActive && interactive && (
