@@ -1,0 +1,67 @@
+# 前端构建 → 上传到阿里云 OSS (静态托管, 配合 CDN 在 monoi.cn 提供)
+#
+# 触发: push 到 main 自动跑, 也能在 Actions 页手动 "Run workflow".
+# 注意: 这只把【静态前端】传到 OSS. api/ 那几个函数仍在 Vercel,
+#       靠 CDN 把 monoi.cn/api/* 回源到 Vercel (见仓库里部署说明 / 群里给的清单).
+#
+# 需要的 GitHub Secrets (Settings → Secrets and variables → Actions):
+#   OSS_ENDPOINT              例如 oss-cn-shenzhen.aliyuncs.com  (monoi-cn 桶所在地域, 不带 https)
+#   OSS_BUCKET                monoi-cn
+#   OSS_AK_ID                 RAM 子账号 (monoi-oss-nls) 的 AccessKey ID
+#   OSS_AK_SECRET             对应 AccessKey Secret
+#   VITE_DIRECT_API_URL       后端地址, 现阶段还是 https://monoi.nat100.top
+#   VITE_ALIYUN_CAPTCHA_PREFIX
+#   VITE_ALIYUN_CAPTCHA_SCENE_ID
+
+name: Deploy frontend to Aliyun OSS
+
+on:
+  # 先只手动触发 (Actions 页点 "Run workflow"). 等 Secrets 配好、手动跑成功一次后,
+  # 再把下面 push 的注释打开, 变成推 main 自动部署 (跟 Vercel 一样).
+  workflow_dispatch: {}
+  # push:
+  #   branches: [main]
+
+# 同一时间只跑一个部署, 新的把旧的顶掉
+concurrency:
+  group: deploy-oss
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Build (vite)
+        env:
+          VITE_DIRECT_API_URL: ${{ secrets.VITE_DIRECT_API_URL }}
+          VITE_ALIYUN_CAPTCHA_PREFIX: ${{ secrets.VITE_ALIYUN_CAPTCHA_PREFIX }}
+          VITE_ALIYUN_CAPTCHA_SCENE_ID: ${{ secrets.VITE_ALIYUN_CAPTCHA_SCENE_ID }}
+        run: npm run build
+
+      - name: Setup ossutil
+        run: |
+          curl -fsSL -o ossutil https://gosspublic.alicdn.com/ossutil/1.7.18/ossutil64
+          chmod +x ossutil
+          ./ossutil config -e "${{ secrets.OSS_ENDPOINT }}" -i "${{ secrets.OSS_AK_ID }}" -k "${{ secrets.OSS_AK_SECRET }}" >/dev/null
+
+      - name: Upload dist to OSS
+        run: |
+          BUCKET="oss://${{ secrets.OSS_BUCKET }}"
+          # 1) 先传全部 (hash 资源长缓存, 覆盖式上传, 不删旧资源 — 旧 index 可能还引用着)
+          ./ossutil cp -r -f --meta "Cache-Control:public, max-age=31536000, immutable" dist/ "$BUCKET/"
+          # 2) index.html 单独覆盖成不缓存, 保证用户每次拿到最新 (引用最新 hash 资源)
+          ./ossutil cp -f --meta "Cache-Control:no-cache, must-revalidate" dist/index.html "$BUCKET/index.html"
+          echo "✅ 已上传 dist/ 到 $BUCKET"
+
+      # 可选: 部署后刷新 CDN 上的 index.html (需要 AK 有 CDN 刷新权限).
+      # 先不开 — 在 OSS 控制台 / CDN 控制台手动刷新 index.html 也行, 或后面补这步.
