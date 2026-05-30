@@ -16,11 +16,10 @@
 name: Deploy frontend to Aliyun OSS
 
 on:
-  # 先只手动触发 (Actions 页点 "Run workflow"). 等 Secrets 配好、手动跑成功一次后,
-  # 再把下面 push 的注释打开, 变成推 main 自动部署 (跟 Vercel 一样).
+  # 推 main 自动部署 (跟 Vercel 一样); workflow_dispatch 保留手动触发能力, 调试时用
   workflow_dispatch: {}
-  # push:
-  #   branches: [main]
+  push:
+    branches: [main]
 
 # 同一时间只跑一个部署, 新的把旧的顶掉
 concurrency:
