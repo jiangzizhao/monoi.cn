@@ -1324,7 +1324,11 @@ def create_voice_clone(req: VoiceCloneCreateRequest, request: Request):
     finally:
         conn.close()
 
-VOICE_PROMPTS_DIR = r"D:\monoi-server\models\cosyvoice\voice_prompts"
+VOICE_PROMPTS_DIR = os.environ.get(
+    "VOICE_PROMPTS_DIR",
+    r"D:\monoi-server\models\cosyvoice\voice_prompts" if os.name == 'nt'
+    else "/data/monoi-server/models/cosyvoice/voice_prompts"
+)
 
 @app.post("/api/voice/upload-clone")
 async def upload_clone(
@@ -2335,7 +2339,11 @@ def finalize_narration_proxy(req: FinalizeNarrationRequest, request: Request):
         raise HTTPException(503, "voice-server (9001) 未启动")
 
 
-NARRATION_OUTPUT_DIR = r"D:\monoi-server\models\cosyvoice\narration_outputs"
+NARRATION_OUTPUT_DIR = os.environ.get(
+    "NARRATION_OUTPUT_DIR",
+    r"D:\monoi-server\models\cosyvoice\narration_outputs" if os.name == 'nt'
+    else "/data/monoi-server/models/cosyvoice/narration_outputs"
+)
 
 
 @app.get("/api/voice/narration-audio/{name}")
@@ -3403,8 +3411,16 @@ def proxy_audio_minimax(name: str):
 
 # ============== 数字人 (Duix-Avatar / HeyGem) ==============
 DUIX_API_BASE = "http://127.0.0.1:8383/easy"
-DUIX_DATA_DIR = r"D:\monoi-server\heygem-data\face2face\temp"
-DUIX_AVATAR_DIR = r"D:\monoi-server\heygem-data\avatars"
+DUIX_DATA_DIR = os.environ.get(
+    "DUIX_DATA_DIR",
+    r"D:\monoi-server\heygem-data\face2face\temp" if os.name == 'nt'
+    else "/data/monoi-server/heygem-data/face2face/temp"
+)
+DUIX_AVATAR_DIR = os.environ.get(
+    "DUIX_AVATAR_DIR",
+    r"D:\monoi-server\heygem-data\avatars" if os.name == 'nt'
+    else "/data/monoi-server/heygem-data/avatars"
+)
 MAX_AVATARS_PER_USER = 5    # 兜底默认 (没 user_id 时用), 实际按 tier 走 _get_max_avatars()
 
 
@@ -4093,6 +4109,206 @@ async def asr_ws_proxy(client_ws: WebSocket):
     finally:
         try: await client_ws.close()
         except: pass
+
+
+# =====================================================================
+# Vercel api 迁入 (chat / pexels / pixabay / fetch-content alias / font)
+# 原 api/*.ts 改写: 直接挂在 main.py /api/ 下, Nginx 转发即可, Vercel 可退役
+# 鉴权统一复用 _user_id_from_request(); 扣费走 billing.consume_credits() 本进程调用
+# =====================================================================
+
+
+class _ChatRequest(BaseModel):
+    system: str = ""
+    messages: list = []
+    stream: bool = False
+    json_mode: bool = False
+    charge_feature: Optional[str] = None
+
+
+# 跟原 Vercel api/chat.ts 一致的硬编码价目表 (防前端篡改 amount)
+_CHAT_PRICES = {
+    'ai_writing': 3,
+    'ai_writing_regen': 3,
+    'footage_match': 5,
+}
+
+
+@app.post("/api/chat")
+def api_chat(req: _ChatRequest, request: Request):
+    """DeepSeek 代理 + 服务端扣积分 + JWT 鉴权 (原 Vercel api/chat.ts).
+    扣费在调 DeepSeek 之前同步做, 不够直接 402 透传给前端, AI 调用根本不发生.
+    """
+    uid = _user_id_from_request(request)
+    deepseek_key = os.environ.get("DEEPSEEK_API_KEY", "")
+    if not deepseek_key:
+        raise HTTPException(500, "DEEPSEEK_API_KEY 未配置")
+
+    # 服务端扣费 (绕开前端篡改 amount 的攻击面)
+    if req.charge_feature and req.charge_feature in _CHAT_PRICES:
+        amount = _CHAT_PRICES[req.charge_feature]
+        try:
+            from billing import consume_credits
+            consume_credits(uid, req.charge_feature, amount, ref_id=None)
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(503, f"扣费服务暂时不可用: {e}")
+
+    full_messages = [{"role": "system", "content": req.system}, *req.messages]
+    payload = {
+        "model": "deepseek-chat",
+        "messages": full_messages,
+        "stream": req.stream,
+        "max_tokens": 4096,
+    }
+    if req.json_mode:
+        payload["response_format"] = {"type": "json_object"}
+
+    headers = {
+        "Authorization": f"Bearer {deepseek_key}",
+        "Content-Type": "application/json",
+    }
+
+    import requests as _req
+    if not req.stream:
+        r = _req.post("https://api.deepseek.com/chat/completions",
+                      json=payload, headers=headers, timeout=120)
+        if r.status_code != 200:
+            raise HTTPException(r.status_code, r.text)
+        return r.json()
+
+    # 流式 SSE
+    import json as _json
+    def _gen():
+        with _req.post("https://api.deepseek.com/chat/completions",
+                       json=payload, headers=headers, timeout=120, stream=True) as r:
+            if r.status_code != 200:
+                yield f'data: {{"error": "upstream {r.status_code}"}}\n\n'
+                return
+            for raw in r.iter_lines(decode_unicode=True):
+                if not raw or not raw.startswith("data: "):
+                    continue
+                data = raw[6:].strip()
+                if data == "[DONE]":
+                    yield "data: [DONE]\n\n"
+                    continue
+                try:
+                    p = _json.loads(data)
+                    text = (p.get("choices") or [{}])[0].get("delta", {}).get("content") or ""
+                    if text:
+                        yield f'data: {_json.dumps({"delta": {"text": text}})}\n\n'
+                except Exception:
+                    pass
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(_gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/api/pexels")
+def api_pexels(request: Request,
+               query: str = Query(...),
+               per_page: int = Query(5),
+               orientation: str = Query("landscape")):
+    """Pexels 视频搜索 + JWT 鉴权 (原 Vercel api/pexels.ts)."""
+    _user_id_from_request(request)
+    api_key = os.environ.get("PEXELS_API_KEY", "")
+    if not api_key:
+        raise HTTPException(500, "PEXELS_API_KEY 未配置")
+    import requests as _req
+    try:
+        r = _req.get(
+            "https://api.pexels.com/videos/search",
+            params={"query": query, "per_page": per_page, "orientation": orientation},
+            headers={"Authorization": api_key},
+            timeout=30,
+        )
+        data = r.json()
+        videos = [{
+            "id": v.get("id"),
+            "image": v.get("image"),
+            "duration": v.get("duration"),
+            "url": v.get("url"),
+            "video_files": v.get("video_files"),
+        } for v in (data.get("videos") or [])]
+        return {"videos": videos}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.get("/api/pixabay")
+def api_pixabay(request: Request,
+                query: str = Query(...),
+                per_page: int = Query(5)):
+    """Pixabay 视频搜索 + JWT 鉴权 (原 Vercel api/pixabay.ts)."""
+    _user_id_from_request(request)
+    api_key = os.environ.get("PIXABAY_API_KEY", "")
+    if not api_key:
+        raise HTTPException(500, "PIXABAY_API_KEY 未配置")
+    import requests as _req
+    try:
+        r = _req.get(
+            "https://pixabay.com/api/videos/",
+            params={"key": api_key, "q": query, "per_page": per_page, "video_type": "film"},
+            timeout=30,
+        )
+        data = r.json()
+        hits = [{
+            "id": v.get("id"),
+            "duration": v.get("duration"),
+            "previewURL": v.get("previewURL"),
+            "videos": {
+                "medium": {"thumbnail": (v.get("videos") or {}).get("medium", {}).get("thumbnail")},
+                "small": {"url": (v.get("videos") or {}).get("small", {}).get("url")},
+            },
+        } for v in (data.get("hits") or [])]
+        return {"hits": hits}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.post("/api/fetch-content")
+def api_fetch_content(req: FetchRequest, request: Request):
+    """Vercel /api/fetch-content 的别名 — 抓取逻辑全在 /api/fetch 里 (line 1085).
+    前端历史上调的是 /api/fetch-content, 留这个别名免改前端."""
+    return fetch_content(req, request)
+
+
+_FONT_FILES = [
+    'SourceHanSansCN-Heavy.otf',
+    'zcool-xiaowei-logo.otf',
+    'zcool-qingke-huangyou.ttf',
+    'zcool-kuaile.ttf',
+    'shetu-modern-xiaofang.ttf',
+    'baotu-xiaobai.ttf',
+    'jiangxi-zhuokai.ttf',
+    'youshe-biaoti-hei.ttf',
+    'zhuangjia-mincho.ttf',
+    'marker-shouhui.ttf',
+]
+FONTS_DIR = os.environ.get(
+    "FONTS_DIR",
+    r"D:\monoi-server\fonts" if os.name == 'nt'
+    else "/data/monoi-server/fonts"
+)
+
+
+@app.get("/api/font")
+def api_font(name: str = Query(...)):
+    """从本地 fonts/ 读字体返回 (替代原 Vercel api/font.ts 走 GitHub 代理).
+    部署时事先用 jsdelivr/scp 把字体放到 FONTS_DIR 即可 (一键启动.bat 已下过)."""
+    if name not in _FONT_FILES:
+        raise HTTPException(404, "font not in whitelist")
+    fp = os.path.join(FONTS_DIR, name)
+    if not os.path.isfile(fp):
+        raise HTTPException(404, f"font missing on server: {name}")
+    from fastapi.responses import FileResponse
+    media = "font/otf" if name.lower().endswith(".otf") else "font/ttf"
+    return FileResponse(
+        fp,
+        media_type=media,
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
 
 
 if __name__ == "__main__":
