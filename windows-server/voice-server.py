@@ -60,12 +60,20 @@ os.makedirs(PROMPTS_DIR, exist_ok=True)
 DEFAULT_PROMPT_WAV = os.path.join(COSYVOICE_DIR, "asset", "zero_shot_prompt.wav")
 DEFAULT_PROMPT_TEXT = "希望你以后能够做的比我还好呦。"
 
-print("Loading CosyVoice2...", flush=True)
-MODEL = CosyVoice2(
-    os.path.join(COSYVOICE_DIR, "pretrained_models", "CosyVoice2-0.5B"),
-    load_jit=False, load_trt=False, fp16=False,
-)
-print("Model loaded.", flush=True)
+# SKIP_COSYVOICE=1 → 跳过加载 CosyVoice2 (~5G 内存)。
+# 用途: 云上配音走 API / IndexTTS, 不用本地 CosyVoice 时省内存, 让 index-server 装得下。
+# 其它功能 (封面/BGM/剪映/发布/转录whisper/闪说funasr) 都不依赖 CosyVoice2, 照常工作。
+# 家里 Windows 不设这个变量 → 行为不变, 照常加载。
+if os.environ.get("SKIP_COSYVOICE") == "1":
+    MODEL = None
+    print("SKIP_COSYVOICE=1 → 跳过加载 CosyVoice2 (配音走 API; 本地 /synthesize 不可用, 省 ~5G)", flush=True)
+else:
+    print("Loading CosyVoice2...", flush=True)
+    MODEL = CosyVoice2(
+        os.path.join(COSYVOICE_DIR, "pretrained_models", "CosyVoice2-0.5B"),
+        load_jit=False, load_trt=False, fp16=False,
+    )
+    print("Model loaded.", flush=True)
 
 
 class SynthesizeRequest(BaseModel):
@@ -102,6 +110,8 @@ def health():
 
 @app.post("/synthesize")
 def synthesize(req: SynthesizeRequest):
+    if MODEL is None:
+        raise HTTPException(503, "CosyVoice2 未加载 (SKIP_COSYVOICE=1): 本地配音不可用, 请用 API 或 IndexTTS")
     text = req.text.strip()
     if not text:
         raise HTTPException(400, "text 不能为空")
