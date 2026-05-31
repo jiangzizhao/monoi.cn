@@ -795,9 +795,9 @@ function CreditsTab({ credits, plans, sub, onBuyPack }: {
             <div className="text-xs text-[var(--text-3)] mb-2">当前积分余额</div>
             <div className="text-4xl font-bold mb-3">{credits?.total ?? 0}</div>
             <div className="text-xs text-[var(--text-2)] flex gap-4">
-              {/* 免费用户的 monthly_credits 其实是「每日赠送」(每天清零重发), 不是按月; 故标签区分 */}
+              {/* 免费用户余额=今日赠送的剩余(每天清零重发); 标签用「今日剩余」区别于下方「每日赠送100(发放量)」 */}
               <span>
-                {isFree ? '每日赠送' : '月送'} <b className="text-[var(--text)]">{credits?.monthly ?? 0}</b>
+                {isFree ? '今日剩余' : '月送'} <b className="text-[var(--text)]">{credits?.monthly ?? 0}</b>
                 <span className="text-[10px] text-[var(--text-3)]">{isFree ? '(明日清零)' : '(月底清零)'}</span>
               </span>
               <span>加买 <b className="text-[var(--text)]">{credits?.purchased ?? 0}</b> <span className="text-[10px] text-[var(--text-3)]">(永不过期)</span></span>
