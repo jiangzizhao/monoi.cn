@@ -215,7 +215,7 @@ export default function VoiceTab() {
     setTranslating(true)
     setTranslatedText('')
     try {
-      const res = await fetch('/api/chat', {
+      const res = await fetch(((import.meta as any).env?.VITE_DIRECT_API_URL || 'https://monoi.nat100.top') + '/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken() || ''}` },
         body: JSON.stringify({

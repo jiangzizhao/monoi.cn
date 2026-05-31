@@ -46,9 +46,26 @@ function handleKick(msg: string) {
   }, 1500)
 }
 
+// Vercel 退役后, 前端在 OSS 静态托管, 没有 /api/proxy serverless 函数, 相对 /api/* 也无同源后端。
+// 把所有相对 /api 请求重写成直连后端 (api.monoi.cn, 即 VITE_DIRECT_API_URL):
+//   /api/proxy?path=<encoded>  →  <DIRECT_BASE> + 解码后的真实路径 (替代原 Vercel proxy 中转)
+//   /api/xxx                   →  <DIRECT_BASE>/api/xxx
+// 后端 main.py 自带这些真实接口; IP 转发由 Nginx X-Real-IP 处理。绝对 URL 不动。
+const DIRECT_BASE = (import.meta as any).env?.VITE_DIRECT_API_URL || ''
+function rewriteApiUrl(input: RequestInfo | URL): RequestInfo | URL {
+  if (!DIRECT_BASE || typeof input !== 'string') return input
+  if (input.startsWith('/api/proxy?path=')) {
+    try { return DIRECT_BASE + decodeURIComponent(input.slice('/api/proxy?path='.length)) }
+    catch { return DIRECT_BASE + input }
+  }
+  if (input.startsWith('/api/')) return DIRECT_BASE + input
+  return input
+}
+
 export function installSessionGuard() {
   const orig = window.fetch.bind(window)
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    input = rewriteApiUrl(input)
     const res = await orig(input, init)
     if (res.status === 401) {
       // 克隆一下读 body, 别影响原 response 被业务代码消费

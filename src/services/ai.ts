@@ -218,7 +218,15 @@ function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+// Vercel 退役后, 相对 /api/* 直连后端 (api.monoi.cn); main.py 自带这些接口。
+const DIRECT_BASE = (import.meta as any).env?.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'
+function resolveApi(input: RequestInfo | URL): RequestInfo | URL {
+  if (typeof input === 'string' && input.startsWith('/api')) return DIRECT_BASE + input
+  return input
+}
+
 async function fetchWithRetry(input: RequestInfo | URL, init: RequestInit, retries = 2): Promise<Response> {
+  input = resolveApi(input)
   try {
     return await fetch(input, init)
   } catch (error) {

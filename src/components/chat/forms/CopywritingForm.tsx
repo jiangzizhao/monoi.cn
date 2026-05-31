@@ -98,7 +98,7 @@ function GuidedForm({ mode, onSubmit, onClose }: { mode: 'original' | 'rewrite';
     setFetchError('')
     try {
       const token = getToken()
-      const res = await fetch('/api/fetch-content', {
+      const res = await fetch(((import.meta as any).env?.VITE_DIRECT_API_URL || 'https://monoi.nat100.top') + '/api/fetch-content', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
