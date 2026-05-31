@@ -43,7 +43,7 @@ PLANS = {
         'name': 'Pro',
         'price_yuan': 99,
         'period_days': 30,
-        'monthly_credits': 1500,
+        'monthly_credits': 2500,
         'credit_pack_rate': 15,                       # 加买积分 ¥1=15 (1.5x 标准)
         'digital_human_quota': 30,                    # 月配额
         'max_avatars': 5,                             # 数字人形象数量上限
@@ -67,7 +67,7 @@ PLANS = {
         'name': 'Max',
         'price_yuan': 199,
         'period_days': 30,
-        'monthly_credits': 4000,
+        'monthly_credits': 5000,
         'credit_pack_rate': 20,                       # ¥1=20 (2x)
         'digital_human_quota': 100,
         'max_avatars': 10,                            # 数字人形象数量上限
@@ -543,7 +543,7 @@ def init_billing_tables():
 # ============================== 积分 helpers ==============================
 
 
-DAILY_FREE_GRANT_AMOUNT = 60       # free 用户每天送多少
+DAILY_FREE_GRANT_AMOUNT = 100      # free 用户每天送多少 (60→100: 让免费用户每天能做 1 个基础 2 分钟作品)
 FREE_TRIAL_WINDOW_DAYS = 7         # 从第一次领起算的日历日窗口. 过期 → 永久停送.
 
 # 兼容老引用 (准备移除)
