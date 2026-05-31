@@ -1279,8 +1279,9 @@ class BuyCreditsRequest(BaseModel):
     payment_method: str = 'manual'
 
 
-# JWT 配置 (跟 main.py 保持一致, 后续抽到 config 模块)
-SECRET_KEY = "monoi-secret-key-2025"
+# JWT 配置 — 必须跟 main.py 用同一个密钥, 否则主程序签发的 token 在这里(billing/referral 接口)
+# 解不开 → 全部 401「token 无效」(积分/推广页空白)。之前写死成默认值, 配了强随机 JWT_SECRET_KEY 后就炸。
+SECRET_KEY = os.getenv('JWT_SECRET_KEY') or "monoi-secret-key-2025"
 ALGORITHM = "HS256"
 
 
