@@ -129,7 +129,7 @@ function planHighlights(tier: string, p: PlanConfig): string[] {
   // 每档卡片只列**最直观的差异**, 详细对比表里看完整功能.
   if (tier === 'free') {
     return [
-      `${p.monthly_credits} 积分 (7 天体验)`,
+      '赠送 700 积分，享受 7 天免费创作',
       '配音预设',
       '数字人 (1 个形象)',
       '文案 / 封面',
