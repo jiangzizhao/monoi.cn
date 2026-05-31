@@ -91,8 +91,8 @@ PLANS = {
         'name': '旗舰年卡',
         'price_yuan': 2980,
         'period_days': 365,
-        'monthly_credits': 5000,                      # 每月入账, 不是一次性 60000
-        'yearly_total_credits': 60000,
+        'monthly_credits': 6000,                      # 每月入账 (高于 Max 5000, 体现最高档)
+        'yearly_total_credits': 72000,                # 6000 × 12
         'credit_pack_rate': 25,                       # ¥1=25 (2.5x)
         'digital_human_quota': 300,
         'max_avatars': -1,                            # -1 = 不限
