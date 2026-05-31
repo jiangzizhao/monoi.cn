@@ -1,5 +1,9 @@
+// Vercel 退役后, 前端直连后端 (api.monoi.cn). main.py 自带 /api/login /api/send-sms 等真实接口,
+// 不再需要 Vercel 的 /api/proxy 中转层。IP 转发由 Nginx (X-Real-IP) 处理, 后端限流照常生效。
+const DIRECT_BASE = (import.meta as any).env?.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'
+
 async function proxyRequest(path: string, body: object) {
-  const res = await fetch(`/api/proxy?path=${path}`, {
+  const res = await fetch(`${DIRECT_BASE}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
