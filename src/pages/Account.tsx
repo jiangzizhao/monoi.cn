@@ -526,14 +526,7 @@ function ProfileTab({ me, sub, credits, refCode, plans, onReload }: {
               )}
             </div>
           }/>
-          <Row label="积分余额" value={
-            <span>
-              <b>{credits?.total || 0}</b>
-              <span className="text-xs text-[var(--text-3)] ml-1">
-                (月送 {credits?.monthly || 0} + 加买 {credits?.purchased || 0})
-              </span>
-            </span>
-          } note={credits && credits.monthly_quota > 0 ? `本月已用 ${credits.monthly_used_pct.toFixed(0)}%` : ''}/>
+          {/* 积分余额行移除: 充值积分 tab 已有完整余额卡, 这里重复且「月送」对免费用户有误导 */}
           <Row label="我的推广码" value={
             <span className="font-mono text-sm">{refCode?.referral_code || '-'}</span>
           } note="分享你的推广链接, 别人注册成功双方各得 30 积分"/>
