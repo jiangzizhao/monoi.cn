@@ -388,8 +388,8 @@ export default function Account() {
 
 // ========== Tab 1: 个人资料 ==========
 
-function ProfileTab({ me, sub, credits, refCode, plans, onReload }: {
-  me: UserProfile | null; sub: UserSubscription | null; credits: CreditBalance | null
+function ProfileTab({ me, sub, refCode, plans, onReload }: {
+  me: UserProfile | null; sub: UserSubscription | null; credits?: CreditBalance | null
   refCode: ReferralCode | null; plans: PlansResponse | null; onReload: () => void
 }) {
   const [editing, setEditing] = useState(false)
