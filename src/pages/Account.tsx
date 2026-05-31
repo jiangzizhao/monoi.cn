@@ -794,14 +794,36 @@ function CreditsTab({ credits, plans, sub, onBuyPack }: {
   return (
     <>
       {/* 余额卡 */}
-      <div className="p-6 rounded-2xl border border-[var(--border)] bg-gradient-to-br from-[var(--bg-card)] to-[var(--bg-hover)]">
-        <div className="text-xs text-[var(--text-3)] mb-2">当前积分余额</div>
-        <div className="text-4xl font-bold mb-3">{credits?.total ?? 0}</div>
-        <div className="text-xs text-[var(--text-2)] flex gap-4">
-          <span>月送 <b className="text-[var(--text)]">{credits?.monthly ?? 0}</b> <span className="text-[10px] text-[var(--text-3)]">(月底清零)</span></span>
-          <span>加买 <b className="text-[var(--text)]">{credits?.purchased ?? 0}</b> <span className="text-[10px] text-[var(--text-3)]">(永不过期)</span></span>
-        </div>
-      </div>
+      {(() => {
+        const isFree = (sub?.tier || 'free') === 'free'
+        const dg = credits?.daily_grant
+        return (
+          <div className="p-6 rounded-2xl border border-[var(--border)] bg-gradient-to-br from-[var(--bg-card)] to-[var(--bg-hover)]">
+            <div className="text-xs text-[var(--text-3)] mb-2">当前积分余额</div>
+            <div className="text-4xl font-bold mb-3">{credits?.total ?? 0}</div>
+            <div className="text-xs text-[var(--text-2)] flex gap-4">
+              {/* 免费用户的 monthly_credits 其实是「每日赠送」(每天清零重发), 不是按月; 故标签区分 */}
+              <span>
+                {isFree ? '每日赠送' : '月送'} <b className="text-[var(--text)]">{credits?.monthly ?? 0}</b>
+                <span className="text-[10px] text-[var(--text-3)]">{isFree ? '(明日清零)' : '(月底清零)'}</span>
+              </span>
+              <span>加买 <b className="text-[var(--text)]">{credits?.purchased ?? 0}</b> <span className="text-[10px] text-[var(--text-3)]">(永不过期)</span></span>
+            </div>
+            {/* 免费用户: 展示每日赠送机制 + 试用期进度 (数据来自后端 get_balance.daily_grant) */}
+            {isFree && dg && (
+              <div className="mt-3 pt-3 border-t border-[var(--border)] text-[11px] text-[var(--text-3)] leading-relaxed">
+                {dg.all_used_up ? (
+                  <>新人体验已结束 · 开通会员获取每月积分,或购买永不过期的加买积分包</>
+                ) : dg.granted_today ? (
+                  <>🎁 每日赠送 <b className="text-[var(--text-2)]">{dg.daily_amount}</b> 积分 · 今日已到账 · 新人体验第 {Math.min(dg.day_in_window, dg.total_cap)}/{dg.total_cap} 天 · 明日刷新页面自动再领</>
+                ) : (
+                  <>🎁 每日赠送 <b className="text-[var(--text-2)]">{dg.daily_amount}</b> 积分 · 今日可领(刷新页面自动到账){dg.day_in_window > 0 ? ` · 新人体验第 ${dg.day_in_window}/${dg.total_cap} 天` : ` · 共 ${dg.total_cap} 天`}</>
+                )}
+              </div>
+            )}
+          </div>
+        )
+      })()}
 
       {/* 积分包 4 档 — 必须 Pro 及以上会员才能买 */}
       {(() => {
@@ -815,7 +837,7 @@ function CreditsTab({ credits, plans, sub, onBuyPack }: {
               )}
             </div>
             <div className="text-xs text-[var(--text-3)] mb-4">
-              {isFreeUser ? '免费用户只能用每月赠送积分; 加买积分包需先开会员' : '买完积分永不过期, 可叠加月送积分使用'}
+              {isFreeUser ? '免费用户用每日赠送积分; 加买积分包需先开通会员' : '买完积分永不过期, 可叠加月送积分使用'}
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {plans && Object.entries(plans.credit_packs).map(([code, pack]) => {
