@@ -16,6 +16,7 @@ V1 阶段:
 - 退款: 不退款 (设计已定)
 """
 
+import os
 import sqlite3
 import time
 import uuid
