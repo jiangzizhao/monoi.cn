@@ -1,0 +1,21 @@
+[Unit]
+Description=monoi main.py (FastAPI 后端: 登录/积分/各业务调度 + 迁入的 Vercel api)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/data/monoi-server
+# .env 用 EnvironmentFile 注入 (前缀 - 表示文件不存在也不报错, 但生产必须有)
+EnvironmentFile=-/data/monoi-server/.env
+ExecStart=/data/monoi-server/venv/bin/python /data/monoi-server/main.py
+Restart=on-failure
+RestartSec=10
+# main.py 不加载大模型, 内存占用小, 但还是给个保护避免被 OOM 优先杀
+OOMScoreAdjust=-100
+# 日志进 journald, 用 journalctl -u main-server 看
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
