@@ -832,9 +832,6 @@ function CreditsTab({ credits, plans, sub, onBuyPack }: {
           <div>
             <div className="flex items-baseline justify-between mb-1">
               <div className="text-base font-semibold">购买积分包</div>
-              {isFreeUser && (
-                <div className="text-xs text-amber-500">⚠️ 需先开通 Pro 及以上会员</div>
-              )}
             </div>
             <div className="text-xs text-[var(--text-3)] mb-4">
               {isFreeUser ? '免费用户用每日赠送积分; 加买积分包需先开通会员' : '买完积分永不过期, 可叠加月送积分使用'}
@@ -865,7 +862,10 @@ function CreditsTab({ credits, plans, sub, onBuyPack }: {
       <div className="p-5 rounded-2xl border border-[var(--border)] bg-[var(--bg-card)]">
         <div className="text-sm font-medium mb-2">积分说明</div>
         <div className="text-xs text-[var(--text-2)] leading-relaxed">
-          月送积分每月 reset, 加买积分永不过期. 使用功能时优先扣月送积分, 用完再扣加买积分.
+          积分分两种：<br />
+          • <b className="text-[var(--text)]">赠送积分</b>：免费用户每天赠送、会员每月赠送，<b className="text-[var(--text)]">有有效期，到期清零</b>。<br />
+          • <b className="text-[var(--text)]">加买积分</b>：购买积分包获得，<b className="text-[var(--text)]">永不过期</b>。<br />
+          使用功能时<b className="text-[var(--text)]">先扣赠送积分，用完再扣加买积分</b>。
         </div>
       </div>
     </>
