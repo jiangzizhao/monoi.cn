@@ -35,7 +35,9 @@ def get_db():
     return conn
 
 
-SECRET_KEY = "monoi-secret-key-2025"
+# 必须跟 main.py 用同一个 JWT 密钥, 否则主程序签发的 token 在这里解不开 → "token 无效"。
+# 之前写死成默认值, 一旦 main.py 配了强随机 JWT_SECRET_KEY 就对不上。改成读同一个 env。
+SECRET_KEY = os.getenv('JWT_SECRET_KEY') or "monoi-secret-key-2025"
 ALGORITHM = "HS256"
 
 
