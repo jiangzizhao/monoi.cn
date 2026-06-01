@@ -1268,14 +1268,15 @@ function CoverTemplateTab() {
               <div className="px-4 py-2 border-b border-[var(--border)] text-xs text-[var(--text-2)] font-medium">
                 {COVER_CAT_LABEL[cat] || cat} · {ts.length} 个
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 p-3">
+              {/* masonry: 一排 4 个, 卡片按高度自然堆叠 — 横版(16:9)矮, 两个竖叠 ≈ 一个竖版(3:4/9:16)高 */}
+              <div className="columns-2 sm:columns-3 md:columns-4 gap-3 p-3">
                 {ts.map(t => {
                   // 缩略图用 TemplatePreview 显示底图 + 字段渲染 (用 placeholder 当示例文字),
                   // 跟用户端模板库卡片一致, 看得到字体效果
                   const cardTexts: Record<string, string> = {}
                   for (const f of t.text_fields) cardTexts[f.label] = f.placeholder || f.label
                   return (
-                    <div key={t.id} className="relative group rounded-lg border border-[var(--border)] overflow-hidden">
+                    <div key={t.id} className="relative group rounded-lg border border-[var(--border)] overflow-hidden break-inside-avoid mb-3">
                       {/* TemplatePreview 接受 CoverTemplate 类型, AdminCoverTemplate 结构上兼容, cast 即可 */}
                       <TemplatePreview
                         template={t as any}
