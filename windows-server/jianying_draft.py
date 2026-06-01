@@ -11,6 +11,7 @@
 """
 import os
 import json
+import uuid
 import shutil
 import subprocess
 from typing import Optional
@@ -195,6 +196,21 @@ def build_draft_zip(
     # 5. 保存 draft_content.json
     json_path = os.path.join(draft_dir, 'draft_content.json')
     script.dump(json_path)
+
+    # 5b. 写 draft_meta_info.json —— 剪映靠它在草稿列表里"识别 + 显示"草稿.
+    # 之前没写, 所以剪映扫描草稿目录看不到这个草稿 (导出不显示的根因).
+    # DraftFolder.create_draft 内部也是 copy 这个模板; 这里额外填名字/id/时长.
+    try:
+        from pyJianYingDraft import assets as _pjassets
+        with open(_pjassets.get_asset_path("DRAFT_META_TEMPLATE"), 'r', encoding='utf-8') as _f:
+            _meta = json.load(_f)
+    except Exception:
+        _meta = {}
+    _meta['draft_name'] = draft_name
+    _meta['draft_id'] = str(uuid.uuid4()).upper()
+    _meta['tm_duration'] = int(total_dur_s * 1_000_000)   # 剪映用微秒
+    with open(os.path.join(draft_dir, 'draft_meta_info.json'), 'w', encoding='utf-8') as _f:
+        json.dump(_meta, _f, ensure_ascii=False, indent=2)
 
     # 6. 把 JSON 里的素材绝对路径改成 `materials/xxx`, 这样 zip 跨机器有效
     _rewrite_paths_to_relative(json_path, materials_dir)
