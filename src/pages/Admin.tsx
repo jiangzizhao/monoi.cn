@@ -1865,7 +1865,7 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
                       }}
                     >
                       <div className="absolute -top-5 left-0 text-[10px] bg-[var(--text)] text-[var(--bg)] px-1 rounded whitespace-nowrap z-10">
-                        #{i + 1} {f.label}
+                        #{i + 1} {f.label}{f.layer === 'behind' ? ' · 人物后' : ''}
                       </div>
                       {/* 字体预览 — wrapper 自己旋转, 这里不再 rotate */}
                       <div style={{
@@ -2010,6 +2010,7 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
                 field={activeField}
                 fonts={fonts}
                 bgWidth={bgNaturalSize.w}
+                hasPerson={!!personSlot}
                 onChange={patch => updateField(activeField._id, patch)}
                 onRemove={() => removeField(activeField._id)}
               />
@@ -2027,10 +2028,11 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
 }
 
 /** 右侧字段属性面板 */
-function FieldEditor({ field, fonts, bgWidth, onChange, onRemove }: {
+function FieldEditor({ field, fonts, bgWidth, hasPerson, onChange, onRemove }: {
   field: UiTextField
   fonts: FontOption[]
   bgWidth?: number                    // 底图宽 (px), 用来算字号占宽 % 提示
+  hasPerson?: boolean                 // 模板有人物坑时才显示图层(人物前/后)开关
   onChange: (patch: Partial<UiTextField>) => void
   onRemove: () => void
 }) {
@@ -2117,6 +2119,26 @@ function FieldEditor({ field, fonts, bgWidth, onChange, onRemove }: {
           </div>
         </div>
       </div>
+
+      {hasPerson && (
+        <div className="border-t border-[var(--border)] pt-3">
+          <div className="text-xs text-[var(--text-3)] mb-2">图层 (相对人物)</div>
+          <div className="flex rounded-lg overflow-hidden border border-[var(--border)] text-sm">
+            {(['front', 'behind'] as const).map(opt => (
+              <button key={opt}
+                onClick={() => onChange({ layer: opt })}
+                className={`flex-1 py-1.5 cursor-pointer ${(field.layer || 'front') === opt
+                  ? 'bg-[var(--text)] text-[var(--bg)]'
+                  : 'text-[var(--text-2)] hover:bg-[var(--bg-hover)]'}`}>
+                {opt === 'front' ? '人物前' : '人物后'}
+              </button>
+            ))}
+          </div>
+          <div className="text-[10px] text-[var(--text-3)] mt-1">
+            "人物后" = 人物压在文字上 (头/肩盖住标题, 更立体)
+          </div>
+        </div>
+      )}
 
       <div>
         <label className="text-xs text-[var(--text-3)]">旋转角度 ({(field.rotation || 0).toFixed(0)}°)</label>

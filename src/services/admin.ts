@@ -248,6 +248,7 @@ export interface CoverTextField {
   shadow_blur: number
   align: 'left' | 'center' | 'right'
   rotation: number                    // 旋转角度 (°), -45 ~ +45
+  layer?: 'front' | 'behind'          // 相对人物的图层: front=人物前(默认) / behind=人物后(人物压字)
   max_chars: number
   placeholder: string
 }

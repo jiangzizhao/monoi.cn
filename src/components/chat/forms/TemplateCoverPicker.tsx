@@ -109,6 +109,7 @@ export function TemplateCoverPicker({ onClose }: { onClose?: () => void } = {}) 
         if (ovr.highlight_color) trimmed.highlight_color = ovr.highlight_color
         if (ovr.stroke_color) trimmed.stroke_color = ovr.stroke_color
         if (ovr.stroke_width !== undefined) trimmed.stroke_width = ovr.stroke_width
+        if (ovr.layer) trimmed.layer = ovr.layer        // 用户改的图层 (人物前/后)
         if (ovr.x !== undefined) trimmed.x = ovr.x      // 用户拖拽位置
         if (ovr.y !== undefined) trimmed.y = ovr.y
         if (ovr.w !== undefined) trimmed.w = ovr.w
@@ -373,6 +374,7 @@ export function TemplateCoverPicker({ onClose }: { onClose?: () => void } = {}) 
             const curColor = ovr.color || f.color
             const curHighlight = ovr.highlight_color || f.highlight_color || ''
             const curStroke = ovr.stroke_color || f.stroke_color || ''
+            const curLayer = ovr.layer ?? f.layer ?? 'front'
             return (
               <div key={i} className="flex flex-col gap-1.5">
                 <div className="flex items-center justify-between">
@@ -442,6 +444,17 @@ export function TemplateCoverPicker({ onClose }: { onClose?: () => void } = {}) 
                           className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"/>
                       </span>
                     </label>
+                  )}
+                  {/* 图层: 文字在人物前 / 后 (人物压字) — 仅有人物坑的模板显示 */}
+                  {selected.person_slot && (
+                    <button
+                      onClick={() => updateOverride(f.label, { layer: curLayer === 'behind' ? 'front' : 'behind' })}
+                      className="flex items-center gap-1 px-1.5 py-0.5 rounded border border-[var(--border)] hover:border-[var(--text-3)] cursor-pointer"
+                      title="切换文字在人物前面 / 后面 (人物压字效果)"
+                    >
+                      <span>图层</span>
+                      <span className="font-medium text-[var(--text-2)]">{curLayer === 'behind' ? '人物后' : '人物前'}</span>
+                    </button>
                   )}
                   {/* 重置 */}
                   {textOverrides[f.label] && Object.keys(textOverrides[f.label]).length > 0 && (
@@ -765,6 +778,7 @@ export function TemplatePreview({ template, userTexts, textOverrides, extraField
               height: `${ph / tplH * 100}%`,
               transform: Math.abs(pRot) > 0.01 ? `rotate(${pRot}deg)` : undefined,
               transformOrigin: 'center',
+              zIndex: 20,   // 介于 behind 文字(10) 和 front 文字(30) 之间
             }}
             onMouseDown={interactive ? (e) => {
               e.preventDefault(); e.stopPropagation()
@@ -867,6 +881,8 @@ export function TemplatePreview({ template, userTexts, textOverrides, extraField
         // 用户/admin 改 rotation 时, 优先用 override 的 (admin 字段), 否则用 field 自带的
         const rotation = (isAdmin ? (ovr.rotation ?? f.rotation) : f.rotation) || 0
         const hasRotation = Math.abs(rotation) > 0.01
+        // 图层: behind=人物后(z10) / front=人物前(z30), 人物 z20. 跟后端绘制顺序一致
+        const layer = (isAdmin ? (ovr.layer ?? f.layer) : f.layer) || 'front'
         // wrapper 整体旋转 — 字 + handles 一起转 (跟 Canva 一致)
         // 注意: wrapper 不再设 containerType — 让内部 cqw 单位向上找到外层 TemplatePreview 容器,
         // 按整图宽算字号 (而不是按字段框自己的宽). 这样字号比例跟最终图一致.
@@ -880,6 +896,7 @@ export function TemplatePreview({ template, userTexts, textOverrides, extraField
           transform: hasRotation ? `rotate(${rotation}deg)` : undefined,
           transformOrigin: 'center',
           overflow: 'visible',
+          zIndex: layer === 'behind' ? 10 : 30,
         }
         const isActive = activeLabel === f.label
         return (

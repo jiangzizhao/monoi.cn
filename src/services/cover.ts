@@ -20,6 +20,7 @@ export interface UserCoverTextField {
   shadow_blur: number
   align: 'left' | 'center' | 'right'
   rotation: number                       // 旋转角度 (°)
+  layer?: 'front' | 'behind'             // 相对人物的图层: front=人物前(默认) / behind=人物后
   max_chars: number
   placeholder: string
 }
@@ -156,6 +157,7 @@ export interface TextFieldOverride {
   w?: number
   h?: number
   rotation?: number                      // 旋转角度 (°)
+  layer?: 'front' | 'behind'             // 用户改字段图层 (人物前/后)
 }
 
 /** 按模板渲染封面 */

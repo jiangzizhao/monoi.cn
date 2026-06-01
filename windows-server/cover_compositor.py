@@ -296,22 +296,24 @@ def render_cover(
     overrides = text_overrides or {}
     hidden = set(hidden_labels or [])
 
-    # 1. 人物坑 — 支持 rotation (PIL rotate + center align)
-    if person_slot and person_png_path and os.path.exists(person_png_path):
+    # 1. 人物贴图准备成闭包 —— 延后到 "人物后的字" 画完再贴, 实现图层前后可调
+    def _paste_person():
+        if not (person_slot and person_png_path and os.path.exists(person_png_path)):
+            return
         person_img = Image.open(person_png_path).convert('RGBA')
         # 描边跟模板走: 人物库存的是光图, 这里按模板 person_slot 配置加描边
         # (在抠图原尺寸上加再 fit, 跟 admin 示例人物的描边缩放一致)
         if person_slot.get('stroke_enabled') and int(person_slot.get('stroke_width') or 0) > 0:
-            person_img = add_stroke_to_image(person_img, person_slot.get('stroke_color') or '#FFFFFF', int(person_slot.get('stroke_width')))
-        fitted = _fit_person(person_img, person_slot)
+            person_img2 = add_stroke_to_image(person_img, person_slot.get('stroke_color') or '#FFFFFF', int(person_slot.get('stroke_width')))
+        else:
+            person_img2 = person_img
+        fitted = _fit_person(person_img2, person_slot)
         person_rotation = float(person_slot.get('rotation') or 0)
         if abs(person_rotation) > 0.01:
             rotated = fitted.rotate(-person_rotation, expand=True, resample=Image.BICUBIC)
             slot_cx = int(person_slot['x']) + int(person_slot['w']) // 2
             slot_cy = int(person_slot['y']) + int(person_slot['h']) // 2
-            paste_x = slot_cx - rotated.width // 2
-            paste_y = slot_cy - rotated.height // 2
-            bg.alpha_composite(rotated, (paste_x, paste_y))
+            bg.alpha_composite(rotated, (slot_cx - rotated.width // 2, slot_cy - rotated.height // 2))
         else:
             bg.alpha_composite(fitted, (int(person_slot['x']), int(person_slot['y'])))
 
@@ -323,7 +325,8 @@ def render_cover(
     for f in extra_fields or []:
         all_fields.append((f, False))
 
-    # 3. 文字字段 — admin 字段走 override 合并, extra 字段不走 (本身就是用户配置)
+    # 3. 合并 override + 按 layer 分组 (behind=人物后 / front=人物前, 默认 front)
+    behind_fields, front_fields = [], []   # 各装 (merged_field, user_text)
     for field, is_admin in all_fields:
         label = field.get('label', '')
         user_text = user_texts.get(label, field.get('placeholder', ''))
@@ -343,7 +346,7 @@ def render_cover(
                 v = ovr.get(k)
                 if v is not None:
                     merged[k] = int(v)
-            for k in ('font_file', 'color', 'highlight_color', 'stroke_color', 'stroke_width', 'rotation'):
+            for k in ('font_file', 'color', 'highlight_color', 'stroke_color', 'stroke_width', 'rotation', 'layer'):
                 v = ovr.get(k)
                 if v not in (None, ''):
                     merged[k] = v
@@ -351,6 +354,13 @@ def render_cover(
             # extra 字段直接用 (前端传啥就是啥)
             merged = dict(field)
 
+        (behind_fields if merged.get('layer') == 'behind' else front_fields).append((merged, user_text))
+
+    # 4. 绘制顺序: 人物后的字 → 贴人物 → 人物前的字
+    for merged, user_text in behind_fields:
+        _draw_text_field(bg, merged, user_text)
+    _paste_person()
+    for merged, user_text in front_fields:
         _draw_text_field(bg, merged, user_text)
 
     return bg
