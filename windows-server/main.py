@@ -3694,10 +3694,29 @@ def submit_digital_human(
     video_path = os.path.join(DUIX_DATA_DIR, video_name)
 
     try:
-        with open(audio_path, "wb") as f:
+        # 先写原始上传音频到临时文件
+        raw_audio_path = audio_path + ".raw"
+        with open(raw_audio_path, "wb") as f:
             f.write(audio.file.read())
+        # HeyGem 的 ffprobe 只认标准 PCM WAV — IndexTTS 输出 24kHz 等格式它读不出 streams
+        # ("三次获取音频时长失败")。用 ffmpeg 统一转成 16kHz 单声道 16bit PCM wav 再喂给它。
+        _conv = subprocess.run(
+            ["ffmpeg", "-y", "-i", raw_audio_path, "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", audio_path],
+            capture_output=True, timeout=120,
+        )
+        try:
+            os.remove(raw_audio_path)
+        except Exception:
+            pass
+        if _conv.returncode != 0 or (not os.path.exists(audio_path)) or os.path.getsize(audio_path) == 0:
+            _err = _conv.stderr.decode("utf-8", errors="ignore")[-300:]
+            print(f"[dh] 音频转码失败: {_err}", flush=True)
+            _duix_cleanup(audio_path, video_path)
+            raise HTTPException(400, "音频转码失败, 请换一段音频重试")
         # HeyGem 只认 /code/data/temp/ 下的文件, 把 avatar 复制过去
         shutil.copyfile(avatar_path, video_path)
+    except HTTPException:
+        raise
     except Exception as e:
         _duix_cleanup(audio_path, video_path)
         raise HTTPException(500, f"准备文件失败: {e}")
