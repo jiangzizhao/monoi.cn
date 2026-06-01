@@ -22,6 +22,7 @@ import time
 import uuid
 
 _BUCKET_CACHE = None
+_PUBLIC_BUCKET_CACHE = None
 _ENV_LOADED = False
 
 
@@ -94,6 +95,29 @@ def _get_bucket():
     return _BUCKET_CACHE
 
 
+def _get_public_bucket():
+    """给【浏览器】签 URL 专用 — 用公网 endpoint。
+    后端读写 OSS 用 _get_bucket() 的内网 endpoint (同区免流量费), 但内网 endpoint 签出来的
+    URL 公网访问不到 → 给浏览器的 PUT/GET 签名 URL 必须用公网 endpoint。
+    公网 endpoint: 显式 OSS_PUBLIC_ENDPOINT, 否则把内网 endpoint 的 '-internal' 去掉。
+    (家里用的本就是公网 endpoint, 无 '-internal' 可去 → 行为不变, 兼容。)"""
+    global _PUBLIC_BUCKET_CACHE
+    if _PUBLIC_BUCKET_CACHE is not None:
+        return _PUBLIC_BUCKET_CACHE
+    _try_load_env()
+    import oss2
+    endpoint = os.environ.get("OSS_ENDPOINT", "").strip()
+    public_ep = os.environ.get("OSS_PUBLIC_ENDPOINT", "").strip() or endpoint.replace("-internal", "")
+    bucket_name = os.environ.get("OSS_BUCKET", "").strip()
+    ak_id = os.environ.get("OSS_ACCESS_KEY_ID", "").strip() or os.environ.get("ALIYUN_AK_ID", "").strip()
+    ak_secret = os.environ.get("OSS_ACCESS_KEY_SECRET", "").strip() or os.environ.get("ALIYUN_AK_SECRET", "").strip()
+    if not public_ep or not bucket_name or not ak_id or not ak_secret:
+        raise RuntimeError("OSS 未配置 (public endpoint 签名用)")
+    auth = oss2.Auth(ak_id, ak_secret)
+    _PUBLIC_BUCKET_CACHE = oss2.Bucket(auth, public_ep, bucket_name, connect_timeout=600)
+    return _PUBLIC_BUCKET_CACHE
+
+
 def oss_upload_resumable(oss_key: str, local_path: str, content_type: str = "video/mp4") -> None:
     """分片上传 (multipart). 阈值 5MB, 每片 2MB, 3 线程并发. 适合慢上行带宽."""
     bucket = _get_bucket()
@@ -127,14 +151,14 @@ def oss_make_upload_key(filename: str, prefix: str = "uploads") -> str:
 
 
 def oss_sign_put(oss_key: str, content_type: str = "application/octet-stream", expires: int = 3600) -> str:
-    """生成 PUT 签名 URL (浏览器直传用). 默认 1 小时有效."""
-    bucket = _get_bucket()
+    """生成 PUT 签名 URL (浏览器直传用). 默认 1 小时有效. 用公网 endpoint (浏览器要能访问)."""
+    bucket = _get_public_bucket()
     return bucket.sign_url("PUT", oss_key, expires, headers={"Content-Type": content_type}, slash_safe=True)
 
 
 def oss_sign_get(oss_key: str, expires: int = 6 * 3600) -> str:
-    """生成 GET 签名 URL (浏览器播放/下载用). 默认 6 小时有效."""
-    bucket = _get_bucket()
+    """生成 GET 签名 URL (浏览器播放/下载用). 默认 6 小时有效. 用公网 endpoint (浏览器要能访问)."""
+    bucket = _get_public_bucket()
     return bucket.sign_url("GET", oss_key, expires, slash_safe=True)
 
 
