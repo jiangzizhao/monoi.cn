@@ -3580,6 +3580,17 @@ async def upload_avatar(
     meta = _probe_video_meta(file_path)
     file_size = os.path.getsize(file_path)
 
+    # 形象视频限制: ≤ 80MB + ≤ 15 秒。它只是循环参考, 长了只拖慢 HeyGem 预处理 (逐帧抽), 对成品无益。
+    _dur = meta.get("duration_seconds") or 0
+    if file_size > 80 * 1024 * 1024 or (_dur and _dur > 15.5):
+        try:
+            os.remove(file_path)
+        except Exception:
+            pass
+        if file_size > 80 * 1024 * 1024:
+            raise HTTPException(400, "形象视频太大 (>80MB), 请压缩或剪短到 15 秒内再上传")
+        raise HTTPException(400, f"形象视频太长 ({_dur:.0f} 秒), 请剪到 15 秒内 — 它只是循环参考, 短点生成快很多")
+
     conn = get_db()
     try:
         conn.execute(

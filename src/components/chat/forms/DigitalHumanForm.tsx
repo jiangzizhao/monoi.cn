@@ -153,6 +153,24 @@ export function DigitalHumanForm({ onSubmit, onClose }: Props) {
       setUploadError(`已达上限: 最多保留 ${maxAvatars} 个形象, 请先删除一个`)
       return
     }
+    // 形象视频限制: ≤ 80MB + ≤ 15 秒 (只是循环参考, 短点生成快很多)
+    if (file.size > 80 * 1024 * 1024) {
+      setUploadError('形象视频太大 (>80MB), 请压缩或剪短到 15 秒内再传')
+      return
+    }
+    try {
+      const dur = await new Promise<number>((resolve, reject) => {
+        const v = document.createElement('video')
+        v.preload = 'metadata'
+        v.onloadedmetadata = () => { URL.revokeObjectURL(v.src); resolve(v.duration || 0) }
+        v.onerror = () => { URL.revokeObjectURL(v.src); reject(new Error('read fail')) }
+        v.src = URL.createObjectURL(file)
+      })
+      if (dur > 15.5) {
+        setUploadError(`形象视频 ${dur.toFixed(0)} 秒, 太长了 — 请剪到 15 秒内 (它只是循环参考, 短点生成快很多)`)
+        return
+      }
+    } catch { /* 读不到时长就放过, 后端会兜底 */ }
     setUploading(true)
     setUploadError('')
     try {
