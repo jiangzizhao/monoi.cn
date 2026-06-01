@@ -3685,6 +3685,11 @@ def submit_digital_human(
 ):
     """用已保存的形象 + 上传的音频提交数字人对口型. 返回 code, 前端轮询 /task/{code}.
     扣 2 积分/秒 (按音频实际时长)."""
+    # ⚠️ 数字人云上自托管 (HeyGem) 在 T4 上跑不通, 且任务卡住会占满 main.py 线程拖垮全站。
+    # 暂时关闭, 方案改为桌面版本地跑 (Max 会员用自己 N 卡)。
+    # 临时开自托管测试: .env 设 DIGITAL_HUMAN_ENABLED=1 (注意会有拖垮全站的风险)。
+    if os.environ.get("DIGITAL_HUMAN_ENABLED") != "1":
+        raise HTTPException(503, "数字人功能升级中, 即将以桌面版形式上线, 敬请期待")
     import requests as _req
     import shutil
     import uuid as _uuid
