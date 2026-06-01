@@ -1,7 +1,8 @@
 """
 剪映草稿生成 (V1 最小版): 按句分段视频/字幕 + 整段口播音频, 打 zip 给用户下载.
 
-依赖: pip install pyJianYingDraft  (可选, 没装时 endpoint 会报清楚错误)
+依赖: pip install pycapcut  (CapCut 版, 生成 draft_info.json 新格式 —— 实测新版剪映
+10.6.0 也能打开; pyJianYingDraft 只支持剪映 5.9 老格式, 新版打不开"草稿损坏")
 
 数据结构上跟 /compose-footage 完全对齐: 每个 shot = 一镜 = (start, end, 该镜素材路径).
 草稿打开后用户在剪映里看到的是已经按句子分好段的 3 条轨道:
@@ -29,13 +30,13 @@ _RATIO_DIMS = {
 }
 
 
-def _check_pyjianying():
+def _check_pycapcut():
     try:
-        import pyJianYingDraft  # noqa: F401
-        return pyJianYingDraft
+        import pycapcut  # noqa: F401  (API 跟 pyJianYingDraft 基本一致, 同作者)
+        return pycapcut
     except ImportError as e:
         raise RuntimeError(
-            "pyJianYingDraft 未安装. 在 D:\\monoi-server 跑: pip install pyJianYingDraft"
+            "pycapcut 未安装. 跑: pip install pycapcut"
         ) from e
 
 
@@ -96,7 +97,7 @@ def build_draft_zip(
        - asset_duration (s): 素材文件原长 (用于 source_timerange)
        - text: 该镜字幕 (空字符串 = 不加这段字幕)
     返回生成的 zip 路径 (在 work_dir 下)."""
-    pjd = _check_pyjianying()
+    pjd = _check_pycapcut()
     if output_ratio not in _RATIO_DIMS:
         raise ValueError(f'不支持的 output_ratio: {output_ratio}')
     W, H = _RATIO_DIMS[output_ratio]
@@ -136,8 +137,8 @@ def build_draft_zip(
             shot_local_paths.append(None)
 
     # 4. 构造 ScriptFile + 3 条轨道
-    # pyJianYingDraft 0.2.x 起 ScriptFile 多两个必填: fps 默认 30, maintrack_adsorb 主轨吸附 (True 跟剪映默认行为一致)
-    script = pjd.ScriptFile(W, H, fps=30, maintrack_adsorb=True)
+    # pycapcut.ScriptFile(width, height, fps) — 没有 maintrack_adsorb 参数
+    script = pjd.ScriptFile(W, H, fps=30)
     V_TRACK = 'video_main'
     A_TRACK = 'audio_narration'
     T_TRACK = 'subtitle'
@@ -193,16 +194,21 @@ def build_draft_zip(
             text_seg = pjd.TextSegment(text, target)
             script.add_segment(text_seg, T_TRACK)
 
-    # 5. 保存 draft_content.json
+    # 5. 保存 → pycapcut 写 draft_content.json
     json_path = os.path.join(draft_dir, 'draft_content.json')
     script.dump(json_path)
 
-    # 5b. 写 draft_meta_info.json —— 剪映靠它在草稿列表里"识别 + 显示"草稿.
-    # 之前没写, 所以剪映扫描草稿目录看不到这个草稿 (导出不显示的根因).
-    # DraftFolder.create_draft 内部也是 copy 这个模板; 这里额外填名字/id/时长.
+    # 6. 素材绝对路径改成相对 `materials/xxx` (zip 跨机器有效)
+    _rewrite_paths_to_relative(json_path, materials_dir)
+
+    # 6b. 复制成 draft_info.json —— 新版剪映/CapCut 读这个名字 (老版读 draft_content.json).
+    # 两个都留, 兼容性最好. 实测剪映 10.6.0 读 draft_info.json 能打开三轨.
+    shutil.copy(json_path, os.path.join(draft_dir, 'draft_info.json'))
+
+    # 6c. 写 draft_meta_info.json —— 剪映靠它在草稿列表里"识别 + 显示"草稿 (不写就扫不到).
     try:
-        from pyJianYingDraft import assets as _pjassets
-        with open(_pjassets.get_asset_path("DRAFT_META_TEMPLATE"), 'r', encoding='utf-8') as _f:
+        from pycapcut import assets as _ccassets
+        with open(_ccassets.get_asset_path("DRAFT_META_TEMPLATE"), 'r', encoding='utf-8') as _f:
             _meta = json.load(_f)
     except Exception:
         _meta = {}
@@ -210,10 +216,7 @@ def build_draft_zip(
     _meta['draft_id'] = str(uuid.uuid4()).upper()
     _meta['tm_duration'] = int(total_dur_s * 1_000_000)   # 剪映用微秒
     with open(os.path.join(draft_dir, 'draft_meta_info.json'), 'w', encoding='utf-8') as _f:
-        json.dump(_meta, _f, ensure_ascii=False, indent=2)
-
-    # 6. 把 JSON 里的素材绝对路径改成 `materials/xxx`, 这样 zip 跨机器有效
-    _rewrite_paths_to_relative(json_path, materials_dir)
+        json.dump(_meta, _f, ensure_ascii=False)
 
     # 7. 打 zip
     zip_base = os.path.join(work_dir, draft_name)
