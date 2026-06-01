@@ -26,8 +26,9 @@ from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 # ============== 字体加载 (跟 voice-server.py 的逻辑保持一致) ==============
 
-_FONT_DIR_PROJECT = r'D:\monoi-server\fonts'
-_FONT_FALLBACK = 'C:/Windows/Fonts/msyhbd.ttc'
+_FONT_DIR_PROJECT = os.environ.get('FONTS_DIR') or (r'D:\monoi-server\fonts' if os.name == 'nt' else '/data/monoi-server/fonts')
+# 兜底字体: Windows 用微软雅黑, Linux 用 Noto CJK (apt install fonts-noto-cjk)
+_FONT_FALLBACK = 'C:/Windows/Fonts/msyhbd.ttc' if os.name == 'nt' else '/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc'
 
 
 def _load_font(filename: str, size: int):

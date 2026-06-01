@@ -1732,7 +1732,7 @@ _COVER_DIMS = {
 
 # 字体路径优先级: 项目 fonts 目录 (用户放设计字体) → Win 系统字体 (兜底)
 # 用户在 D:\monoi-server\fonts\ 放思源黑体 Heavy 等设计字体, 自动用; 没的话 fallback 到微软雅黑
-_FONT_DIR_PROJECT = r'D:\monoi-server\fonts'
+_FONT_DIR_PROJECT = os.environ.get('FONTS_DIR') or (r'D:\monoi-server\fonts' if os.name == 'nt' else '/data/monoi-server/fonts')
 _FONT_CANDIDATES_HEAVY = [   # 标题用粗体
     'SourceHanSansCN-Heavy.otf',
     'SourceHanSansSC-Heavy.otf',
@@ -1745,8 +1745,10 @@ _FONT_CANDIDATES_REGULAR = [  # 副标题用常规
     'SourceHanSansSC-Bold.otf',
     'AlibabaPuHuiTi-3-85-Bold.ttf',
 ]
-_FONT_FALLBACK_HEAVY = 'C:/Windows/Fonts/msyhbd.ttc'      # 微软雅黑 Bold
-_FONT_FALLBACK_REGULAR = 'C:/Windows/Fonts/msyh.ttc'      # 微软雅黑
+_FONT_FALLBACK_HEAVY = ('C:/Windows/Fonts/msyhbd.ttc' if os.name == 'nt'
+                        else '/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc')    # Linux: Noto CJK Bold
+_FONT_FALLBACK_REGULAR = ('C:/Windows/Fonts/msyh.ttc' if os.name == 'nt'
+                          else '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc')  # Linux: Noto CJK Regular
 
 
 def _find_font(candidates: list, fallback: str) -> str:
