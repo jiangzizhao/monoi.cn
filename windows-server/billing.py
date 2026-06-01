@@ -847,6 +847,15 @@ def consume_credits(user_id: int, feature: str, amount: int, ref_id: Optional[st
         return  # 0 积分功能直接放过
     conn = get_db()
     try:
+        # 管理员/创始人账号 (is_admin=1) 免扣积分 — 方便自用 + 测试。仍记一条 delta=0 流水留痕。
+        _adm = conn.execute("SELECT is_admin FROM users WHERE id = ?", (user_id,)).fetchone()
+        if _adm and _adm['is_admin']:
+            conn.execute(
+                "INSERT INTO credit_log (user_id, feature, delta, source, ref_id, created_at) VALUES (?, ?, 0, 'admin_free', ?, ?)",
+                (user_id, feature, ref_id, time.time())
+            )
+            conn.commit()
+            return
         row = conn.execute(
             "SELECT monthly_credits, purchased_credits FROM credit_balance WHERE user_id = ?",
             (user_id,)
