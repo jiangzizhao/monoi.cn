@@ -1916,14 +1916,18 @@ def synthesize_voice(req: VoiceSynthesizeRequest, request: Request):
         # 只校验余额够不够, 不真的扣 — 后扣会在 _run_tts_task 用真实时长重算
         _conn = get_db()
         _conn.row_factory = sqlite3.Row
+        # 管理员/创始人 (is_admin=1) 免扣积分 → 跳过预检查, 不拦
+        _adm = _conn.execute("SELECT is_admin FROM users WHERE id = ?", (_uid,)).fetchone()
+        _is_admin = bool(_adm and _adm['is_admin'])
         _bal = _conn.execute(
             "SELECT monthly_credits, purchased_credits FROM credit_balance WHERE user_id = ?",
             (_uid,)
         ).fetchone()
         _conn.close()
         _total = int((_bal['monthly_credits'] or 0) if _bal else 0) + int((_bal['purchased_credits'] or 0) if _bal else 0)
-        if _total < est_amount:
-            raise HTTPException(402, f"积分余额不足 (需要约 {est_amount}, 当前剩 {_total}). 升级套餐或购买积分包.")
+        # 不暴露"需要多少", 只提示当前余额 (跟 consume_credits 文案一致)
+        if not _is_admin and _total < est_amount:
+            raise HTTPException(402, f"积分余额不足, 当前剩 {_total} 积分. 升级套餐或购买积分包.")
     except HTTPException:
         raise
     except Exception as _ce:
