@@ -227,6 +227,15 @@ def init_db():
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    # 用户收藏的音色 (voice_id 可以是预设 key / 克隆 key, 不做外键约束)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS user_voice_favorite (
+            user_id INTEGER NOT NULL,
+            voice_id TEXT NOT NULL,
+            created_at REAL NOT NULL,
+            PRIMARY KEY (user_id, voice_id)
+        )
+    """)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS voice_assets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1250,6 +1259,56 @@ def get_my_clones(request: Request):
             "max_count": _get_max_clones(user_id),
             "current_count": len(rows),
         }
+    finally:
+        conn.close()
+
+
+class VoiceFavoriteRequest(BaseModel):
+    voice_id: str
+    favorite: bool = True   # True=收藏 / False=取消收藏
+
+
+@app.get("/api/voice/favorites")
+def get_voice_favorites(request: Request):
+    """当前用户收藏的音色 id 列表 (未登录返空, 不报错)."""
+    try:
+        user_id = _user_id_from_request(request)
+    except Exception:
+        user_id = None
+    if not user_id:
+        return {"items": []}
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            "SELECT voice_id FROM user_voice_favorite WHERE user_id = ? ORDER BY created_at DESC",
+            (user_id,),
+        ).fetchall()
+        return {"items": [r[0] for r in rows]}
+    finally:
+        conn.close()
+
+
+@app.post("/api/voice/favorite")
+def set_voice_favorite(req: VoiceFavoriteRequest, request: Request):
+    """收藏 / 取消收藏一个音色 (预设或克隆都行). 强制登录."""
+    user_id = _user_id_from_request(request)
+    vid = (req.voice_id or "").strip()
+    if not vid:
+        raise HTTPException(400, "voice_id 不能为空")
+    conn = get_db()
+    try:
+        if req.favorite:
+            conn.execute(
+                "INSERT OR IGNORE INTO user_voice_favorite (user_id, voice_id, created_at) VALUES (?, ?, ?)",
+                (user_id, vid, time.time()),
+            )
+        else:
+            conn.execute(
+                "DELETE FROM user_voice_favorite WHERE user_id = ? AND voice_id = ?",
+                (user_id, vid),
+            )
+        conn.commit()
+        return {"success": True, "favorite": req.favorite}
     finally:
         conn.close()
 

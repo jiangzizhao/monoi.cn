@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { Play, Pause, Loader2 } from 'lucide-react'
+import { Play, Pause, Loader2, Star } from 'lucide-react'
 import { NarrationEditor } from '../NarrationEditor'
 import { getToken } from '../../../lib/auth'
 import { consumePrefill } from '../../../lib/formPrefill'
@@ -41,13 +41,15 @@ function formTitle(mode: Mode) {
   return '配音 · 克隆声音'
 }
 
-function VoiceCard({ voice, selected, playing, loading, onSelect, onPreview }: {
+function VoiceCard({ voice, selected, playing, loading, isFavorite, onSelect, onPreview, onToggleFavorite }: {
   voice: VoiceOption
   selected: boolean
   playing: boolean
   loading: boolean
+  isFavorite: boolean
   onSelect: () => void
   onPreview: () => void
+  onToggleFavorite: () => void
 }) {
   return (
     <div
@@ -74,6 +76,13 @@ function VoiceCard({ voice, selected, playing, loading, onSelect, onPreview }: {
         </div>
         <div className="text-xs text-[var(--text-3)] mt-0.5 line-clamp-1">{voice.desc}</div>
       </div>
+      <button
+        onClick={(e) => { e.stopPropagation(); onToggleFavorite() }}
+        className={`flex-shrink-0 mt-0.5 transition-colors ${isFavorite ? 'text-[var(--text)]' : 'text-[var(--text-3)] hover:text-[var(--text-2)]'}`}
+        title={isFavorite ? '取消收藏' : '收藏'}
+      >
+        <Star size={14} fill={isFavorite ? 'currentColor' : 'none'}/>
+      </button>
     </div>
   )
 }
@@ -101,8 +110,9 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
   const [cloneMaxReached, setCloneMaxReached] = useState(false)
   const [showCloneUpload, setShowCloneUpload] = useState(false)
   const [cleanResult, setCleanResult] = useState<any>(null)
-  // tab 过滤: 全部 / 女声(普通话女) / 男声(普通话男) / 方言 / 外语
-  const [tabFilter, setTabFilter] = useState<'all' | 'female' | 'male' | 'dialect' | 'language'>('all')
+  // tab 过滤: 全部 / 收藏 / 女声(普通话女) / 男声(普通话男) / 方言 / 外语
+  const [tabFilter, setTabFilter] = useState<'all' | 'favorite' | 'female' | 'male' | 'dialect' | 'language'>('all')
+  const [favorites, setFavorites] = useState<Set<string>>(new Set())  // 收藏的音色 id
   const [previewPlaying, setPreviewPlaying] = useState<string>('')
   const [previewLoading, setPreviewLoading] = useState<string>('')
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -182,6 +192,7 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
     const filtered = voiceOptions.filter(v => {
       const cat = v.category || 'preset'
       if (tabFilter === 'all') return true
+      if (tabFilter === 'favorite') return favorites.has(v.id)
       if (tabFilter === 'female') return cat === 'preset' && v.gender === 'female'
       if (tabFilter === 'male')   return cat === 'preset' && v.gender === 'male'
       if (tabFilter === 'dialect')  return cat === 'dialect'
@@ -195,7 +206,7 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
       groups[cat].push(v)
     }
     return groups
-  }, [voiceOptions, tabFilter])
+  }, [voiceOptions, tabFilter, favorites])
 
   // 加载用户克隆列表（克隆模式时）
   const loadMyClones = async () => {
@@ -271,6 +282,39 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
       mounted = false
     }
   }, [mode])
+
+  // 加载用户收藏的音色 (预设模式)
+  useEffect(() => {
+    if (mode !== 'preset') return
+    fetch('/api/proxy?path=' + encodeURIComponent('/api/voice/favorites'), {
+      headers: { Authorization: `Bearer ${getToken() || ''}` },
+    })
+      .then(r => r.json())
+      .then(d => { if (Array.isArray(d.items)) setFavorites(new Set(d.items.map(String))) })
+      .catch(() => {})
+  }, [mode])
+
+  const toggleFavorite = async (voiceId: string) => {
+    const willFav = !favorites.has(voiceId)
+    setFavorites(prev => {                       // 乐观更新
+      const n = new Set(prev)
+      if (willFav) n.add(voiceId); else n.delete(voiceId)
+      return n
+    })
+    try {
+      await fetch('/api/proxy?path=' + encodeURIComponent('/api/voice/favorite'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken() || ''}` },
+        body: JSON.stringify({ voice_id: voiceId, favorite: willFav }),
+      })
+    } catch {
+      setFavorites(prev => {                      // 失败回滚
+        const n = new Set(prev)
+        if (willFav) n.delete(voiceId); else n.add(voiceId)
+        return n
+      })
+    }
+  }
 
   const submitPreset = () => {
     // 用 JSON 字符串编码合成参数，useChat 检测到这个前缀直接调合成接口（不走 AI）
@@ -414,6 +458,7 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
               <div className="flex gap-1.5 sticky top-0 bg-[var(--bg-card)] py-1 z-10 flex-wrap">
                 {([
                   ['all',      '全部'],
+                  ['favorite', '收藏'],
                   ['female',   '女声'],
                   ['male',     '男声'],
                   ['dialect',  '方言'],
@@ -449,8 +494,10 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
                             selected={voice === v.id}
                             playing={previewPlaying === v.id}
                             loading={previewLoading === v.id}
+                            isFavorite={favorites.has(v.id)}
                             onSelect={() => setVoice(v.id)}
                             onPreview={() => togglePreview(v.id)}
+                            onToggleFavorite={() => toggleFavorite(v.id)}
                           />
                         ))}
                       </div>
@@ -459,6 +506,9 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
                 })}
               </div>
 
+              {tabFilter === 'favorite' && (['clone', 'preset', 'dialect', 'language'] as const).every(c => (groupedVoices[c] || []).length === 0) && (
+                <div className="text-xs text-[var(--text-3)] py-6 text-center">还没收藏音色 —— 点音色卡右侧的 ☆ 收藏, 下次在这里快速找到</div>
+              )}
               {presetLoading && <div className="text-xs text-[var(--text-3)]">正在加载预设音色...</div>}
               {presetError && <div className="text-xs text-amber-400">{presetError}</div>}
               <div className="flex gap-2">
