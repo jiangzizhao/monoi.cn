@@ -13,9 +13,12 @@ export function AudioPlayer({ data }: { data: AudioResult }) {
   const safeUrl = data.audio_url.startsWith('http://')
     ? 'https://' + data.audio_url.slice('http://'.length)
     : data.audio_url
+  // 相对 /api/... 要补成后端绝对地址 (api.monoi.cn): <audio src> / <img> 这类 DOM 元素
+  // 不走全局 fetch 拦截器, 相对路径会指向 monoi.cn(CDN→OSS) 404。
+  const DIRECT_BASE = (import.meta as any).env?.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'
   const fullUrl = safeUrl.startsWith('http')
     ? safeUrl
-    : `/api/proxy?path=${encodeURIComponent(safeUrl)}`
+    : DIRECT_BASE + safeUrl
 
   const toggle = () => {
     const a = audioRef.current
