@@ -66,8 +66,9 @@ export function NarrationVideoForm({ onSubmit, onClose }: Props) {
     return () => clearInterval(timer)
   }, [phase])
 
-  // Whisper 估算: 5060 Ti small 模型 RTF 约 0.4
-  const estimatedTranscribeSec = videoDuration ? Math.round(videoDuration * 0.4) : null
+  // 整条转录链路粗估 (转码 + 抽音频 + OSS 上传 + 云端 NLS 识别):
+  // 固定开销 ~10s + 时长 * 0.5 (识别本身很快, 主要耗在 ffmpeg 转码 + OSS 传输)
+  const estimatedTranscribeSec = videoDuration ? Math.round(10 + videoDuration * 0.5) : null
 
   const handleUpload = async () => {
     if (!videoFile) {
@@ -245,7 +246,7 @@ export function NarrationVideoForm({ onSubmit, onClose }: Props) {
               )}
 
               <p className="text-[11px] text-[var(--text-3)] leading-relaxed">
-                支持 mp4 / mov / avi / mkv / webm. 时长不限,但越长转录越久(Whisper 大约 1 分钟视频要 20-30 秒).
+                支持 mp4 / mov / avi / mkv / webm. 时长不限,但越长转录越久(1 分钟视频大约 30-40 秒).
               </p>
             </div>
           )}
