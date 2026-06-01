@@ -200,7 +200,6 @@ def _nls_transcribe_url(file_url: str, poll_timeout: float = 240.0) -> list:
     凭证 ALIYUN_AK_ID/SECRET/APP_KEY 由 oss_helper 从 .env 载入 os.environ.
     注意: 录音文件识别服务要在 NLS 控制台单独开通 (跟语音合成是两个服务)."""
     import json as _json
-    from collections import defaultdict
     from aliyunsdkcore.client import AcsClient
     from aliyunsdkcore.request import CommonRequest
 
@@ -254,24 +253,34 @@ def _nls_transcribe_url(file_url: str, poll_timeout: float = 240.0) -> list:
     if result is None:
         raise RuntimeError(f"NLS 轮询超时 ({poll_timeout}s)")
 
-    # 3. 转成 whisper 同构 segments (ms → 秒, 按句聚合词)
-    words_by_sid = defaultdict(list)
-    for w in result.get("Words", []) or []:
-        words_by_sid[w.get("SentenceId")].append({
-            "start": w.get("BeginTime", 0) / 1000.0,
-            "end": w.get("EndTime", 0) / 1000.0,
-            "word": _to_simplified(w.get("Word", "")),
-        })
+    # 3. 转成 whisper 同构 segments (ms → 秒).
+    #    NLS 4.0 的 Words 不带 SentenceId, 按时间把词归到所属句子 (句子时间不重叠).
+    raw_words = sorted(
+        ({"start": w.get("BeginTime", 0) / 1000.0,
+          "end": w.get("EndTime", 0) / 1000.0,
+          "word": _to_simplified(w.get("Word", ""))}
+         for w in (result.get("Words") or [])),
+        key=lambda x: x["start"],
+    )
+    raw_sentences = sorted((result.get("Sentences") or []), key=lambda s: s.get("BeginTime", 0))
     segments = []
-    for s in result.get("Sentences", []) or []:
-        sid = s.get("SentenceId")
+    wi = 0
+    for s in raw_sentences:
+        sb = s.get("BeginTime", 0) / 1000.0
+        se = s.get("EndTime", 0) / 1000.0
+        # 词的 start 落在 [sb, se] 区间内归到这句 (容 50ms)
+        while wi < len(raw_words) and raw_words[wi]["start"] < sb - 0.05:
+            wi += 1
+        seg_words = []
+        while wi < len(raw_words) and raw_words[wi]["start"] <= se + 0.05:
+            seg_words.append(raw_words[wi]); wi += 1
         segments.append({
-            "start": s.get("BeginTime", 0) / 1000.0,
-            "end": s.get("EndTime", 0) / 1000.0,
+            "start": sb, "end": se,
             "text": _to_simplified(s.get("Text", "")),
-            "words": words_by_sid.get(sid, []),
+            "words": seg_words,
         })
-    segments.sort(key=lambda x: x["start"])
+    if wi < len(raw_words) and segments:   # 兜底: 剩余零散词挂最后一句
+        segments[-1]["words"].extend(raw_words[wi:])
     print(f"[nls-asr] 完成: {len(segments)} 句, {sum(len(x['words']) for x in segments)} 词", flush=True)
     return segments
 
