@@ -194,6 +194,88 @@ def _to_simplified(text):
         return text
 
 
+def _nls_transcribe_url(file_url: str, poll_timeout: float = 240.0) -> list:
+    """阿里云 NLS 录音文件识别 (FileTrans): 传一个可公网访问的音频 URL (OSS 签名 URL),
+    返回跟 whisper 同构的 segments: [{start,end,text,words:[{start,end,word}]}] (秒).
+    凭证 ALIYUN_AK_ID/SECRET/APP_KEY 由 oss_helper 从 .env 载入 os.environ.
+    注意: 录音文件识别服务要在 NLS 控制台单独开通 (跟语音合成是两个服务)."""
+    import json as _json
+    from collections import defaultdict
+    from aliyunsdkcore.client import AcsClient
+    from aliyunsdkcore.request import CommonRequest
+
+    ak_id = os.environ.get("ALIYUN_AK_ID", "").strip()
+    ak_secret = os.environ.get("ALIYUN_AK_SECRET", "").strip()
+    app_key = os.environ.get("ALIYUN_APP_KEY", "").strip()
+    if not (ak_id and ak_secret and app_key):
+        raise RuntimeError("NLS 凭证缺失 (ALIYUN_AK_ID/SECRET/APP_KEY)")
+
+    DOMAIN = "filetrans.cn-shanghai.aliyuncs.com"
+    VERSION = "2018-08-17"
+    client = AcsClient(ak_id, ak_secret, "cn-shanghai")
+
+    # 1. 提交任务
+    task = {
+        "appkey": app_key,
+        "file_link": file_url,
+        "version": "4.0",
+        "enable_words": True,                  # 要词级时间戳 (剪辑器靠它)
+        "enable_sample_rate_adaptive": True,   # 采样率自适应
+    }
+    submit = CommonRequest()
+    submit.set_domain(DOMAIN); submit.set_version(VERSION)
+    submit.set_product("nls-filetrans"); submit.set_action_name("SubmitTask")
+    submit.set_method("POST")
+    submit.add_body_params("Task", _json.dumps(task))
+    resp = _json.loads(client.do_action_with_exception(submit))
+    if resp.get("StatusText") != "SUCCESS":
+        raise RuntimeError(f"NLS 提交失败: {resp.get('StatusText')} / {resp.get('StatusCode')}")
+    task_id = resp["TaskId"]
+    print(f"[nls-asr] 任务已提交 task_id={task_id}", flush=True)
+
+    # 2. 轮询结果
+    deadline = time.time() + poll_timeout
+    result = None
+    while time.time() < deadline:
+        time.sleep(3)
+        q = CommonRequest()
+        q.set_domain(DOMAIN); q.set_version(VERSION)
+        q.set_product("nls-filetrans"); q.set_action_name("GetTaskResult")
+        q.set_method("GET")
+        q.add_query_param("TaskId", task_id)
+        r = _json.loads(client.do_action_with_exception(q))
+        status = r.get("StatusText", "")
+        if status in ("RUNNING", "QUEUEING"):
+            continue
+        if status in ("SUCCESS", "SUCCESS_WITH_NO_VALID_FRAGMENT"):
+            result = r.get("Result", {}) or {}
+            break
+        raise RuntimeError(f"NLS 识别失败: {status}")
+    if result is None:
+        raise RuntimeError(f"NLS 轮询超时 ({poll_timeout}s)")
+
+    # 3. 转成 whisper 同构 segments (ms → 秒, 按句聚合词)
+    words_by_sid = defaultdict(list)
+    for w in result.get("Words", []) or []:
+        words_by_sid[w.get("SentenceId")].append({
+            "start": w.get("BeginTime", 0) / 1000.0,
+            "end": w.get("EndTime", 0) / 1000.0,
+            "word": _to_simplified(w.get("Word", "")),
+        })
+    segments = []
+    for s in result.get("Sentences", []) or []:
+        sid = s.get("SentenceId")
+        segments.append({
+            "start": s.get("BeginTime", 0) / 1000.0,
+            "end": s.get("EndTime", 0) / 1000.0,
+            "text": _to_simplified(s.get("Text", "")),
+            "words": words_by_sid.get(sid, []),
+        })
+    segments.sort(key=lambda x: x["start"])
+    print(f"[nls-asr] 完成: {len(segments)} 句, {sum(len(x['words']) for x in segments)} 词", flush=True)
+    return segments
+
+
 def _is_hdr_video(video_path: str) -> bool:
     """探测视频是不是 HDR (iPhone HLG / Dolby Vision / 任何 bt2020 色域).
     SDR 视频 (Chrome MediaRecorder webm / 大部分相机) 不走 tonemap, 否则 ffmpeg zscale 算不出帧."""
@@ -709,16 +791,31 @@ def clean_narration_video_oss(req: CleanVideoOssRequest):
     info = sf.info(audio_path)
     orig_dur = info.duration
 
-    # 4. Whisper 转录
-    model = get_whisper()
-    segments_iter, _ = model.transcribe(audio_path, language="zh", beam_size=5, word_timestamps=True)
-    segments = []
-    for s in segments_iter:
-        words = []
-        if s.words:
-            for w in s.words:
-                words.append({"start": w.start, "end": w.end, "word": _to_simplified(w.word)})
-        segments.append({"start": s.start, "end": s.end, "text": _to_simplified(s.text), "words": words})
+    # 4. 转录 — 默认 whisper(GPU); ASR_ENGINE=nls 时走阿里云 NLS 录音文件识别 (省 GPU).
+    #    NLS 失败自动回退 whisper, 不让转录整个挂掉.
+    segments = None
+    if os.environ.get("ASR_ENGINE", "whisper").strip().lower() == "nls":
+        asr_key = f"asr_tmp/{job_id}.wav"
+        try:
+            oss_upload(asr_key, audio_path, content_type="audio/wav")
+            asr_url = oss_sign_get(asr_key, expires=3600)
+            segments = _nls_transcribe_url(asr_url)
+        except Exception as e:
+            print(f"[nls-asr] 失败, 回退 whisper: {e}", flush=True)
+            segments = None
+        finally:
+            try: oss_delete(asr_key)
+            except Exception: pass
+    if segments is None:
+        model = get_whisper()
+        segments_iter, _ = model.transcribe(audio_path, language="zh", beam_size=5, word_timestamps=True)
+        segments = []
+        for s in segments_iter:
+            words = []
+            if s.words:
+                for w in s.words:
+                    words.append({"start": w.start, "end": w.end, "word": _to_simplified(w.word)})
+            segments.append({"start": s.start, "end": s.end, "text": _to_simplified(s.text), "words": words})
     full_text = "".join(s["text"] for s in segments).strip()
 
     # 5. 检测气口/重复/填充词
