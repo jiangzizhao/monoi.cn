@@ -61,7 +61,7 @@ function AssetThumb({ asset, selected, onSelect }: { asset: VideoAsset; selected
     <div onClick={onSelect}
       className={`relative aspect-video rounded-lg overflow-hidden cursor-pointer border-2 transition-all duration-150 group ${selected ? 'border-[var(--text)]' : 'border-transparent hover:border-[var(--text-3)]'}`}>
       {asset.thumbnail ? (
-        <img src={asset.thumbnail} alt="" className="w-full h-full object-cover"/>
+        <img src={asset.thumbnail} alt="" loading="lazy" decoding="async" className="w-full h-full object-cover"/>
       ) : (
         <div className="w-full h-full bg-[var(--bg-hover)] flex items-center justify-center text-[var(--text-3)]">
           <Play size={20}/>

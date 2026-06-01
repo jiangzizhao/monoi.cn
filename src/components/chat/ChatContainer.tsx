@@ -9,12 +9,18 @@ export function ChatContainer() {
   const { conversations, activeId, updateFootageGrid, setPipelineState } = useChatStore()
   const { send, chooseOption } = useChat()
   const endRef = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
 
   const conv = conversations.find(c => c.id === activeId)
   const messages = conv?.messages ?? []
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth' })
+    // 只在用户本来就在底部附近时才自动滚到底 —— 用户往上翻看素材/历史时,
+    // 内容更新(如素材网格加载)不要把他从上面拽回底部 (之前一直拽, 体验很差)。
+    const el = scrollRef.current
+    if (!el) return
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 200
+    if (nearBottom) endRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages.length, messages[messages.length - 1]?.blocks])
 
   const handleScriptFootage = (script: string) => send(`用上面这篇文案帮我找素材:\n${script}`)
@@ -37,7 +43,7 @@ export function ChatContainer() {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto">
+    <div className="flex-1 overflow-y-auto" ref={scrollRef}>
       <div className="max-w-3xl mx-auto px-4 py-8 flex flex-col gap-6">
         {messages.length === 0 && (
           <WelcomeMessage/>
