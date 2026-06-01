@@ -23,9 +23,26 @@ function splitSegmentByPause(
   seg: { text: string; start: number; end: number; words?: { start: number; end: number; word: string }[] },
   gapThreshold: number = 0.25,
   minDuration: number = 1.0,
+  maxDuration: number = 3.5,   // 单镜上限: 太长强制断 (NLS 词间常无停顿 gap≈0, 靠它保证短句)
 ): { text: string; start: number; end: number }[] {
+  // 无词级时间戳兜底: 按字符把整句均分成 ~maxDuration 一段 (中文 ~4 字/秒)
   if (!seg.words || seg.words.length === 0) {
-    return [{ text: seg.text, start: seg.start, end: seg.end }]
+    const total = seg.end - seg.start
+    const maxChars = Math.max(8, Math.round(maxDuration * 4))
+    const txt = seg.text || ''
+    if (txt.length <= maxChars || total <= 0) {
+      return [{ text: txt, start: seg.start, end: seg.end }]
+    }
+    const n = Math.ceil(txt.length / maxChars)
+    const pieces: { text: string; start: number; end: number }[] = []
+    for (let i = 0; i < n; i++) {
+      pieces.push({
+        text: txt.slice(i * maxChars, (i + 1) * maxChars),
+        start: seg.start + total * (i / n),
+        end: seg.start + total * ((i + 1) / n),
+      })
+    }
+    return pieces
   }
   const result: { text: string; start: number; end: number }[] = []
   let buf: { start: number; end: number; word: string }[] = []
@@ -48,7 +65,8 @@ function splitSegmentByPause(
     const prevEnd = buf[buf.length - 1].end
     const gap = w.start - prevEnd
     const bufDuration = prevEnd - buf[0].start
-    if (gap >= gapThreshold && bufDuration >= minDuration) {
+    // 自然停顿断句 (whisper 有细停顿); 或缓冲超 maxDuration 强制断 (NLS 词间无停顿时靠这个)
+    if ((gap >= gapThreshold && bufDuration >= minDuration) || bufDuration >= maxDuration) {
       flush()
     }
     buf.push(w)
