@@ -100,15 +100,44 @@ export async function forgetDraftDir(): Promise<void> {
   await dbDel(HANDLE_KEY)
 }
 
+// 剪映草稿目录里 root_meta_info.json (明文) 存了草稿根目录的绝对路径 root_path.
+// 读它 → 拼出本草稿素材的绝对路径. 剪映 10.6 只认绝对路径 (相对 materials/xxx 不认),
+// 而浏览器 File System Access 拿不到目录绝对路径, 所以靠这个文件曲线救国.
+async function readRootPath(dirHandle: any): Promise<string | null> {
+  try {
+    const fh = await dirHandle.getFileHandle('root_meta_info.json')
+    const txt = await (await fh.getFile()).text()
+    const meta = JSON.parse(txt)
+    return typeof meta.root_path === 'string' && meta.root_path ? meta.root_path : null
+  } catch { return null }
+}
+
+// 把 draft 里所有 "path": "materials/xxx" 改成绝对路径 (按 root_path 的分隔符, 兼容 Win/Mac)
+function rewriteMaterialPaths(obj: any, absBase: string, sep: string): void {
+  if (Array.isArray(obj)) { for (const o of obj) rewriteMaterialPaths(o, absBase, sep); return }
+  if (obj && typeof obj === 'object') {
+    for (const k of Object.keys(obj)) {
+      const v = obj[k]
+      if (k === 'path' && typeof v === 'string' && v.startsWith('materials/')) {
+        obj[k] = absBase + sep + v.split('/').join(sep)
+      } else {
+        rewriteMaterialPaths(v, absBase, sep)
+      }
+    }
+  }
+}
+
 /**
  * 拉 zip → JSZip 解压 → 把所有文件夹/文件写进 dirHandle 下.
  * zip 里第一层通常是 monoi_<时间戳>/, 解压后剪映草稿目录里多了这个文件夹.
+ * 写入前读 root_meta_info.json 的 root_path, 把 draft_info/draft_content.json 里的
+ * 相对素材路径改成绝对 (剪映 10.6 只认绝对路径), 这样媒体自动就位无需手动链接.
  */
 export async function downloadAndExtractZipToFolder(
   zipUrl: string,
   dirHandle: any,
   onProgress?: (msg: string) => void,
-): Promise<{ rootFolderName: string; fileCount: number }> {
+): Promise<{ rootFolderName: string; fileCount: number; pathsAbsolute: boolean }> {
   onProgress?.('下载草稿包...')
   const res = await fetch(zipUrl)
   if (!res.ok) throw new Error(`下载失败 HTTP ${res.status}`)
@@ -125,17 +154,32 @@ export async function downloadAndExtractZipToFolder(
   }
   if (!rootFolderName) throw new Error('zip 是空的')
 
-  // 逐个文件写
+  // 读剪映目录绝对路径, 拼出本草稿素材的绝对前缀
+  const rootPath = await readRootPath(dirHandle)
+  const sep = rootPath && rootPath.includes('\\') ? '\\' : '/'
+  const absBase = rootPath ? rootPath + sep + rootFolderName : null
+
+  // 逐个文件写; draft_info/draft_content.json 改素材路径为绝对, draft_meta 补 fold_path
   const entries = Object.entries(zip.files)
   let count = 0
   for (const [path, entry] of entries) {
     if (entry.dir) continue
     onProgress?.(`写入 (${++count}/${entries.length}) ${path}`)
-    const fileBlob = await entry.async('blob')
-    await writeFileToDir(dirHandle, path, fileBlob)
+    const base = path.split('/').pop() || ''
+    if (absBase && (base === 'draft_info.json' || base === 'draft_content.json')) {
+      let txt = await entry.async('string')
+      try { const j = JSON.parse(txt); rewriteMaterialPaths(j, absBase, sep); txt = JSON.stringify(j) } catch { /* 解析失败就原样写 */ }
+      await writeFileToDir(dirHandle, path, new Blob([txt]))
+    } else if (absBase && base === 'draft_meta_info.json') {
+      let txt = await entry.async('string')
+      try { const j = JSON.parse(txt); j.draft_fold_path = absBase; j.draft_root_path = rootPath; txt = JSON.stringify(j) } catch { /* 同上 */ }
+      await writeFileToDir(dirHandle, path, new Blob([txt]))
+    } else {
+      await writeFileToDir(dirHandle, path, await entry.async('blob'))
+    }
   }
 
-  return { rootFolderName, fileCount: count }
+  return { rootFolderName, fileCount: count, pathsAbsolute: !!absBase }
 }
 
 // 把 zip 内的相对路径 (例 `monoi_xxx/materials/narration.m4a`) 解析成子目录链, 创建必要的子目录, 写入文件
