@@ -1,4 +1,4 @@
-// monoi Electron 主进程 — 加载 monoi-cn.vercel.app, 跟网页同源 + 共享 localStorage / cookie.
+// monoi Electron 主进程 — 加载 monoi.cn, 跟网页同源 + 共享 localStorage / cookie.
 //
 // 为啥不打包前端进 .exe?
 // - 让网页跟桌面端 0 同步成本 — 推新版上 Vercel, 桌面端用户下次启动就是最新 UI.
@@ -22,9 +22,9 @@ if (!gotLock) {
   app.quit()
 }
 
-// 默认走 Vercel 直连 (monoi.cn 域名国内 DNS 不一定通).
-// 等域名稳定后可改回 monoi.cn, 或用 MONOI_URL 环境变量覆盖.
-const MONOI_URL = process.env.MONOI_URL || 'https://monoi-cn.vercel.app'
+// 加载 monoi.cn (已全量迁阿里云: CDN+OSS 前端 + api.monoi.cn 后端).
+// Vercel 已退役, vercel.app 域名国内被墙, 不要再用. 可用 MONOI_URL 环境变量覆盖.
+const MONOI_URL = process.env.MONOI_URL || 'https://monoi.cn'
 const isDev = !app.isPackaged
 
 let mainWin: BrowserWindow | null = null
