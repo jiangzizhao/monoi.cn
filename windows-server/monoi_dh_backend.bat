@@ -1,29 +1,27 @@
 @echo off
-chcp 65001 >nul
-title monoi 数字人后台启动器
 echo ============================================
-echo   monoi 数字人后台 (开机自动起)
-echo   HeyGem 容器 + frp 隧道 + agent + 看门狗
+echo   monoi digital-human backend (autostart)
+echo   HeyGem container + frp tunnel + agent + watchdog
 echo ============================================
 echo.
 
-REM 1. HeyGem 容器: 设开机自启 + 现在拉起
+REM 1. HeyGem container: set restart=always + start now
 docker update --restart=always duix-avatar-gen-video >nul 2>&1
 docker start duix-avatar-gen-video >nul 2>&1
-echo  [1/4] HeyGem 容器: 已设开机自启 + 启动
+echo  [1/4] HeyGem container: restart=always + started
 
-REM 2. frp 隧道 (连阿里云)
+REM 2. frp tunnel (to Aliyun)
 start "monoi-frpc" /min D:\monoi-server\frp\frpc.exe -c D:\monoi-server\frp\frpc.toml
-echo  [2/4] frp 隧道: 已启动
+echo  [2/4] frp tunnel: started
 
-REM 3. 数字人 agent (云端把音频/形象发到这, 调本地 HeyGem)
+REM 3. digital-human agent (cloud sends audio/avatar here -> local HeyGem)
 start "monoi-agent" /min python D:\monoi-server\heygem_agent.py
-echo  [3/4] 数字人 agent: 已启动
+echo  [3/4] heygem agent: started
 
-REM 4. 看门狗 (HeyGem 卡死 → 重启容器 → 还卡 → 重启电脑)
+REM 4. watchdog (HeyGem stuck -> restart container -> still stuck -> reboot PC)
 start "monoi-watchdog" /min python D:\monoi-server\heygem_watchdog.py
-echo  [4/4] 看门狗: 已启动
+echo  [4/4] watchdog: started
 
 echo.
-echo  全部启动完成。这个窗口 5 秒后自动关 (其余 4 个最小化在跑)。
+echo  All started. This window closes in 5s. Other 4 run minimized.
 ping -n 6 127.0.0.1 >nul
