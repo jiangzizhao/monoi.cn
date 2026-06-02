@@ -128,7 +128,8 @@ export function AddBgmDialog({ videoUrl, onClose, onSuccess }: Props) {
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={handleClose}>
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+      onClick={(e) => { if (e.target === e.currentTarget) handleClose() }}>
       <div className="bg-[var(--bg-card)] rounded-2xl border border-[var(--border)] w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-3 border-b border-[var(--border)]">
           <div className="text-base font-semibold flex items-center gap-2"><Music size={16}/> 给视频加 BGM</div>
