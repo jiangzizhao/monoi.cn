@@ -3736,151 +3736,239 @@ def serve_avatar_file(avatar_key: str):
     return FileResponse(file_path, media_type="video/mp4")
 
 
+# ============== 数字人排队 + 家里 agent 路由 ==============
+# HeyGem 在家里 Win(5060Ti, 单 worker), 经 frp 隧道访问家里 heygem_agent (:18385)。
+# 云端排队: 一次只发一个任务, 多人请求排队等。提交立即返回 (后台 worker 处理轮询 —— 之前
+# 在请求里同步轮询把 main.py 线程占满拖垮过全站, 后台线程跑就不会)。出片成功才按时长×2 扣费。
+DH_AGENT_URL = os.environ.get("DH_AGENT_URL", "http://127.0.0.1:18385")
+
+import threading as _dh_threading
+from collections import deque as _dh_deque
+_dh_lock = _dh_threading.Lock()
+_dh_queue = _dh_deque()      # 排队中的 job_id
+_dh_jobs = {}                # job_id -> {status,user_id,audio_path,avatar_path,est_amount,progress,video_url,error,created_at,done_at}
+_dh_active = None            # 正在处理的 job_id
+_dh_worker_started = False
+_DH_JOB_TTL = 3600           # 完成/失败任务保留 1h 供前端取结果
+
+
+def _dh_ensure_worker():
+    global _dh_worker_started
+    with _dh_lock:
+        if _dh_worker_started:
+            return
+        _dh_worker_started = True
+    _dh_threading.Thread(target=_dh_worker_loop, daemon=True).start()
+    print("[dh-worker] 队列 worker 已启动", flush=True)
+
+
+def _dh_position(job_id) -> int:
+    """排第几个 (1=下一个; 正在处理的占 1 位)。不在队列返 0。"""
+    with _dh_lock:
+        try:
+            idx = list(_dh_queue).index(job_id)
+        except ValueError:
+            return 0
+        return idx + 1 + (1 if _dh_active else 0)
+
+
+def _dh_worker_loop():
+    import requests as _req
+    global _dh_active
+    while True:
+        job_id = None
+        with _dh_lock:
+            if _dh_active is None and _dh_queue:
+                job_id = _dh_queue.popleft()
+                _dh_active = job_id
+                if job_id in _dh_jobs:
+                    _dh_jobs[job_id]["status"] = "processing"
+        if not job_id:
+            time.sleep(1)
+            _dh_gc()
+            continue
+        job = _dh_jobs.get(job_id) or {}
+        try:
+            _dh_run_job(_req, job_id, job)
+        except Exception as e:
+            print(f"[dh-worker] job {job_id} 失败: {e}", flush=True)
+            with _dh_lock:
+                if job_id in _dh_jobs:
+                    _dh_jobs[job_id]["status"] = "failed"
+                    _dh_jobs[job_id]["error"] = str(e)[:200]
+                    _dh_jobs[job_id]["done_at"] = time.time()
+        finally:
+            _duix_cleanup(job.get("audio_path") or "")
+            with _dh_lock:
+                _dh_active = None
+
+
+def _dh_run_job(_req, job_id, job):
+    # 1. 把 音频 + 形象 发给家里 agent /generate
+    with open(job["audio_path"], "rb") as af, open(job["avatar_path"], "rb") as vf:
+        r = _req.post(
+            f"{DH_AGENT_URL}/generate",
+            files={"audio": ("audio.wav", af, "audio/wav"),
+                   "avatar": ("avatar.mp4", vf, "video/mp4")},
+            timeout=180,
+        )
+    if r.status_code != 200 or not r.json().get("success"):
+        raise RuntimeError(f"家里 agent 提交失败 ({r.status_code}): {r.text[:200]}")
+    code = r.json()["code"]
+    # 2. 轮询 agent /query (代理本地 HeyGem) 直到完成, 最多 15 分钟
+    deadline = time.time() + 15 * 60
+    result_path = None
+    while time.time() < deadline:
+        time.sleep(3)
+        inner = (_req.get(f"{DH_AGENT_URL}/query", params={"code": code}, timeout=15).json().get("data") or {})
+        st = inner.get("status")
+        if st == 1:
+            with _dh_lock:
+                if job_id in _dh_jobs:
+                    _dh_jobs[job_id]["progress"] = inner.get("progress", 0)
+            continue
+        if st == 2:
+            result_path = (inner.get("result") or "").lstrip("/").lstrip("\\")
+            break
+        if st == 3:
+            raise RuntimeError(inner.get("msg") or "HeyGem 生成失败")
+    if not result_path:
+        raise RuntimeError("生成超时 (15 分钟)")
+    # 3. 从 agent 取结果视频 → 上 OSS
+    v = _req.get(f"{DH_AGENT_URL}/video", params={"path": result_path}, timeout=180)
+    if v.status_code != 200 or not v.content:
+        raise RuntimeError("取结果视频失败")
+    import tempfile as _tf
+    tmp = os.path.join(_tf.gettempdir(), f"dhres_{job_id}.mp4")
+    with open(tmp, "wb") as f:
+        f.write(v.content)
+    from oss_helper import oss_upload, oss_sign_get
+    oss_key = f"digital_human/{job_id}.mp4"
+    oss_upload(oss_key, tmp, content_type="video/mp4")
+    url = oss_sign_get(oss_key, expires=7 * 24 * 3600)
+    try:
+        os.remove(tmp)
+    except Exception:
+        pass
+    # 4. 出片成功才扣费 (按音频时长 × 2; admin 在 consume_credits 内部免扣)
+    try:
+        from billing import consume_credits
+        consume_credits(job["user_id"], "digital_human", job["est_amount"], ref_id=job_id)
+    except Exception as ce:
+        print(f"[dh-worker] 扣费异常 (已出片, 不回滚): {ce}", flush=True)
+    with _dh_lock:
+        if job_id in _dh_jobs:
+            _dh_jobs[job_id].update(status="completed", progress=100, video_url=url, done_at=time.time())
+
+
+def _dh_gc():
+    now = time.time()
+    with _dh_lock:
+        for jid in [k for k, v in _dh_jobs.items()
+                    if v.get("status") in ("completed", "failed")
+                    and now - v.get("done_at", v.get("created_at", now)) > _DH_JOB_TTL]:
+            _dh_jobs.pop(jid, None)
+
+
 @app.post("/api/digital-human/submit")
 def submit_digital_human(
     request: Request,
     audio: UploadFile = File(...),
     avatar_key: str = Form(...),
 ):
-    """用已保存的形象 + 上传的音频提交数字人对口型. 返回 code, 前端轮询 /task/{code}.
-    扣 2 积分/秒 (按音频实际时长)."""
-    # ⚠️ 数字人云上自托管 (HeyGem) 在 T4 上跑不通, 且任务卡住会占满 main.py 线程拖垮全站。
-    # 暂时关闭, 方案改为桌面版本地跑 (Max 会员用自己 N 卡)。
-    # 临时开自托管测试: .env 设 DIGITAL_HUMAN_ENABLED=1 (注意会有拖垮全站的风险)。
+    """提交数字人任务 → 进云端队列, 家里 N卡 (HeyGem) 跑。立即返回 job_id, 前端轮询 /task/{job_id}.
+    单 worker 排队, 提交不阻塞。出片成功后按音频时长 × 2 扣费 (admin 免)。
+    需 .env 设 DIGITAL_HUMAN_ENABLED=1 (家里 agent + 隧道就绪后开)。"""
     if os.environ.get("DIGITAL_HUMAN_ENABLED") != "1":
-        raise HTTPException(503, "数字人功能升级中, 即将以桌面版形式上线, 敬请期待")
-    import requests as _req
-    import shutil
+        raise HTTPException(503, "数字人功能升级中, 敬请期待")
     import uuid as _uuid
     import re as _re
+    import tempfile as _tf
+    import wave as _wave
 
+    uid = _user_id_from_request(request)
     safe_key = _re.sub(r"[^a-zA-Z0-9_]", "", avatar_key)
     if not safe_key.startswith("avatar_"):
         raise HTTPException(400, "avatar_key 格式错误")
-
     avatar_path = os.path.join(DUIX_AVATAR_DIR, f"{safe_key}.mp4")
     if not os.path.exists(avatar_path):
         raise HTTPException(404, "形象不存在, 请重新选择")
 
-    code = _uuid.uuid4().hex[:16]
-    audio_name = f"{code}_audio.wav"
-    video_name = f"{code}_video.mp4"
-    audio_path = os.path.join(DUIX_DATA_DIR, audio_name)
-    video_path = os.path.join(DUIX_DATA_DIR, video_name)
-
+    # 存上传音频 → ffmpeg 16k 单声道 PCM wav (拿准时长 + 减小传给家里的体积)
+    job_id = _uuid.uuid4().hex[:16]
+    raw = os.path.join(_tf.gettempdir(), f"dh_{job_id}.raw")
+    audio_path = os.path.join(_tf.gettempdir(), f"dh_{job_id}.wav")
+    with open(raw, "wb") as f:
+        f.write(audio.file.read())
+    _conv = subprocess.run(
+        ["ffmpeg", "-y", "-i", raw, "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", audio_path],
+        capture_output=True, timeout=120,
+    )
     try:
-        # 先写原始上传音频到临时文件
-        raw_audio_path = audio_path + ".raw"
-        with open(raw_audio_path, "wb") as f:
-            f.write(audio.file.read())
-        # HeyGem 的 ffprobe 只认标准 PCM WAV — IndexTTS 输出 24kHz 等格式它读不出 streams
-        # ("三次获取音频时长失败")。用 ffmpeg 统一转成 16kHz 单声道 16bit PCM wav 再喂给它。
-        _conv = subprocess.run(
-            ["ffmpeg", "-y", "-i", raw_audio_path, "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", audio_path],
-            capture_output=True, timeout=120,
-        )
+        os.remove(raw)
+    except Exception:
+        pass
+    if _conv.returncode != 0 or not os.path.exists(audio_path) or os.path.getsize(audio_path) == 0:
+        _duix_cleanup(audio_path)
+        raise HTTPException(400, "音频转码失败, 请换一段音频重试")
+
+    # 时长 → 预估积分
+    try:
+        with _wave.open(audio_path, "rb") as _wf:
+            _dur = _wf.getnframes() / _wf.getframerate()
+    except Exception:
+        _dur = 0
+    est = max(1, round(_dur * 2)) if _dur > 0 else 20
+
+    # 余额预检 (admin 免) —— 不够直接拒, 别白排队白跑 GPU
+    try:
+        c = get_db()
         try:
-            os.remove(raw_audio_path)
-        except Exception:
-            pass
-        if _conv.returncode != 0 or (not os.path.exists(audio_path)) or os.path.getsize(audio_path) == 0:
-            _err = _conv.stderr.decode("utf-8", errors="ignore")[-300:]
-            print(f"[dh] 音频转码失败: {_err}", flush=True)
-            _duix_cleanup(audio_path, video_path)
-            raise HTTPException(400, "音频转码失败, 请换一段音频重试")
-        # HeyGem 只认 /code/data/temp/ 下的文件, 把 avatar 复制过去
-        shutil.copyfile(avatar_path, video_path)
+            _adm = c.execute("SELECT is_admin FROM users WHERE id = ?", (uid,)).fetchone()
+            if not (_adm and _adm[0]):
+                _bal = c.execute(
+                    "SELECT COALESCE(monthly_credits,0)+COALESCE(purchased_credits,0) FROM credit_balance WHERE user_id = ?",
+                    (uid,),
+                ).fetchone()
+                _have = (_bal[0] if _bal else 0) or 0
+                if _have < est:
+                    _duix_cleanup(audio_path)
+                    raise HTTPException(402, f"积分不足: 这条约需 {est} 积分, 你当前 {_have}")
+        finally:
+            c.close()
     except HTTPException:
         raise
-    except Exception as e:
-        _duix_cleanup(audio_path, video_path)
-        raise HTTPException(500, f"准备文件失败: {e}")
+    except Exception as _pe:
+        print(f"[dh] 余额预检跳过: {_pe}", flush=True)
 
-    # 先扣费 — 按音频时长 × 2 积分/秒. 拿不到时长 fallback 20 积分.
-    # 不做条数配额, 积分覆盖一切 (积分扣光 = 不能用)
-    try:
-        _uid = _user_id_from_request(request)
-        from billing import consume_credits
-        # 读音频时长 (wav 标准库, 不依赖 ffprobe)
-        try:
-            import wave as _wave
-            with _wave.open(audio_path, 'rb') as _wf:
-                _dur = _wf.getnframes() / _wf.getframerate()
-        except Exception:
-            _dur = 0
-        _amount = max(1, round(_dur * 2)) if _dur > 0 else 20
-        consume_credits(_uid, 'digital_human', _amount, ref_id=code)
-    except HTTPException as _he:
-        _duix_cleanup(audio_path, video_path)
-        raise _he
-    except Exception as _ce:
-        print(f"[dh-credit] 跳过扣费 (拿不到 user): {_ce}", flush=True)
-
-    payload = {
-        "audio_url": audio_name,
-        "video_url": video_name,
-        "code": code,
-        "chaofen": 0,
-        "watermark_switch": 0,
-        "pn": 1,
-    }
-
-    try:
-        resp = _req.post(f"{DUIX_API_BASE}/submit", json=payload, timeout=30)
-        if resp.status_code != 200:
-            _duix_cleanup(audio_path, video_path)
-            raise HTTPException(resp.status_code, f"数字人服务错误: {resp.text[:200]}")
-        data = resp.json()
-        if not data.get("success"):
-            _duix_cleanup(audio_path, video_path)
-            raise HTTPException(500, data.get("msg") or "提交任务失败")
-        return {"success": True, "code": code, "submit_response": data}
-    except _req.exceptions.ConnectionError:
-        _duix_cleanup(audio_path, video_path)
-        raise HTTPException(503, "数字人服务 (8383) 未启动")
-
-
-@app.get("/api/digital-human/task/{code}")
-def query_digital_human(code: str):
-    """轮询数字人任务状态. status: processing/completed/failed"""
-    import requests as _req
-
-    try:
-        resp = _req.get(f"{DUIX_API_BASE}/query", params={"code": code}, timeout=10)
-        if resp.status_code != 200:
-            raise HTTPException(resp.status_code, f"查询失败: {resp.text[:200]}")
-        data = resp.json()
-    except _req.exceptions.ConnectionError:
-        raise HTTPException(503, "数字人服务 (8383) 未启动")
-
-    inner = data.get("data") or {}
-    status = inner.get("status")
-
-    if status == 2:
-        result = (inner.get("result") or "").lstrip("/").lstrip("\\")
-        return {
-            "success": True,
-            "status": "completed",
-            "progress": 100,
-            "video_url": f"/api/digital-human/video/{result}",
-            "duration_ms": inner.get("video_duration"),
-            "width": inner.get("width"),
-            "height": inner.get("height"),
+    # 入队
+    with _dh_lock:
+        _dh_jobs[job_id] = {
+            "status": "queued", "user_id": uid, "audio_path": audio_path,
+            "avatar_path": avatar_path, "est_amount": est, "progress": 0,
+            "video_url": "", "error": "", "created_at": time.time(),
         }
-    if status == 1:
-        return {
-            "success": True,
-            "status": "processing",
-            "progress": inner.get("progress", 0),
-            "msg": inner.get("msg", ""),
-        }
-    if status == 3:
-        return {
-            "success": False,
-            "status": "failed",
-            "msg": inner.get("msg") or "任务失败",
-        }
-    return {"success": False, "status": "unknown", "raw": data}
+        _dh_queue.append(job_id)
+    _dh_ensure_worker()
+    return {"success": True, "job_id": job_id, "position": _dh_position(job_id)}
+
+
+@app.get("/api/digital-human/task/{job_id}")
+def query_digital_human(job_id: str):
+    """查任务状态: queued(+position) / processing(+progress) / completed(+video_url) / failed."""
+    job = _dh_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, "任务不存在或已过期")
+    st = job["status"]
+    if st == "queued":
+        pos = _dh_position(job_id)
+        return {"success": True, "status": "queued", "position": pos,
+                "msg": f"排队中, 前面还有 {max(0, pos - 1)} 个"}
+    if st == "processing":
+        return {"success": True, "status": "processing", "progress": job.get("progress", 0)}
+    if st == "completed":
+        return {"success": True, "status": "completed", "progress": 100, "video_url": job["video_url"]}
+    return {"success": False, "status": "failed", "msg": job.get("error") or "生成失败"}
 
 
 # ============== 支付集成 (V2: 微信扫码 + 支付宝 stub) ==============

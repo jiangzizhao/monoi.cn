@@ -15,8 +15,9 @@ type Phase = 'idle' | 'submitting' | 'processing' | 'completed' | 'failed'
 
 interface TaskResp {
   success: boolean
-  status: 'processing' | 'completed' | 'failed' | 'unknown'
+  status: 'queued' | 'processing' | 'completed' | 'failed' | 'unknown'
   progress?: number
+  position?: number
   msg?: string
   video_url?: string
   duration_ms?: number
@@ -290,6 +291,11 @@ export function DigitalHumanForm({ onSubmit, onClose }: Props) {
           setErrorMsg(data.msg || '合成失败')
           return
         }
+        if (data.status === 'queued') {
+          pollTicksRef.current = 0   // 排队不计入超时, 轮到再算
+          setProgress(0)
+          setStatusMsg(data.msg || `排队中 (第 ${data.position ?? '?'} 位), 家里 GPU 一次跑一个`)
+        }
         if (data.status === 'processing') {
           setProgress(data.progress ?? 0)
           if (data.msg) setStatusMsg(data.msg)
@@ -340,7 +346,7 @@ export function DigitalHumanForm({ onSubmit, onClose }: Props) {
         setErrorMsg(data.detail || data.error || '提交失败')
         return
       }
-      startPolling(data.code)
+      startPolling(data.job_id)
     } catch (e: any) {
       setPhase('failed')
       setErrorMsg(e?.message || '网络错误')
