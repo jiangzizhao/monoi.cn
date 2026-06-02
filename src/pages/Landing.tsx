@@ -219,13 +219,12 @@ export default function Landing() {
         </div>
 
         <div className="mt-6 flex items-center justify-center gap-3 text-sm text-[var(--text-3)]">
-          <a href="#examples" className="hover:text-[var(--text-2)] cursor-pointer">看看示例</a>
-          <span>·</span>
           <a href="#pricing" className="hover:text-[var(--text-2)] cursor-pointer">查看定价</a>
         </div>
       </section>
 
-      {/* =============== 示例视频墙 (auto-scroll marquee) =============== */}
+      {/* =============== 示例视频墙 (暂隐藏: 还没真实示例视频, 等有了再放出来 → 改 false 为 true) =============== */}
+      {false && (
       <section id="examples" className="py-12 sm:py-20 max-w-6xl mx-auto">
         <div className="text-center mb-8 sm:mb-12 px-4">
           <h2 className="text-2xl sm:text-4xl font-bold mb-3">用 monoi 已经做出的视频</h2>
@@ -253,6 +252,7 @@ export default function Landing() {
           </div>
         </div>
       </section>
+      )}
 
       {/* =============== 5 步流程 =============== */}
       <section className="px-4 sm:px-6 py-12 sm:py-20 max-w-6xl mx-auto bg-[var(--bg-hover)]/30 rounded-3xl">
