@@ -713,6 +713,18 @@ def try_daily_grant(user_id: int) -> Optional[dict]:
     # 加今天的 grant (放 monthly_credits)
     add_credits(user_id, DAILY_FREE_GRANT_AMOUNT, 'daily_free_grant',
                 ref_id=today, to_monthly=True, feature='daily_free_grant')
+    # 关键修复: 把 monthly_credits_reset_at 标成"今天". 否则下次请求的 Phase 1 会把今天刚领的
+    # 当成"昨天的余额"清零 — add_credits 不更新 reset_at; 新用户首次领时 old_monthly=0, Phase 1
+    # 也没标 reset_at → 第二次访问就把今天的 100 清零, 表现为"显示已领但余额 0、啥都用不了".
+    _conn = get_db()
+    try:
+        _conn.execute(
+            "UPDATE credit_balance SET monthly_credits_reset_at = ?, updated_at = ? WHERE user_id = ?",
+            (time.time(), time.time(), user_id)
+        )
+        _conn.commit()
+    finally:
+        _conn.close()
     return {
         'granted': True, 'amount': DAILY_FREE_GRANT_AMOUNT,
         'day_in_window': day_in_window,
