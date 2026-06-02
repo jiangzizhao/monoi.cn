@@ -114,6 +114,18 @@ def query(code: str):
     return r.json()
 
 
+@app.post("/restart")
+def restart_heygem():
+    """重启本地 HeyGem 容器 —— 云端 worker 在任务卡死(GPU 0% 但 HTTP 还活, 看门狗抓不到)
+    超时时调这个, 解开卡死、不让后续任务全堵住。"""
+    container = os.environ.get("HEYGEM_CONTAINER", "duix-avatar-gen-video")
+    try:
+        subprocess.run(["docker", "restart", container], capture_output=True, timeout=90)
+        return {"ok": True, "restarted": container}
+    except Exception as e:
+        raise HTTPException(500, f"重启容器失败: {e}")
+
+
 @app.get("/video")
 def video(path: str):
     """把结果视频回传给云端 (云端再上 OSS 发给用户)。path = HeyGem 返回的 result 路径。"""

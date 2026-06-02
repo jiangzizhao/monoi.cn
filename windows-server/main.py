@@ -3833,7 +3833,12 @@ def _dh_run_job(_req, job_id, job):
         if st == 3:
             raise RuntimeError(inner.get("msg") or "HeyGem 生成失败")
     if not result_path:
-        raise RuntimeError("生成超时 (15 分钟)")
+        # 任务卡死 (GPU 0% 但 HTTP 还活, 家里看门狗抓不到) → 让家里重启容器解卡, 不堵后续任务
+        try:
+            _req.post(f"{DH_AGENT_URL}/restart", timeout=90)
+        except Exception:
+            pass
+        raise RuntimeError("生成超时 (15 分钟), 已请求重启家里容器")
     # 3. 从 agent 取结果视频 → 上 OSS
     v = _req.get(f"{DH_AGENT_URL}/video", params={"path": result_path}, timeout=180)
     if v.status_code != 200 or not v.content:
