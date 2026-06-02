@@ -72,7 +72,7 @@ const COMPARE_ROWS: Array<{
     free: '免费', pro_monthly: '¥99/月', max_monthly: '¥199/月', flagship_yearly: '¥2980/年',
   }},
   { label: '月送积分', values: {
-    free: '60/天 × 7 天', pro_monthly: '1,500', max_monthly: '4,000', flagship_yearly: '5,000/月',
+    free: '100/天 × 7 天', pro_monthly: '2,500', max_monthly: '5,000', flagship_yearly: '6,000/月',
   }},
   { label: '克隆音色', values: {
     free: '✗', pro_monthly: '1 个', max_monthly: '3 个', flagship_yearly: '5 个',
@@ -602,7 +602,7 @@ function MembershipTab({ sub, plans, credits, onUpgrade }: {
                 <UsageBar
                   label={
                     credits.daily_grant.day_in_window === 0
-                      ? `新人体验 · 7 天免费 (首次登录领 60 积分开启)`
+                      ? `新人体验 · 7 天免费 (首次登录领 100 积分开启)`
                       : `新人体验 · 第 ${Math.min(credits.daily_grant.day_in_window, credits.daily_grant.total_cap)}/${credits.daily_grant.total_cap} 天`
                   }
                   used={credits.monthly_used}

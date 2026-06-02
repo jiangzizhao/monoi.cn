@@ -120,7 +120,7 @@ PLANS = {
 FREE_PLAN = {
     'name': '免费',
     'price_yuan': 0,
-    'monthly_credits': 150,                           # 一次性, 注册时给 (够跑 1-2 个完整流程)
+    'monthly_credits': 700,                           # 显示用: 免费 100/天 × 7 天 = 700 (实际走 daily grant, 见 DAILY_FREE_GRANT_AMOUNT)
     'credit_pack_rate': 10,                           # ¥1=10 标准
     'digital_human_quota': 3,
     'max_avatars': 1,                                 # 免费只 1 个形象
@@ -287,7 +287,7 @@ def init_billing_tables():
     """)
     c.execute("CREATE INDEX IF NOT EXISTS idx_bgm_library_category ON bgm_library(category, created_at DESC)")
 
-    # free 用户每天领取记录 (注册起 7 天每天送 60 积分, 7 天后停)
+    # free 用户每天领取记录 (注册起 7 天每天送 100 积分, 7 天后停)
     c.execute("""
         CREATE TABLE IF NOT EXISTS daily_credit_grant (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -582,7 +582,7 @@ def _compute_consecutive_streak(conn, user_id: int, today_str: str) -> int:
 
 
 def try_daily_grant(user_id: int) -> Optional[dict]:
-    """free 用户每天送 60 积分. 7 天**硬日历窗口**: 从第一次领的那天起算 7 天, 过期永久停送.
+    """free 用户每天送 100 积分. 7 天**硬日历窗口**: 从第一次领的那天起算 7 天, 过期永久停送.
 
     规则 (2026-05-26 v2):
       - 第一次领时, 窗口开始 (first_grant_date)
@@ -758,7 +758,7 @@ def log_api_usage(
 
 
 def get_balance(user_id: int) -> dict:
-    """返回完整额度信息. free 用户走 daily grant (注册起 7 天, 每天 60 积分),
+    """返回完整额度信息. free 用户走 daily grant (注册起 7 天, 每天 100 积分),
     付费用户走 monthly_credits 套餐配额."""
     conn = get_db()
     row = conn.execute(
@@ -1323,7 +1323,7 @@ def list_plans():
 @router.get("/credits")
 def my_credits(request: Request):
     user_id = get_current_user_id(request)
-    # free 用户每次访问尝试当天 grant (注册起 7 天每天送 60). 失败吞异常不阻塞.
+    # free 用户每次访问尝试当天 grant (注册起 7 天每天送 100). 失败吞异常不阻塞.
     try:
         try_daily_grant(user_id)
     except Exception as _e:

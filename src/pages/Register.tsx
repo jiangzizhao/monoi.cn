@@ -96,7 +96,7 @@ export default function Register() {
           <Logo className="w-12 h-12 mb-3 object-contain"/>
           <h1 className="text-xl font-semibold text-[var(--text)]">注册 monoi</h1>
           <p className="text-sm text-[var(--text-3)] mt-1">免费开始你的创作</p>
-          <p className="text-xs text-amber-500 mt-2">新用户 7 天免费 · 每天送 60 积分</p>
+          <p className="text-xs text-amber-500 mt-2">新用户 7 天免费 · 每天送 100 积分</p>
         </div>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
