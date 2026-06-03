@@ -143,8 +143,8 @@ export default function Landing() {
     <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]">
 
       {/* =============== Nav =============== */}
-      <nav className={`sticky top-0 z-50 transition-all ${
-        scrolled ? 'bg-white/80 backdrop-blur-md border-b border-[var(--border)]' : 'bg-transparent'
+      <nav className={`sticky top-0 z-50 transition-all bg-[var(--bg)]/90 backdrop-blur-md ${
+        scrolled ? 'border-b border-[var(--border)] shadow-sm' : ''
       }`}>
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -211,7 +211,7 @@ export default function Landing() {
                 ⚡ 新用户 7 天免费 · 每天送 100 积分 · 不需要任何视频技能
               </span>
               <button onClick={submitPrompt}
-                className="inline-flex items-center gap-1.5 px-4 py-2 bg-[var(--text)] text-[var(--bg)] rounded-xl text-sm font-medium hover:opacity-80 cursor-pointer">
+                className="inline-flex items-center gap-1.5 px-4 py-2 bg-[var(--text)] text-[var(--bg)] rounded-xl text-sm font-medium hover:opacity-80 cursor-pointer whitespace-nowrap flex-shrink-0">
                 开始创作 <ArrowRight size={14}/>
               </button>
             </div>
