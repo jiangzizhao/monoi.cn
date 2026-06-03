@@ -260,18 +260,18 @@ export default function Landing() {
           <h2 className="text-2xl sm:text-4xl font-bold mb-3">从一段文字, 到一条能发的视频</h2>
           <p className="text-sm text-[var(--text-3)]">5 步, 全程对话</p>
         </div>
-        <div className="flex flex-col sm:flex-row items-center sm:items-stretch gap-3 sm:gap-2">
+        <div className="grid grid-cols-3 gap-3 items-start sm:flex sm:flex-row sm:items-stretch sm:gap-2">
           {STEPS.map((s, i) => (
-            <div key={i} className="flex-1 flex sm:flex-col items-center gap-3 sm:gap-2 w-full">
+            <div key={i} className="flex flex-col items-center gap-2 w-full sm:flex-1">
               <div className="flex flex-col items-center flex-shrink-0">
                 <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-[var(--bg-card)] border border-[var(--border)] flex items-center justify-center mb-1 sm:mb-2">
                   <s.Icon size={22} className="text-[var(--text-2)]" strokeWidth={1.6}/>
                 </div>
                 <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-[var(--text)] text-[var(--bg)] flex items-center justify-center text-xs font-bold">{i+1}</div>
               </div>
-              <div className="flex-1 text-left sm:text-center">
-                <div className="text-sm sm:text-base font-semibold mb-0.5 sm:mb-1">{s.title}</div>
-                <div className="text-xs text-[var(--text-3)] leading-relaxed">{s.desc}</div>
+              <div className="text-center">
+                <div className="text-xs sm:text-base font-semibold mb-0.5 sm:mb-1">{s.title}</div>
+                <div className="text-xs text-[var(--text-3)] leading-relaxed hidden sm:block">{s.desc}</div>
               </div>
             </div>
           ))}
@@ -284,7 +284,7 @@ export default function Landing() {
           <h2 className="text-2xl sm:text-4xl font-bold mb-3">你能用 monoi 做什么</h2>
           <p className="text-sm text-[var(--text-3)]">从文案到发布, 全链路 AI 辅助</p>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
           {FEATURES.map((f, i) => (
             <button key={i} onClick={focusInput}
               className="text-left p-5 sm:p-6 rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] hover:border-[var(--text-3)] hover:bg-[var(--bg-hover)] transition-all cursor-pointer">
@@ -303,20 +303,20 @@ export default function Landing() {
           <h2 className="text-2xl sm:text-4xl font-bold mb-3">定价</h2>
           <p className="text-sm text-[var(--text-3)]">按需选择, 月卡随时可取消自动续费</p>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 max-w-4xl mx-auto">
+        <div className="grid grid-cols-3 gap-2 sm:gap-4 max-w-4xl mx-auto">
           {PRICING.map(p => (
-            <div key={p.tier} className={`relative p-5 sm:p-6 rounded-2xl border-2 flex flex-col gap-3 bg-[var(--bg-card)] ${
+            <div key={p.tier} className={`relative p-3 sm:p-6 rounded-2xl border-2 flex flex-col gap-2 sm:gap-3 bg-[var(--bg-card)] ${
               p.highlighted ? 'border-amber-400' : 'border-[var(--border)]'
             }`}>
               {p.badge && (
                 <div className="absolute -top-2.5 left-1/2 -translate-x-1/2 px-2.5 py-0.5 rounded-full bg-amber-400 text-black text-[10px] font-medium">⭐ {p.badge}</div>
               )}
-              <div className="text-lg font-semibold">{p.name}</div>
+              <div className="text-sm sm:text-lg font-semibold">{p.name}</div>
               <div className="flex items-baseline gap-1">
-                <span className="text-3xl font-bold">{p.price}</span>
+                <span className="text-xl sm:text-3xl font-bold">{p.price}</span>
                 <span className="text-xs text-[var(--text-3)]">{p.period}</span>
               </div>
-              <ul className="text-xs text-[var(--text-2)] space-y-1.5 flex-1">
+              <ul className="text-[10px] sm:text-xs text-[var(--text-2)] space-y-1 sm:space-y-1.5 flex-1">
                 {p.features.map((f, i) => (
                   <li key={i} className="flex items-start gap-1.5">
                     <Check size={12} className="text-green-500 mt-0.5 flex-shrink-0"/>
