@@ -724,8 +724,8 @@ export function useChat() {
             type: 'choices',
             question: '下一步',
             options: [
-              { id: '__form_footage__', label: '匹配素材', description: '按文案找配套画面, 拼成最终视频' },
               { id: '__digital_human__', label: '做数字人视频', description: '用这段音频驱动数字人讲' },
+              { id: '__form_footage__', label: '匹配素材', description: '按文案找配套画面, 拼成最终视频' },
             ],
           },
         ])
@@ -820,8 +820,8 @@ export function useChat() {
             type: 'choices',
             question: '下一步',
             options: [
-              { id: '__form_footage__', label: '匹配素材', description: '按文案找配套画面, 拼成最终视频' },
               { id: '__digital_human__', label: '做数字人视频', description: '用这段音频驱动数字人讲' },
+              { id: '__form_footage__', label: '匹配素材', description: '按文案找配套画面, 拼成最终视频' },
             ],
           },
         ])
