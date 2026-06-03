@@ -100,6 +100,11 @@ export default function RecordTab() {
   const cameraVideoRef = useRef<HTMLVideoElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rafRef = useRef<number>(0)
+  const pipPanelRef = useRef<HTMLDivElement | null>(null)   // PIP 设置面板
+  // 打开 PIP 设置时把面板滚到可见 —— 按钮在底部工具条、面板在内容中段, 否则点了像"没反应"
+  useEffect(() => {
+    if (showPipSettings) pipPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [showPipSettings])
   const recorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
   // 白板模式: Konva stage ref, canvas loop 里画到主 canvas
@@ -879,7 +884,7 @@ export default function RecordTab() {
               <audio ref={bgmAudioElRef} className="hidden"/>
 
               {showPipSettings && (
-                <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] p-4 flex flex-col gap-3 msg-enter">
+                <div ref={pipPanelRef} className="rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] p-4 flex flex-col gap-3 msg-enter">
                   <div className="text-xs font-medium text-[var(--text-2)]">输出尺寸</div>
                   <div className="flex flex-wrap items-center gap-2 text-xs">
                     {(['16:9', '9:16', '1:1', '3:4'] as OutputRatio[]).map(r => (
