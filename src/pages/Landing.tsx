@@ -99,7 +99,7 @@ const FAQS = [
 // =============== 组件 ===============
 
 // ICP 备案号: 拿到工信部备案号后填这里 (例 '粤ICP备2024XXXXXX号'), 留空则页脚不显示
-const ICP_BEIAN = ''
+const ICP_BEIAN = '粤ICP备2025473586号-3'
 
 export default function Landing() {
   const nav = useNavigate()
