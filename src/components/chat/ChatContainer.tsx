@@ -10,17 +10,29 @@ export function ChatContainer() {
   const { send, chooseOption } = useChat()
   const endRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const atBottomRef = useRef(true)   // 是否贴在底部; 初始 true → 进对话/新消息会滚到底
 
   const conv = conversations.find(c => c.id === activeId)
   const messages = conv?.messages ?? []
 
-  useEffect(() => {
-    // 只在用户本来就在底部附近时才自动滚到底 —— 用户往上翻看素材/历史时,
-    // 内容更新(如素材网格加载)不要把他从上面拽回底部 (之前一直拽, 体验很差)。
+  // 用户滚动时实时记录"是否贴底"。关键: 必须在新内容到来【之前】测量 —— 新内容(尤其
+  // 素材网格那种高的)会撑高 scrollHeight, 若等渲染后再算, 离底距离会突然变大被误判成
+  // "不在底部"而不滚 (这就是之前"新消息来了也不滚、看不到最新"的根因)。
+  const handleScroll = () => {
     const el = scrollRef.current
     if (!el) return
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 200
-    if (nearBottom) endRef.current?.scrollIntoView({ behavior: 'smooth' })
+    atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 150
+  }
+
+  // 切换对话 / 首次进入: 直接回到底部看最新
+  useEffect(() => {
+    atBottomRef.current = true
+    requestAnimationFrame(() => endRef.current?.scrollIntoView({ behavior: 'auto' }))
+  }, [activeId])
+
+  // 新消息 / 内容更新(含素材网格): 只有用户原本就贴底才自动滚到底; 往上翻看时不打扰。
+  useEffect(() => {
+    if (atBottomRef.current) endRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages.length, messages[messages.length - 1]?.blocks])
 
   const handleScriptFootage = (script: string) => send(`用上面这篇文案帮我找素材:\n${script}`)
@@ -43,7 +55,7 @@ export function ChatContainer() {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto" ref={scrollRef}>
+    <div className="flex-1 overflow-y-auto" ref={scrollRef} onScroll={handleScroll}>
       <div className="max-w-3xl mx-auto px-4 py-8 flex flex-col gap-6">
         {messages.length === 0 && (
           <WelcomeMessage/>
