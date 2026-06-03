@@ -1984,9 +1984,9 @@ def synthesize_voice(req: VoiceSynthesizeRequest, request: Request):
         ).fetchone()
         _conn.close()
         _total = int((_bal['monthly_credits'] or 0) if _bal else 0) + int((_bal['purchased_credits'] or 0) if _bal else 0)
-        # 不暴露"需要多少", 只提示当前余额 (跟 consume_credits 文案一致)
+        # 不暴露具体数字 (需要多少 / 剩余多少), 只提示去升级 (跟 consume_credits 文案一致)
         if not _is_admin and _total < est_amount:
-            raise HTTPException(402, f"积分余额不足, 当前剩 {_total} 积分. 升级套餐或购买积分包.")
+            raise HTTPException(402, "积分不足, 升级套餐获取更多积分")
     except HTTPException:
         raise
     except Exception as _ce:

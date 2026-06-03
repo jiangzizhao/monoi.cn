@@ -876,8 +876,8 @@ def consume_credits(user_id: int, feature: str, amount: int, ref_id: Optional[st
         purchased = row['purchased_credits'] if row else 0
         total = (monthly or 0) + (purchased or 0)
         if total < amount:
-            # 不暴露 "需要 X 积分" 具体值, 体验更顺 (后端 credit_log 仍记账给 admin)
-            raise HTTPException(402, f"积分余额不足. 当前剩 {total} 积分, 升级套餐获更多月送积分, 或购买积分包补充.")
+            # 不暴露具体数字 (需要多少 / 剩余多少), 只提示去升级 (后端 credit_log 仍记账给 admin)
+            raise HTTPException(402, "积分不足, 升级套餐获取更多积分")
         from_monthly = min(monthly or 0, amount)
         from_purchased = amount - from_monthly
         now = time.time()
