@@ -2129,7 +2129,7 @@ function FieldEditor({ field, fonts, bgWidth, hasPerson, onChange, onRemove }: {
           <span className="text-xs text-[var(--text-3)]">阴影</span>
           <button onClick={() => onChange(field.shadow_color
             ? { shadow_color: null, shadow_offset_x: 0, shadow_offset_y: 0, shadow_blur: 0 }
-            : { shadow_color: '#000000', shadow_offset_x: 4, shadow_offset_y: 4, shadow_blur: 4 })}
+            : { shadow_color: '#000000', shadow_offset_x: Math.round(field.font_size * 0.05), shadow_offset_y: Math.round(field.font_size * 0.05), shadow_blur: Math.round(field.font_size * 0.04) })}
             className="text-[10px] text-[var(--text-2)] hover:text-[var(--text)] cursor-pointer underline">
             {field.shadow_color ? '关闭阴影' : '开启阴影'}
           </button>
