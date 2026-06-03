@@ -3938,7 +3938,7 @@ def submit_digital_human(
                 _have = (_bal[0] if _bal else 0) or 0
                 if _have < est:
                     _duix_cleanup(audio_path)
-                    raise HTTPException(402, f"积分不足: 这条约需 {est} 积分, 你当前 {_have}")
+                    raise HTTPException(402, "积分不足, 升级套餐获取更多积分")
         finally:
             c.close()
     except HTTPException:
