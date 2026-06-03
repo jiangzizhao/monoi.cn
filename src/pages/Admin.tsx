@@ -1880,6 +1880,9 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
                         WebkitTextStroke: (f.stroke_color && f.stroke_width > 0)
                           ? `${f.stroke_width * 2 * sx}px ${f.stroke_color}` : undefined,
                         paintOrder: 'stroke fill' as const,
+                        textShadow: f.shadow_color
+                          ? `${(f.shadow_offset_x || 0) * sx}px ${(f.shadow_offset_y || 0) * sx}px ${(f.shadow_blur || 0) * sx}px ${f.shadow_color}`
+                          : undefined,
                         pointerEvents: 'none',
                       }}>
                         {segs.map((s, j) => (
