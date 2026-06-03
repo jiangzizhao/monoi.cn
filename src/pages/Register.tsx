@@ -168,6 +168,13 @@ export default function Register() {
           </button>
         </form>
 
+        <p className="text-center text-[11px] text-[var(--text-3)] mt-3 leading-relaxed px-2">
+          注册即代表你已阅读并同意
+          <button onClick={() => nav('/terms')} className="text-[var(--text-2)] hover:text-[var(--text)] cursor-pointer underline underline-offset-2">《用户协议》</button>
+          和
+          <button onClick={() => nav('/privacy')} className="text-[var(--text-2)] hover:text-[var(--text)] cursor-pointer underline underline-offset-2">《隐私政策》</button>
+        </p>
+
         <p className="text-center text-sm text-[var(--text-3)] mt-6">
           已有账号？
           <button onClick={() => nav('/login')} className="text-[var(--text-2)] hover:text-[var(--text)] ml-1 cursor-pointer underline underline-offset-2">

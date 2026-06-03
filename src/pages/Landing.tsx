@@ -98,6 +98,9 @@ const FAQS = [
 
 // =============== 组件 ===============
 
+// ICP 备案号: 拿到工信部备案号后填这里 (例 '粤ICP备2024XXXXXX号'), 留空则页脚不显示
+const ICP_BEIAN = ''
+
 export default function Landing() {
   const nav = useNavigate()
   const [prompt, setPrompt] = useState('')
@@ -393,9 +396,8 @@ export default function Landing() {
           <div>
             <div className="text-sm font-semibold mb-3">法律</div>
             <ul className="text-xs text-[var(--text-3)] space-y-1.5">
-              <li>用户协议</li>
-              <li>隐私政策</li>
-              <li>ICP 备案 (待补)</li>
+              <li><button onClick={() => nav('/terms')} className="hover:text-[var(--text-2)] cursor-pointer">用户协议</button></li>
+              <li><button onClick={() => nav('/privacy')} className="hover:text-[var(--text-2)] cursor-pointer">隐私政策</button></li>
             </ul>
           </div>
           <div>
@@ -412,8 +414,12 @@ export default function Landing() {
             <Logo className="w-6 h-6 rounded-lg object-contain"/>
             <span className="text-xs text-[var(--text-3)]">© 2026 monoi · 专为中文创作者</span>
           </div>
-          <div className="text-xs text-[var(--text-3)]">
-            AI 短视频口播全流程工具
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--text-3)]">
+            {ICP_BEIAN && (
+              <a href="https://beian.miit.gov.cn" target="_blank" rel="noopener noreferrer"
+                className="hover:text-[var(--text-2)]">{ICP_BEIAN}</a>
+            )}
+            <span>AI 短视频口播全流程工具</span>
           </div>
         </div>
       </footer>

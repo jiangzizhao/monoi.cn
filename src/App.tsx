@@ -10,6 +10,7 @@ import Admin from './pages/Admin'
 import ChatTab from './pages/ChatTab'
 import RecordTab from './pages/RecordTab'
 import VoiceTab from './pages/VoiceTab'
+import { Terms, Privacy } from './pages/Legal'
 import { isLoggedIn } from './lib/auth'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -104,6 +105,8 @@ export default function App() {
               <Admin/>
             </ProtectedRoute>
           }/>
+          <Route path="/terms" element={<Terms/>}/>
+          <Route path="/privacy" element={<Privacy/>}/>
           <Route path="*" element={<Navigate to="/" replace/>}/>
         </Routes>
       </ToastProvider>
