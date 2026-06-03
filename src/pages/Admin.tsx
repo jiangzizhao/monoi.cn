@@ -2121,6 +2121,42 @@ function FieldEditor({ field, fonts, bgWidth, hasPerson, onChange, onRemove }: {
         </div>
       </div>
 
+      <div className="border-t border-[var(--border)] pt-3">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs text-[var(--text-3)]">阴影</span>
+          <button onClick={() => onChange(field.shadow_color
+            ? { shadow_color: null, shadow_offset_x: 0, shadow_offset_y: 0, shadow_blur: 0 }
+            : { shadow_color: '#000000', shadow_offset_x: 4, shadow_offset_y: 4, shadow_blur: 4 })}
+            className="text-[10px] text-[var(--text-2)] hover:text-[var(--text)] cursor-pointer underline">
+            {field.shadow_color ? '关闭阴影' : '开启阴影'}
+          </button>
+        </div>
+        {field.shadow_color && (
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-[10px] text-[var(--text-3)]">阴影色</label>
+              <input type="color" value={field.shadow_color || '#000000'} onChange={e => onChange({ shadow_color: e.target.value })}
+                className="w-full h-7 bg-[var(--bg)] border border-[var(--border)] rounded mt-0.5 cursor-pointer"/>
+            </div>
+            <div>
+              <label className="text-[10px] text-[var(--text-3)]">虚化 (越大越柔)</label>
+              <input type="number" min={0} value={field.shadow_blur || 0} onChange={e => onChange({ shadow_blur: Math.max(0, +e.target.value) })}
+                className="w-full h-7 bg-[var(--bg)] border border-[var(--border)] rounded px-1.5 text-sm mt-0.5"/>
+            </div>
+            <div>
+              <label className="text-[10px] text-[var(--text-3)]">横偏移 X</label>
+              <input type="number" value={field.shadow_offset_x || 0} onChange={e => onChange({ shadow_offset_x: +e.target.value })}
+                className="w-full h-7 bg-[var(--bg)] border border-[var(--border)] rounded px-1.5 text-sm mt-0.5"/>
+            </div>
+            <div>
+              <label className="text-[10px] text-[var(--text-3)]">竖偏移 Y</label>
+              <input type="number" value={field.shadow_offset_y || 0} onChange={e => onChange({ shadow_offset_y: +e.target.value })}
+                className="w-full h-7 bg-[var(--bg)] border border-[var(--border)] rounded px-1.5 text-sm mt-0.5"/>
+            </div>
+          </div>
+        )}
+      </div>
+
       {hasPerson && (
         <div className="border-t border-[var(--border)] pt-3">
           <div className="text-xs text-[var(--text-3)] mb-2">图层 (相对人物)</div>

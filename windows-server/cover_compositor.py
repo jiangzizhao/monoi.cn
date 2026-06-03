@@ -180,10 +180,30 @@ def _draw_text_field(img: Image.Image, field: dict, user_text: str):
     text_h = asc + desc
 
     # 1. 在临时 layer 上画文字 (layer 比 text 大一点留 margin, 防描边/旋转裁边)
-    margin = max(stroke_width * 2 + 4, int(cur_size * 0.3))
+    # 阴影参数 (CoverTextField 已有这些字段, 之前没渲染上)
+    shadow_color = field.get('shadow_color')
+    shadow_ox = int(field.get('shadow_offset_x', 0) or 0)
+    shadow_oy = int(field.get('shadow_offset_y', 0) or 0)
+    shadow_blur = int(field.get('shadow_blur', 0) or 0)
+
+    margin = max(stroke_width * 2 + 4, int(cur_size * 0.3),
+                 abs(shadow_ox) + shadow_blur * 3 + 4, abs(shadow_oy) + shadow_blur * 3 + 4)
     layer_w = total_w + margin * 2
     layer_h = text_h + margin * 2
     layer = Image.new('RGBA', (layer_w, layer_h), (0, 0, 0, 0))
+    # 阴影: 独立层画偏移的阴影文字 → 高斯模糊 → 作为底层 (主文字随后画其上, 阴影在下)
+    if shadow_color:
+        shadow_layer = Image.new('RGBA', (layer_w, layer_h), (0, 0, 0, 0))
+        sdraw = ImageDraw.Draw(shadow_layer)
+        sx = margin + shadow_ox
+        for _seg, _ in segments:
+            if not _seg:
+                continue
+            sdraw.text((sx, margin + shadow_oy), _seg, font=font, fill=_hex_to_rgb(shadow_color))
+            sx += _measure_text(sdraw, _seg, font)
+        if shadow_blur > 0:
+            shadow_layer = shadow_layer.filter(ImageFilter.GaussianBlur(shadow_blur))
+        layer = shadow_layer
     layer_draw = ImageDraw.Draw(layer)
 
     cur_x_in_layer = margin
