@@ -105,8 +105,15 @@ export function PublishForm({ onClose }: Props) {
   const [desktopInfo, setDesktopInfo] = useState<DesktopLatest | null>(null)
   useEffect(() => {
     if (isDesktop) return
-    fetchMyCredits().then(c => setMyTier(c.tier)).catch(() => {})
     fetchDesktopLatest().then(setDesktopInfo).catch(() => {})
+    // 网页端无法自动发布(浏览器安全限制): 一打开发布表单就引导, 不让用户白填一整张表才被拦。
+    // Max+ → 提示下载桌面版; 免费/Pro → 提示升级 Max。弹窗可关, 关掉仍能看 AI 文案手动发。
+    fetchMyCredits().then(c => {
+      setMyTier(c.tier)
+      const TIER_ORDER = ['free', 'pro_monthly', 'max_monthly', 'flagship_yearly']
+      const canDesktopPublish = TIER_ORDER.indexOf(c.tier) >= TIER_ORDER.indexOf('max_monthly')
+      setGate(canDesktopPublish ? 'desktop' : 'upgrade')
+    }).catch(() => {})
   }, [isDesktop])
 
   const submit = async () => {
