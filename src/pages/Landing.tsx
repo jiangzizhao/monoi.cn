@@ -254,7 +254,8 @@ export default function Landing() {
       </section>
       )}
 
-      {/* =============== 5 步流程 =============== */}
+      {/* =============== 5 步流程 (暂隐藏: 跟首页其它内容重复, 多余 → 改 false 为 true 恢复) =============== */}
+      {false && (
       <section className="px-4 sm:px-6 py-12 sm:py-20 max-w-6xl mx-auto bg-[var(--bg-hover)]/30 rounded-3xl">
         <div className="text-center mb-8 sm:mb-12">
           <h2 className="text-2xl sm:text-4xl font-bold mb-3">从一段文字, 到一条能发的视频</h2>
@@ -277,6 +278,7 @@ export default function Landing() {
           ))}
         </div>
       </section>
+      )}
 
       {/* =============== 核心功能 =============== */}
       <section id="features" className="px-4 sm:px-6 py-12 sm:py-20 max-w-6xl mx-auto">
