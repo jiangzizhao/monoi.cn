@@ -33,7 +33,7 @@ function LegalShell({ title, sections }: { title: string; sections: Section[] })
           ))}
         </div>
         <p className="text-xs text-[var(--text-3)] mt-10 leading-relaxed">
-          如对本{title}有任何疑问或意见，请通过邮箱 hi@monoi.cn 或微信 monoi-service 与我们联系。
+          如对本{title}有任何疑问或意见，请通过客服邮箱 tina@monoi.cn 或微信服务号 monoi.cn 与我们联系。
         </p>
         <button onClick={() => nav('/')}
           className="mt-6 text-sm text-[var(--text-2)] hover:text-[var(--text)] underline underline-offset-2 cursor-pointer">

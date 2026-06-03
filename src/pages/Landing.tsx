@@ -403,9 +403,9 @@ export default function Landing() {
           <div>
             <div className="text-sm font-semibold mb-3">联系</div>
             <ul className="text-xs text-[var(--text-3)] space-y-1.5">
-              <li>微信: monoi-service</li>
-              <li>邮箱: hi@monoi.cn</li>
-              <li>商务合作</li>
+              <li>微信服务号: monoi.cn</li>
+              <li>客服邮箱: tina@monoi.cn</li>
+              <li>商务合作: tim@monoi.cn</li>
             </ul>
           </div>
         </div>
