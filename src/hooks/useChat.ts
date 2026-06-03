@@ -693,6 +693,7 @@ export function useChat() {
             type: 'choices',
             question: '下一步',
             options: [
+              { id: '__form_footage__', label: '匹配素材', description: '给数字人配 b-roll 画面素材' },
               { id: '__form_cover__', label: '生成封面', description: '给视频做个发布封面图' },
               { id: '__add_bgm_to_video__', label: '加 BGM', description: '叠背景音乐 (从 monoi BGM 库选)' },
               { id: '__form_publish__', label: '发布到平台', description: '直接发抖音 / 小红书' },
