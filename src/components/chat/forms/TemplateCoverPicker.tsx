@@ -878,9 +878,9 @@ export function TemplatePreview({ template, userTexts, textOverrides, extraField
           ? { WebkitTextStroke: `${strokeWidth * 2 / tplW * 100}cqw ${strokeColor}`, paintOrder: 'stroke fill' as const }
           : {}
 
-        const shadowColor = ovr.shadow_color || f.shadow_color
+        const shadowColor = f.shadow_color
         const shadowCss = shadowColor
-          ? { textShadow: `${(ovr.shadow_offset_x ?? f.shadow_offset_x ?? 0) / tplW * 100}cqw ${(ovr.shadow_offset_y ?? f.shadow_offset_y ?? 0) / tplW * 100}cqw ${(ovr.shadow_blur ?? f.shadow_blur ?? 0) / tplW * 100}cqw ${shadowColor}` }
+          ? { textShadow: `${(f.shadow_offset_x || 0) / tplW * 100}cqw ${(f.shadow_offset_y || 0) / tplW * 100}cqw ${(f.shadow_blur || 0) / tplW * 100}cqw ${shadowColor}` }
           : {}
 
         // 用户/admin 改 rotation 时, 优先用 override 的 (admin 字段), 否则用 field 自带的
