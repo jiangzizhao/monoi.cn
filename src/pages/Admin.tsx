@@ -1925,46 +1925,49 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
                 </button>
               )}
 
-              <div className="text-xs text-[var(--text-3)] mb-2 mt-1">
-                文字字段 ({fields.length})
-                {drawMode === 'person' && <span className="ml-2 text-pink-400">↑ 模式: 拖框设人物坑</span>}
-              </div>
-              <div className="flex flex-col gap-1 overflow-y-auto">
-                {fields.map((f, i) => (
-                  <button key={f._id} onClick={() => { setActiveFieldId(f._id); setPersonSelected(false); setActiveLineId(null) }}
-                    className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs cursor-pointer ${
-                      activeFieldId === f._id ? 'bg-[var(--text)] text-[var(--bg)]' : 'text-[var(--text-2)] hover:bg-[var(--bg-hover)]'
-                    }`}>
-                    <span className="font-mono text-[10px] opacity-60">#{i + 1}</span>
-                    <span className="flex-1 text-left truncate">{f.label}</span>
-                    <span className="text-[10px] opacity-60">{f.w}×{f.h}</span>
-                  </button>
-                ))}
-                {fields.length === 0 && !personSlot && lines.length === 0 && (
-                  <div className="text-xs text-[var(--text-3)] py-4 text-center">
-                    暂无字段, 在右侧底图上 <span className="text-amber-500">按住鼠标拖一个矩形</span> 添加
-                  </div>
+              {/* 字段 + 线条列表区: 占满剩余高度并可滚动 (字段多时不会被挤没/看不见) */}
+              <div className="flex-1 min-h-0 overflow-y-auto flex flex-col">
+                <div className="text-xs text-[var(--text-3)] mb-2 mt-1">
+                  文字字段 ({fields.length})
+                  {drawMode === 'person' && <span className="ml-2 text-pink-400">↑ 模式: 拖框设人物坑</span>}
+                </div>
+                <div className="flex flex-col gap-1">
+                  {fields.map((f, i) => (
+                    <button key={f._id} onClick={() => { setActiveFieldId(f._id); setPersonSelected(false); setActiveLineId(null) }}
+                      className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs cursor-pointer ${
+                        activeFieldId === f._id ? 'bg-[var(--text)] text-[var(--bg)]' : 'text-[var(--text-2)] hover:bg-[var(--bg-hover)]'
+                      }`}>
+                      <span className="font-mono text-[10px] opacity-60">#{i + 1}</span>
+                      <span className="flex-1 text-left truncate">{f.label}</span>
+                      <span className="text-[10px] opacity-60">{f.w}×{f.h}</span>
+                    </button>
+                  ))}
+                  {fields.length === 0 && !personSlot && lines.length === 0 && (
+                    <div className="text-xs text-[var(--text-3)] py-4 text-center">
+                      暂无字段, 在右侧底图上 <span className="text-amber-500">按住鼠标拖一个矩形</span> 添加
+                    </div>
+                  )}
+                </div>
+
+                {/* 装饰线条列表 */}
+                {lines.length > 0 && (
+                  <>
+                    <div className="text-xs text-[var(--text-3)] mb-2 mt-3">装饰线条 ({lines.length})</div>
+                    <div className="flex flex-col gap-1">
+                      {lines.map((l, i) => (
+                        <button key={l._id} onClick={() => { setActiveLineId(l._id); setActiveFieldId(null); setPersonSelected(false) }}
+                          className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs cursor-pointer ${
+                            activeLineId === l._id ? 'bg-[var(--text)] text-[var(--bg)]' : 'text-[var(--text-2)] hover:bg-[var(--bg-hover)]'
+                          }`}>
+                          <span className="font-mono text-[10px] opacity-60">线{i + 1}</span>
+                          <span className="flex-1 text-left truncate">{l.style === 'wavy' ? '波浪线' : l.style === 'double' ? '双线' : '实线'}{l.layer === 'behind' ? ' · 人物后' : ''}</span>
+                          <span className="text-[10px] opacity-60">{l.w}×{l.thickness}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </>
                 )}
               </div>
-
-              {/* 装饰线条列表 */}
-              {lines.length > 0 && (
-                <>
-                  <div className="text-xs text-[var(--text-3)] mb-2 mt-3">装饰线条 ({lines.length})</div>
-                  <div className="flex flex-col gap-1 overflow-y-auto">
-                    {lines.map((l, i) => (
-                      <button key={l._id} onClick={() => { setActiveLineId(l._id); setActiveFieldId(null); setPersonSelected(false) }}
-                        className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs cursor-pointer ${
-                          activeLineId === l._id ? 'bg-[var(--text)] text-[var(--bg)]' : 'text-[var(--text-2)] hover:bg-[var(--bg-hover)]'
-                        }`}>
-                        <span className="font-mono text-[10px] opacity-60">线{i + 1}</span>
-                        <span className="flex-1 text-left truncate">{l.style === 'wavy' ? '波浪线' : l.style === 'double' ? '双线' : '实线'}{l.layer === 'behind' ? ' · 人物后' : ''}</span>
-                        <span className="text-[10px] opacity-60">{l.w}×{l.thickness}</span>
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
             </div>
 
             {editorErr && <div className="text-xs text-red-400">{editorErr}</div>}
