@@ -179,6 +179,14 @@ def _draw_text_field(img: Image.Image, field: dict, user_text: str):
     desc = font.getmetrics()[1]
     text_h = asc + desc
 
+    # 弧形/扇形: 逐字沿圆弧摆放 (text_arc 度数, >0 上弧 ∩, <0 下弧 ∪). 单独走一条渲染路径.
+    text_arc = float(field.get('text_arc', 0) or 0)
+    if abs(text_arc) >= 1:
+        _draw_arc_field(img, field, segments, font, cur_size, total_w, text_h,
+                        color_rgb, highlight_rgb, stroke_color, stroke_width,
+                        box_x, box_y, box_w, box_h, rotation, text_arc)
+        return
+
     # 1. 在临时 layer 上画文字 (layer 比 text 大一点留 margin, 防描边/旋转裁边)
     # 阴影参数 (CoverTextField 已有这些字段, 之前没渲染上)
     shadow_color = field.get('shadow_color')
@@ -265,6 +273,77 @@ def _draw_text_field(img: Image.Image, field: dict, user_text: str):
     paste_y = box_cy - layer.height // 2
 
     img.alpha_composite(layer, (paste_x, paste_y))
+
+
+def _draw_arc_field(img, field, segments, font, cur_size, total_w, text_h,
+                    color_rgb, highlight_rgb, stroke_color, stroke_width,
+                    box_x, box_y, box_w, box_h, rotation, arc_deg):
+    """弧形/扇形: 逐字沿圆弧摆放 + 切向旋转, 居中贴到 box 中心.
+    arc_deg>0 上弧 ∩ (顶点在上, 两端下沉); <0 下弧 ∪. 弧长=文字总宽, 半径 R=弧长/弧度."""
+    import math
+    # 拍平成逐字 (含各自颜色; 跳过空白但保留普通空格)
+    chars = []
+    for seg_text, is_hl in segments:
+        fill = highlight_rgb if is_hl else color_rgb
+        for ch in seg_text:
+            if ch in '\r\n\t':
+                continue
+            chars.append((ch, fill))
+    if not chars:
+        return
+
+    md = ImageDraw.Draw(img)
+    widths = [max(1, _measure_text(md, ch, font)) for ch, _ in chars]
+    W = float(sum(widths)) or 1.0
+    A = math.radians(min(abs(arc_deg), 340.0))   # 弧度, 上限防退化成整圆
+    R = W / A
+    d = 1.0 if arc_deg >= 0 else -1.0
+    stroke_rgb = _hex_to_rgb(stroke_color) if stroke_color else None
+
+    # 逐字中心角 + 字心相对坐标 (apex 为原点)
+    placements = []   # (x_rel, y_rel, rot_deg, ch, fill, w)
+    cum = 0.0
+    for (ch, fill), w in zip(chars, widths):
+        theta = ((cum + w / 2.0) / W - 0.5) * A     # -A/2 .. +A/2
+        x_rel = R * math.sin(theta)
+        y_rel = d * R * (1.0 - math.cos(theta))      # 上弧: 两端 y 增大(下沉)
+        rot_deg = d * math.degrees(theta)            # 切向 (CSS 顺时针为正)
+        placements.append((x_rel, y_rel, rot_deg, ch, fill, w))
+        cum += w
+
+    pad = int(max(cur_size, text_h) * 0.8) + stroke_width * 2 + 6
+    xs = [p[0] for p in placements]
+    ys = [p[1] for p in placements]
+    min_x, max_x, min_y, max_y = min(xs), max(xs), min(ys), max(ys)
+    layer_w = int((max_x - min_x) + cur_size + pad * 2)
+    layer_h = int((max_y - min_y) + text_h + pad * 2)
+    layer = Image.new('RGBA', (layer_w, layer_h), (0, 0, 0, 0))
+    origin_x = pad + cur_size / 2.0 - min_x          # 字心坐标原点在 layer 上的位置
+    origin_y = pad + text_h / 2.0 - min_y
+
+    for x_rel, y_rel, rot_deg, ch, fill, w in placements:
+        ch_w = int(w + stroke_width * 2 + 4)
+        ch_h = int(text_h + stroke_width * 2 + 4)
+        tile = Image.new('RGBA', (ch_w, ch_h), (0, 0, 0, 0))
+        td = ImageDraw.Draw(tile)
+        tx, ty = stroke_width + 2, stroke_width + 2
+        if stroke_rgb and stroke_width > 0:
+            td.text((tx, ty), ch, font=font, fill=fill,
+                    stroke_width=stroke_width, stroke_fill=stroke_rgb)
+        else:
+            td.text((tx, ty), ch, font=font, fill=fill)
+        if abs(rot_deg) > 0.01:
+            tile = tile.rotate(-rot_deg, expand=True, resample=Image.BICUBIC)  # CSS+ → PIL 取负
+        cx = origin_x + x_rel
+        cy = origin_y + y_rel
+        layer.alpha_composite(tile, (int(cx - tile.width / 2.0), int(cy - tile.height / 2.0)))
+
+    if abs(rotation) > 0.01:
+        layer = layer.rotate(-rotation, expand=True, resample=Image.BICUBIC)
+
+    box_cx = box_x + box_w // 2
+    box_cy = box_y + box_h // 2
+    img.alpha_composite(layer, (box_cx - layer.width // 2, box_cy - layer.height // 2))
 
 
 def _measure_text(draw: ImageDraw.ImageDraw, text: str, font) -> int:

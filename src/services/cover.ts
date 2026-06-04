@@ -21,6 +21,7 @@ export interface UserCoverTextField {
   underline_style?: 'none' | 'solid' | 'wavy' | 'double'   // 下划线样式
   underline_color?: string | null                          // 下划线色 (空=用主色)
   underline_length_pct?: number                            // 下划线长度 = 文字宽 % (20-100, 居中)
+  text_arc?: number                   // 弧形/扇形度数 0=直 >0 上弧 ∩ <0 下弧 ∪
   align: 'left' | 'center' | 'right'
   rotation: number                       // 旋转角度 (°)
   layer?: 'front' | 'behind'             // 相对人物的图层: front=人物前(默认) / behind=人物后

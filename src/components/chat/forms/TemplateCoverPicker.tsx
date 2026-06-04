@@ -6,6 +6,7 @@ import {
 } from '../../../services/cover'
 import { useChatStore, makeAssistantMsg } from '../../../store/chatStore'
 import { underlineStyle } from '../../../lib/coverUnderline'
+import { arcLayout, segmentsToArcChars } from '../../../lib/coverArc'
 import { loadFont, fontFamily, parseSegments } from '../../../utils/coverFonts'
 import { PersonLibrary } from './PersonLibrary'
 
@@ -886,6 +887,11 @@ export function TemplatePreview({ template, userTexts, textOverrides, extraField
 
         const ulCss = underlineStyle(f)   // 定位下划线元素的样式 (或 null), 见 lib/coverUnderline
 
+        // 弧形/扇形 (从模板字段 f 读, 跟 shadow/underline 一样不走 override). cqw 单位.
+        const arc = f.text_arc || 0
+        const isArc = Math.abs(arc) >= 1
+        const arcFontCqw = fontSize / tplW * 100
+
         // 用户/admin 改 rotation 时, 优先用 override 的 (admin 字段), 否则用 field 自带的
         const rotation = (isAdmin ? (ovr.rotation ?? f.rotation) : f.rotation) || 0
         const hasRotation = Math.abs(rotation) > 0.01
@@ -919,6 +925,20 @@ export function TemplatePreview({ template, userTexts, textOverrides, extraField
               document.body.style.cursor = 'move'
             } : undefined}
             title={onMoveField ? '拖动调位置, 点选中显示手柄' : undefined}>
+            {isArc ? (
+              // 弧形/扇形: 逐字沿弧摆放 (绝对定位, 原点=box中心), 与后端同公式. cqw 单位.
+              <div style={{ position: 'absolute', left: '50%', top: '50%', width: 0, height: 0 }}>
+                {arcLayout(segmentsToArcChars(segs, color, highlightColor), arc, arcFontCqw).map((c, j) => (
+                  <span key={j} style={{
+                    position: 'absolute', left: 0, top: 0,
+                    transform: `translate(-50%, -50%) translate(${c.x}cqw, ${c.y}cqw) rotate(${c.rot}deg)`,
+                    fontFamily: `"${fontFamily(fontFile)}", sans-serif`,
+                    fontSize: `${arcFontCqw}cqw`, fontWeight: 900, lineHeight: 1, color: c.color,
+                    whiteSpace: 'pre', ...strokeCss,
+                  }}>{c.ch}</span>
+                ))}
+              </div>
+            ) : (
             <div style={{
               fontFamily: `"${fontFamily(fontFile)}", sans-serif`,
               fontSize: `${fontSize / tplW * 100}cqw`,
@@ -954,6 +974,7 @@ export function TemplatePreview({ template, userTexts, textOverrides, extraField
               ))}
               {ulCss && <span style={ulCss}/>}
             </div>
+            )}
 
             {/* Canva 风手柄: 4 角缩放 + 顶部旋转 (只在选中时显示, 只有支持 resize/rotate 回调时) */}
             {isActive && onResizeField && (

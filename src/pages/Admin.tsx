@@ -25,6 +25,7 @@ import {
 import { fetchMyProfile } from '../services/billing'
 import { isLoggedIn } from '../lib/auth'
 import { underlineStyle } from '../lib/coverUnderline'
+import { arcLayout, segmentsToArcChars } from '../lib/coverArc'
 import { loadFont, fontFamily, parseSegments } from '../utils/coverFonts'
 import { TemplatePreview } from '../components/chat/forms/TemplateCoverPicker'
 
@@ -1587,6 +1588,7 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
       stroke_color: '#000000', stroke_width: 6,
       shadow_color: null, shadow_offset_x: 0, shadow_offset_y: 0, shadow_blur: 0,
       underline_style: 'none', underline_color: null, underline_length_pct: 100,
+      text_arc: 0,
       align: 'left', rotation: 0, max_chars: 0, placeholder: '',
     }
     setFields(prev => [...prev, newField])
@@ -1848,6 +1850,8 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
                   const justify = f.align === 'center' ? 'center' : f.align === 'right' ? 'flex-end' : 'flex-start'
                   const rotation = f.rotation || 0
                   const hasRotation = Math.abs(rotation) > 0.01
+                  const arc = f.text_arc || 0
+                  const isArc = Math.abs(arc) >= 1
                   const isActive = activeFieldId === f._id
                   return (
                     <div key={f._id} data-field-box
@@ -1871,6 +1875,22 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
                         #{i + 1} {f.label}{f.layer === 'behind' ? ' · 人物后' : ''}
                       </div>
                       {/* 字体预览 — wrapper 自己旋转, 这里不再 rotate */}
+                      {isArc ? (
+                        // 弧形/扇形: 逐字沿弧摆放 (绝对定位, 原点=box中心), 与后端同公式
+                        <div style={{ position: 'absolute', left: '50%', top: '50%', width: 0, height: 0, pointerEvents: 'none' }}>
+                          {arcLayout(segmentsToArcChars(segs, f.color, f.highlight_color || f.color), arc, scaledFontSize).map((c, j) => (
+                            <span key={j} style={{
+                              position: 'absolute', left: 0, top: 0,
+                              transform: `translate(-50%, -50%) translate(${c.x}px, ${c.y}px) rotate(${c.rot}deg)`,
+                              fontFamily: `"${fontFamily(f.font_file)}", sans-serif`,
+                              fontSize: `${scaledFontSize}px`, fontWeight: 900, lineHeight: 1, color: c.color,
+                              WebkitTextStroke: (f.stroke_color && f.stroke_width > 0)
+                                ? `${f.stroke_width * 2 * sx}px ${f.stroke_color}` : undefined,
+                              paintOrder: 'stroke fill' as const, whiteSpace: 'pre',
+                            }}>{c.ch}</span>
+                          ))}
+                        </div>
+                      ) : (
                       <div style={{
                         fontFamily: `"${fontFamily(f.font_file)}", sans-serif`,
                         fontSize: `${scaledFontSize}px`,
@@ -1893,6 +1913,7 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
                         ))}
                         {(us => us && <span style={us}/>)(underlineStyle(f))}
                       </div>
+                      )}
 
                       {/* Canva 风手柄 — 选中时显示 */}
                       {isActive && (
@@ -2190,6 +2211,24 @@ function FieldEditor({ field, fonts, bgWidth, hasPerson, onChange, onRemove }: {
               className="flex-1 accent-current cursor-pointer"/>
           </div>
         )}
+      </div>
+
+      <div>
+        <label className="text-xs text-[var(--text-3)]">弧形/扇形 ({(field.text_arc || 0).toFixed(0)}°)</label>
+        <div className="flex items-center gap-2 mt-1">
+          <input type="range" min={-150} max={150} step={5} value={field.text_arc || 0}
+            onChange={e => onChange({ text_arc: +e.target.value })}
+            className="flex-1 accent-current cursor-pointer"/>
+          <button onClick={() => onChange({ text_arc: 0 })}
+            className="text-[10px] text-[var(--text-3)] hover:text-[var(--text)] cursor-pointer">归零</button>
+        </div>
+        <div className="flex gap-1.5 mt-1.5">
+          {[{ l: '上弧', v: 90 }, { l: '下弧', v: -90 }, { l: '扇形', v: 140 }, { l: '直', v: 0 }].map(p => (
+            <button key={p.l} onClick={() => onChange({ text_arc: p.v })}
+              className="px-2.5 py-1 rounded-lg border border-[var(--border)] text-[10px] text-[var(--text-2)] hover:border-[var(--text)] cursor-pointer">{p.l}</button>
+          ))}
+        </div>
+        <div className="text-[10px] text-[var(--text-3)] mt-1">正数上弧 ∩ · 负数下弧 ∪ · 逐字沿弧线摆放 (弧形时阴影/下划线暂不叠加)</div>
       </div>
 
       {hasPerson && (
