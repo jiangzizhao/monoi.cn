@@ -137,6 +137,30 @@ def _parse_segments(text: str) -> list:
     return segments
 
 
+# ============== 狂野笔刷背景 (确定性多边形, 跟前端 coverTextBg.ts 同一套点 → 预览=出图) ==============
+
+def _brush_polygon(k=44, amp=0.24, e=0.10):
+    """笔刷轮廓: 满条 + 毛躁锯齿上下边 + 钝端头. 归一化 [(x,y)...] 在 [0,1]×[0,1]."""
+    import math
+
+    def ramp(x):
+        return max(0.0, min(1.0, min(x, 1 - x) / e))
+
+    def c01(v):
+        return max(0.0, min(1.0, v))
+
+    top, bot = [], []
+    for i in range(k + 1):
+        x = i / k
+        t = ramp(x)
+        hh = 0.5 * (0.30 + 0.70 * t)
+        wt = 0.40 * math.sin(x * 11 + 0.7) + 0.32 * math.sin(x * 29 + 2.1) + 0.28 * math.sin(x * 57 + 1.1)
+        wb = 0.40 * math.sin(x * 9 + 3.5) + 0.32 * math.sin(x * 31 + 0.9) + 0.28 * math.sin(x * 61 + 2.7)
+        top.append((x, c01(0.5 - hh + amp * wt * t)))
+        bot.append((x, c01(0.5 + hh + amp * wb * t)))
+    return top + list(reversed(bot))
+
+
 # ============== 单字段文字渲染 ==============
 
 def _draw_text_field(img: Image.Image, field: dict, user_text: str):
@@ -211,16 +235,21 @@ def _draw_text_field(img: Image.Image, field: dict, user_text: str):
     layer_w = total_w + margin * 2
     layer_h = text_h + margin * 2
     layer = Image.new('RGBA', (layer_w, layer_h), (0, 0, 0, 0))
-    # 1) 最底层: 文字背景色块
+    # 1) 最底层: 文字背景色块 (方块圆角 / 狂野笔刷)
     if bg_color:
         bgd = ImageDraw.Draw(layer)
         rx0, ry0 = margin - bg_pad_x, margin - bg_pad_y
         rx1, ry1 = margin + total_w + bg_pad_x, margin + text_h + bg_pad_y
-        radius = int((ry1 - ry0) / 2 * max(0, min(100, bg_radius)) / 100)
-        try:
-            bgd.rounded_rectangle([rx0, ry0, rx1, ry1], radius=radius, fill=_hex_to_rgb(bg_color))
-        except Exception:
-            bgd.rectangle([rx0, ry0, rx1, ry1], fill=_hex_to_rgb(bg_color))
+        if field.get('bg_style') == 'brush':
+            rw, rh = rx1 - rx0, ry1 - ry0
+            bgd.polygon([(rx0 + px * rw, ry0 + py * rh) for px, py in _brush_polygon()],
+                        fill=_hex_to_rgb(bg_color))
+        else:
+            radius = int((ry1 - ry0) / 2 * max(0, min(100, bg_radius)) / 100)
+            try:
+                bgd.rounded_rectangle([rx0, ry0, rx1, ry1], radius=radius, fill=_hex_to_rgb(bg_color))
+            except Exception:
+                bgd.rectangle([rx0, ry0, rx1, ry1], fill=_hex_to_rgb(bg_color))
     # 2) 阴影: 独立层画偏移的阴影文字 → 高斯模糊 → 叠在背景块之上、文字之下
     if shadow_color:
         shadow_layer = Image.new('RGBA', (layer_w, layer_h), (0, 0, 0, 0))
@@ -360,16 +389,22 @@ def _draw_vertical_field(img: Image.Image, field: dict, segments: list):
     layer_h = line_h * n + margin * 2
     layer = Image.new('RGBA', (layer_w, layer_h), (0, 0, 0, 0))
 
-    # 文字背景色块 (竖排: 整列后面垫圆角块)
+    # 文字背景色块 (竖排: 整列后面垫块. 笔刷转置成竖向)
     if bg_color:
         bgd = ImageDraw.Draw(layer)
         rx0, ry0 = margin - bg_pad_x, margin - bg_pad_y
         rx1, ry1 = margin + char_w + bg_pad_x, margin + line_h * n + bg_pad_y
-        radius = int(min(rx1 - rx0, ry1 - ry0) / 2 * max(0, min(100, bg_radius)) / 100)
-        try:
-            bgd.rounded_rectangle([rx0, ry0, rx1, ry1], radius=radius, fill=_hex_to_rgb(bg_color))
-        except Exception:
-            bgd.rectangle([rx0, ry0, rx1, ry1], fill=_hex_to_rgb(bg_color))
+        if field.get('bg_style') == 'brush':
+            rw, rh = rx1 - rx0, ry1 - ry0
+            # 转置 (px,py)→(py,px): 让笔刷长边沿竖直方向
+            bgd.polygon([(rx0 + py * rw, ry0 + px * rh) for px, py in _brush_polygon()],
+                        fill=_hex_to_rgb(bg_color))
+        else:
+            radius = int(min(rx1 - rx0, ry1 - ry0) / 2 * max(0, min(100, bg_radius)) / 100)
+            try:
+                bgd.rounded_rectangle([rx0, ry0, rx1, ry1], radius=radius, fill=_hex_to_rgb(bg_color))
+            except Exception:
+                bgd.rectangle([rx0, ry0, rx1, ry1], fill=_hex_to_rgb(bg_color))
 
     # 阴影: 独立层逐字画偏移 → 高斯模糊 → 叠在背景之上文字之下
     if shadow_color:

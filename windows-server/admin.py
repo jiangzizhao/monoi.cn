@@ -770,6 +770,7 @@ class CoverTextField(BaseModel):
     shadow_blur: int = 0
     bg_color: Optional[str] = None        # 文字背景底色块 (None 不加). 圆角矩形垫在文字后
     bg_radius: int = 30                   # 背景块圆角 0-100 (% of 半高, 100=胶囊)
+    bg_style: str = 'rect'                # 背景块形状: rect 圆角方块 / brush 狂野笔刷
     underline_style: str = 'none'         # none / solid / wavy / double 下划线样式
     underline_color: Optional[str] = None # 下划线色 (None = 用主色)
     underline_length_pct: int = 100       # 下划线长度 = 文字宽的百分比 (20-100), 居中

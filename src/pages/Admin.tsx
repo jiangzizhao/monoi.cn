@@ -29,6 +29,7 @@ import { underlineStyle } from '../lib/coverUnderline'
 import { arcLayout, segmentsToArcChars } from '../lib/coverArc'
 import { lineStyle } from '../lib/coverLine'
 import { warpMatrix3d, presetWarp, ZERO_WARP } from '../lib/coverWarp'
+import { textBgStyle } from '../lib/coverTextBg'
 import { loadFont, fontFamily, parseSegments } from '../utils/coverFonts'
 import { TemplatePreview } from '../components/chat/forms/TemplateCoverPicker'
 
@@ -1687,7 +1688,7 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
       highlight_color: '#FFD700',
       stroke_color: '#000000', stroke_width: 6,
       shadow_color: null, shadow_offset_x: 0, shadow_offset_y: 0, shadow_blur: 0,
-      bg_color: null, bg_radius: 30,
+      bg_color: null, bg_radius: 30, bg_style: 'rect',
       underline_style: 'none', underline_color: null, underline_length_pct: 100,
       text_arc: 0, text_warp: null,
       align: 'left', rotation: 0, max_chars: 0, placeholder: '',
@@ -2077,7 +2078,7 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
                           textShadow: f.shadow_color
                             ? `${(f.shadow_offset_x || 0) * sx}px ${(f.shadow_offset_y || 0) * sx}px ${(f.shadow_blur || 0) * sx}px ${f.shadow_color}`
                             : undefined,
-                          ...(f.bg_color ? { backgroundColor: f.bg_color, padding: '0.16em 0.28em', borderRadius: `${0.66 * (f.bg_radius ?? 30) / 100}em` } : {}),
+                          ...textBgStyle(f),
                           position: 'relative' as const,
                         }}
                           ref={el => {
@@ -2573,18 +2574,29 @@ function FieldEditor({ field, fonts, bgWidth, hasPerson, onChange, onRemove, war
           </button>
         </div>
         {field.bg_color && (
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1.5">
-              <label className="text-[10px] text-[var(--text-3)]">颜色</label>
-              <input type="color" value={field.bg_color || '#FFE14D'} onChange={e => onChange({ bg_color: e.target.value })}
-                className="w-9 h-7 bg-[var(--bg)] border border-[var(--border)] rounded cursor-pointer"/>
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="flex items-center gap-1.5">
+                <label className="text-[10px] text-[var(--text-3)]">颜色</label>
+                <input type="color" value={field.bg_color || '#FFE14D'} onChange={e => onChange({ bg_color: e.target.value })}
+                  className="w-9 h-7 bg-[var(--bg)] border border-[var(--border)] rounded cursor-pointer"/>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <label className="text-[10px] text-[var(--text-3)]">形状</label>
+                {([['方块', 'rect'], ['笔刷', 'brush']] as const).map(([l, v]) => (
+                  <button key={v} onClick={() => onChange({ bg_style: v })}
+                    className={`px-2.5 py-1 rounded border text-[10px] cursor-pointer ${(field.bg_style || 'rect') === v ? 'border-[var(--text)] bg-[var(--text)] text-[var(--bg)]' : 'border-[var(--border)] text-[var(--text-2)] hover:border-[var(--text)]'}`}>{l}</button>
+                ))}
+              </div>
             </div>
-            <div className="flex-1 flex items-center gap-1.5">
-              <label className="text-[10px] text-[var(--text-3)] whitespace-nowrap">圆角 {field.bg_radius ?? 30}</label>
-              <input type="range" min={0} max={100} step={5} value={field.bg_radius ?? 30}
-                onChange={e => onChange({ bg_radius: +e.target.value })}
-                className="flex-1 accent-current cursor-pointer"/>
-            </div>
+            {(field.bg_style || 'rect') !== 'brush' && (
+              <div className="flex items-center gap-1.5">
+                <label className="text-[10px] text-[var(--text-3)] whitespace-nowrap">圆角 {field.bg_radius ?? 30}</label>
+                <input type="range" min={0} max={100} step={5} value={field.bg_radius ?? 30}
+                  onChange={e => onChange({ bg_radius: +e.target.value })}
+                  className="flex-1 accent-current cursor-pointer"/>
+              </div>
+            )}
           </div>
         )}
       </div>

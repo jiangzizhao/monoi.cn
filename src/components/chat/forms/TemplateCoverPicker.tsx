@@ -9,6 +9,7 @@ import { underlineStyle } from '../../../lib/coverUnderline'
 import { arcLayout, segmentsToArcChars } from '../../../lib/coverArc'
 import { lineStyle } from '../../../lib/coverLine'
 import { warpMatrix3d } from '../../../lib/coverWarp'
+import { textBgStyle } from '../../../lib/coverTextBg'
 import { loadFont, fontFamily, parseSegments } from '../../../utils/coverFonts'
 import { PersonLibrary } from './PersonLibrary'
 
@@ -981,7 +982,7 @@ export function TemplatePreview({ template, userTexts, textOverrides, extraField
                 textAlign,
                 whiteSpace: 'nowrap',
                 ...(f.vertical ? { writingMode: 'vertical-rl' as const, textOrientation: 'upright' as const } : {}),
-                ...(f.bg_color ? { backgroundColor: f.bg_color, padding: '0.16em 0.28em', borderRadius: `${0.66 * (f.bg_radius ?? 30) / 100}em` } : {}),
+                ...textBgStyle(f),
                 ...strokeCss,
                 ...shadowCss,
                 position: 'relative' as const,
