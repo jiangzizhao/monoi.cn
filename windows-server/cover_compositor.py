@@ -227,7 +227,11 @@ def _draw_text_field(img: Image.Image, field: dict, user_text: str):
         u_color = _hex_to_rgb(field.get('underline_color') or field.get('color', '#FFFFFF'))
         u_thick = max(2, int(cur_size * 0.06))
         u_y = y_in_layer + text_h + int(cur_size * 0.06)
-        u_x0, u_x1 = margin, margin + total_w
+        # 长度 = 文字宽的百分比 (居中). 20-100, 默认 100 (整行宽)
+        u_len_pct = max(5, min(100, int(field.get('underline_length_pct', 100) or 100)))
+        u_len = total_w * u_len_pct / 100.0
+        u_cx = margin + total_w / 2.0
+        u_x0, u_x1 = u_cx - u_len / 2.0, u_cx + u_len / 2.0
         if underline_style == 'wavy':
             amp = u_thick * 1.4
             period = max(8.0, cur_size * 0.45)

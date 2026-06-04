@@ -24,6 +24,7 @@ import {
 } from '../services/admin'
 import { fetchMyProfile } from '../services/billing'
 import { isLoggedIn } from '../lib/auth'
+import { underlineStyle } from '../lib/coverUnderline'
 import { loadFont, fontFamily, parseSegments } from '../utils/coverFonts'
 import { TemplatePreview } from '../components/chat/forms/TemplateCoverPicker'
 
@@ -1585,7 +1586,7 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
       highlight_color: '#FFD700',
       stroke_color: '#000000', stroke_width: 6,
       shadow_color: null, shadow_offset_x: 0, shadow_offset_y: 0, shadow_blur: 0,
-      underline_style: 'none', underline_color: null,
+      underline_style: 'none', underline_color: null, underline_length_pct: 100,
       align: 'left', rotation: 0, max_chars: 0, placeholder: '',
     }
     setFields(prev => [...prev, newField])
@@ -1884,15 +1885,13 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
                         textShadow: f.shadow_color
                           ? `${(f.shadow_offset_x || 0) * sx}px ${(f.shadow_offset_y || 0) * sx}px ${(f.shadow_blur || 0) * sx}px ${f.shadow_color}`
                           : undefined,
-                        textDecoration: (f.underline_style && f.underline_style !== 'none') ? 'underline' : undefined,
-                        textDecorationStyle: (f.underline_style && f.underline_style !== 'none') ? (f.underline_style as any) : undefined,
-                        textDecorationColor: f.underline_color || undefined,
-                        textUnderlineOffset: (f.underline_style && f.underline_style !== 'none') ? `${Math.max(2, scaledFontSize * 0.08)}px` : undefined,
+                        position: 'relative' as const,
                         pointerEvents: 'none',
                       }}>
                         {segs.map((s, j) => (
                           <span key={j} style={{ color: s.highlight ? (f.highlight_color || f.color) : f.color }}>{s.text}</span>
                         ))}
+                        {(us => us && <span style={us}/>)(underlineStyle(f))}
                       </div>
 
                       {/* Canva 风手柄 — 选中时显示 */}
@@ -2181,6 +2180,14 @@ function FieldEditor({ field, fonts, bgWidth, hasPerson, onChange, onRemove }: {
             <input type="color" value={field.underline_color || field.color} onChange={e => onChange({ underline_color: e.target.value })}
               className="w-10 h-7 bg-[var(--bg)] border border-[var(--border)] rounded cursor-pointer"/>
             <button onClick={() => onChange({ underline_color: null })} className="text-[10px] text-[var(--text-3)] hover:text-[var(--text)] cursor-pointer">用主色</button>
+          </div>
+        )}
+        {field.underline_style && field.underline_style !== 'none' && (
+          <div className="flex items-center gap-2 mt-2">
+            <label className="text-[10px] text-[var(--text-3)] whitespace-nowrap">长度 {field.underline_length_pct ?? 100}%</label>
+            <input type="range" min={20} max={100} step={5} value={field.underline_length_pct ?? 100}
+              onChange={e => onChange({ underline_length_pct: +e.target.value })}
+              className="flex-1 accent-current cursor-pointer"/>
           </div>
         )}
       </div>

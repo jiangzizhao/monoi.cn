@@ -742,6 +742,7 @@ class CoverTextField(BaseModel):
     shadow_blur: int = 0
     underline_style: str = 'none'         # none / solid / wavy / double 下划线样式
     underline_color: Optional[str] = None # 下划线色 (None = 用主色)
+    underline_length_pct: int = 100       # 下划线长度 = 文字宽的百分比 (20-100), 居中
     align: str = 'left'                   # left / center / right
     rotation: float = 0                   # 旋转角度 (°), -45 ~ +45. 0 = 不旋转
     layer: str = 'front'                  # 相对人物图层: front=人物前(默认) / behind=人物后(人物压字)

@@ -5,6 +5,7 @@ import {
   type CoverTemplate, type TextFieldOverride, type UserCoverTextField, type PersonSlotOverride,
 } from '../../../services/cover'
 import { useChatStore, makeAssistantMsg } from '../../../store/chatStore'
+import { underlineStyle } from '../../../lib/coverUnderline'
 import { loadFont, fontFamily, parseSegments } from '../../../utils/coverFonts'
 import { PersonLibrary } from './PersonLibrary'
 
@@ -883,10 +884,7 @@ export function TemplatePreview({ template, userTexts, textOverrides, extraField
           ? { textShadow: `${(f.shadow_offset_x || 0) / tplW * 100}cqw ${(f.shadow_offset_y || 0) / tplW * 100}cqw ${(f.shadow_blur || 0) / tplW * 100}cqw ${shadowColor}` }
           : {}
 
-        const ulStyle = f.underline_style
-        const underlineCss = (ulStyle && ulStyle !== 'none')
-          ? { textDecorationLine: 'underline', textDecorationStyle: ulStyle as any, textDecorationColor: f.underline_color || undefined, textUnderlineOffset: '0.12em' }
-          : {}
+        const ulCss = underlineStyle(f)   // 定位下划线元素的样式 (或 null), 见 lib/coverUnderline
 
         // 用户/admin 改 rotation 时, 优先用 override 的 (admin 字段), 否则用 field 自带的
         const rotation = (isAdmin ? (ovr.rotation ?? f.rotation) : f.rotation) || 0
@@ -932,7 +930,7 @@ export function TemplatePreview({ template, userTexts, textOverrides, extraField
               transformOrigin: align === 'center' ? 'center' : align === 'right' ? 'right' : 'left',
               ...strokeCss,
               ...shadowCss,
-              ...underlineCss,
+              position: 'relative' as const,
             }}
               ref={el => {
                 if (!el || !el.parentElement) return
@@ -954,6 +952,7 @@ export function TemplatePreview({ template, userTexts, textOverrides, extraField
               {segs.map((s, j) => (
                 <span key={j} style={{ color: s.highlight ? highlightColor : color }}>{s.text}</span>
               ))}
+              {ulCss && <span style={ulCss}/>}
             </div>
 
             {/* Canva 风手柄: 4 角缩放 + 顶部旋转 (只在选中时显示, 只有支持 resize/rotate 回调时) */}
