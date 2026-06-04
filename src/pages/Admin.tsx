@@ -2016,7 +2016,20 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
                             ? `${(f.shadow_offset_x || 0) * sx}px ${(f.shadow_offset_y || 0) * sx}px ${(f.shadow_blur || 0) * sx}px ${f.shadow_color}`
                             : undefined,
                           position: 'relative' as const,
-                        }}>
+                        }}
+                          ref={el => {
+                            // 自动缩字号到塞进框宽 (跟后端 _draw_text_field + 用户端预览一致, 所见即所得).
+                            // 否则: 后台不缩、真出图缩 → 同字号但框窄的字在成品里变小, 两字段大小不一致.
+                            if (!el || !el.parentElement) return
+                            el.style.fontSize = `${scaledFontSize}px`
+                            const parentW = el.parentElement.clientWidth
+                            if (parentW <= 0) return
+                            let cur = scaledFontSize, safety = 30
+                            while (el.scrollWidth > parentW && cur > 6 && safety-- > 0) {
+                              cur = cur * 0.92
+                              el.style.fontSize = `${cur}px`
+                            }
+                          }}>
                           {segs.map((s, j) => (
                             <span key={j} style={{ color: s.highlight ? (f.highlight_color || f.color) : f.color }}>{s.text}</span>
                           ))}
