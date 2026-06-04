@@ -3,13 +3,13 @@ import { useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, Users, ShoppingBag, DollarSign, BarChart3, Search, X, AlertTriangle,
   Music, Trash2, Plus, Loader2, Play, Pause, Type, Image as ImageIcon, MousePointer2,
-  Activity, Upload, PencilRuler,
+  Activity, Upload, PencilRuler, Pencil, Check,
 } from 'lucide-react'
 import {
   adminListUsers, adminUserDetail, adminGrantSubscription, adminGrantCredits,
   adminSetReferrerLevel, adminSetAdminFlag, adminListOrders, adminListWithdrawals,
   adminProcessWithdrawal, adminStats,
-  adminListBgm, adminAddBgm, adminDeleteBgm,
+  adminListBgm, adminAddBgm, adminDeleteBgm, adminUpdateBgm,
   adminListFonts, adminUploadFont, adminDeleteFont,
   adminListCoverTemplates, adminAddCoverTemplate, adminUpdateCoverTemplate, adminDeleteCoverTemplate,
   adminSetSamplePerson,
@@ -742,11 +742,36 @@ function BgmLibraryTab() {
   const [playingId, setPlayingId] = useState<number | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
 
+  // 行内编辑 (改曲名 + 改分类 + 改授权说明)
+  const [editId, setEditId] = useState<number | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editCat, setEditCat] = useState('other')
+  const [editLicense, setEditLicense] = useState('')
+  const [savingEdit, setSavingEdit] = useState(false)
+
   const reload = () => {
     setLoading(true); setErr('')
     adminListBgm().then(r => setList(r.bgms || [])).catch(e => setErr(e.message)).finally(() => setLoading(false))
   }
   useEffect(() => { reload() }, [])
+
+  const startEdit = (t: AdminBgmRow) => {
+    setEditId(t.id); setEditName(t.name); setEditCat(t.category || 'other'); setEditLicense(t.license_note || ''); setErr('')
+  }
+  const handleEditSave = async () => {
+    if (editId == null) return
+    if (!editName.trim()) { setErr('曲名不能为空'); return }
+    setSavingEdit(true); setErr('')
+    try {
+      await adminUpdateBgm(editId, { name: editName.trim(), category: editCat, license_note: editLicense || null })
+      setEditId(null)
+      reload()
+    } catch (e: any) {
+      setErr(e.message || '保存失败')
+    } finally {
+      setSavingEdit(false)
+    }
+  }
 
   const handleFile = (f: File) => {
     setFile(f); setFormErr('')
@@ -972,18 +997,50 @@ function BgmLibraryTab() {
                           {playingId === t.id ? <Pause size={10}/> : <Play size={10}/>}
                         </button>
                       </td>
-                      <td className="px-4 py-2 text-[var(--text)]">{t.name}</td>
+                      <td className="px-4 py-2 text-[var(--text)]">
+                        {editId === t.id ? (
+                          <div className="flex flex-col gap-1">
+                            <input value={editName} onChange={e => setEditName(e.target.value)} autoFocus
+                              className="bg-[var(--bg)] border border-[var(--border)] rounded px-2 py-1 text-xs w-36"/>
+                            <select value={editCat} onChange={e => setEditCat(e.target.value)}
+                              className="bg-[var(--bg)] border border-[var(--border)] rounded px-1 py-1 text-[11px] w-36">
+                              {BGM_CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                            </select>
+                          </div>
+                        ) : t.name}
+                      </td>
                       <td className="px-4 py-2 text-[var(--text-3)]">{t.duration_seconds > 0 ? `${t.duration_seconds.toFixed(0)}s` : '-'}</td>
-                      <td className="px-4 py-2 text-[var(--text-3)] truncate max-w-[200px]">{t.license_note || '-'}</td>
+                      <td className="px-4 py-2 text-[var(--text-3)] truncate max-w-[200px]">
+                        {editId === t.id ? (
+                          <input value={editLicense} onChange={e => setEditLicense(e.target.value)} placeholder="授权说明"
+                            className="bg-[var(--bg)] border border-[var(--border)] rounded px-2 py-1 text-xs w-full min-w-[120px]"/>
+                        ) : (t.license_note || '-')}
+                      </td>
                       <td className="px-4 py-2 text-[var(--text-3)]">{fmtTime(t.created_at)}</td>
                       <td className="px-4 py-2 text-right">
-                        <button
-                          onClick={() => handleDelete(t.id, t.name)}
-                          className="p-1 rounded text-red-400 hover:bg-red-950/30 cursor-pointer"
-                          title="删除"
-                        >
-                          <Trash2 size={14}/>
-                        </button>
+                        {editId === t.id ? (
+                          <div className="flex items-center justify-end gap-1">
+                            <button onClick={handleEditSave} disabled={savingEdit}
+                              className="p-1 rounded text-green-500 hover:bg-green-950/30 cursor-pointer disabled:opacity-50" title="保存">
+                              {savingEdit ? <Loader2 size={14} className="animate-spin"/> : <Check size={14}/>}
+                            </button>
+                            <button onClick={() => setEditId(null)} disabled={savingEdit}
+                              className="p-1 rounded text-[var(--text-3)] hover:bg-[var(--bg-hover)] cursor-pointer" title="取消">
+                              <X size={14}/>
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-end gap-1">
+                            <button onClick={() => startEdit(t)}
+                              className="p-1 rounded text-[var(--text-2)] hover:bg-[var(--bg-hover)] cursor-pointer" title="改名 / 改分类">
+                              <Pencil size={14}/>
+                            </button>
+                            <button onClick={() => handleDelete(t.id, t.name)}
+                              className="p-1 rounded text-red-400 hover:bg-red-950/30 cursor-pointer" title="删除">
+                              <Trash2 size={14}/>
+                            </button>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   ))}

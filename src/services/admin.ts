@@ -178,6 +178,21 @@ export async function adminDeleteBgm(bgm_id: number): Promise<{ success: boolean
   return data
 }
 
+export async function adminUpdateBgm(bgm_id: number, req: {
+  name: string
+  category: string
+  license_note?: string | null
+}): Promise<{ success: boolean }> {
+  const res = await fetch(directBase + `/api/admin/bgm-library/${bgm_id}`, {
+    method: 'PATCH',
+    headers: headers(),
+    body: JSON.stringify(req),
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.detail || data.error || `update failed ${res.status}`)
+  return data
+}
+
 
 // ================= 字体库管理 =================
 

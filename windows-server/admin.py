@@ -584,6 +584,34 @@ def admin_delete_bgm(bgm_id: int, request: Request):
     return {'success': True}
 
 
+class UpdateBgmRequest(BaseModel):
+    name: str
+    category: str = 'other'
+    license_note: Optional[str] = None
+
+
+@router.patch("/bgm-library/{bgm_id}")
+def admin_update_bgm(bgm_id: int, req: UpdateBgmRequest, request: Request):
+    """改 BGM 曲名 / 类目 / 授权说明 (不动音频文件)"""
+    require_admin(request)
+    valid_cats = {'upbeat', 'calm', 'inspirational', 'cinematic', 'electronic', 'chinese', 'other'}
+    if req.category not in valid_cats:
+        raise HTTPException(400, f"category 必须是 {valid_cats}")
+    if not (req.name or '').strip():
+        raise HTTPException(400, "曲名不能为空")
+    conn = get_db()
+    cur = conn.execute(
+        "UPDATE bgm_library SET name = ?, category = ?, license_note = ? WHERE id = ?",
+        (req.name.strip(), req.category, req.license_note, bgm_id)
+    )
+    conn.commit()
+    affected = cur.rowcount
+    conn.close()
+    if not affected:
+        raise HTTPException(404, "BGM 不存在")
+    return {'success': True}
+
+
 # ============== 字体库管理 ==============
 # admin 上传 .ttf/.otf → 写到 D:\monoi-server\fonts\ → 入库
 # voice-server 的 /cover-fonts 同时读 _FONT_CATALOG (内置) + font_library 表 (admin 加的)
