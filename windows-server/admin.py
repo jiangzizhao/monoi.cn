@@ -774,6 +774,7 @@ class CoverTextField(BaseModel):
     text_arc: float = 0                   # 弧形/扇形: 度数. 0=直, >0 上弧 ∩, <0 下弧 ∪ (逐字沿弧摆放)
     # 自由变形 (透视): 拖 box 四角. [[dx,dy]×4] 角偏移 (TL,TR,BR,BL), 单位=box(w,h)比例. None=不变形. 跟弧形互斥
     text_warp: Optional[list] = None
+    vertical: bool = False                # 竖排 (竖版): 逐字从上往下. 跟弧形/变形互斥
     align: str = 'left'                   # left / center / right
     rotation: float = 0                   # 旋转角度 (°), -45 ~ +45. 0 = 不旋转
     layer: str = 'front'                  # 相对人物图层: front=人物前(默认) / behind=人物后(人物压字)

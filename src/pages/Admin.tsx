@@ -2069,6 +2069,7 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
                           lineHeight: 1,
                           textAlign: f.align as any,
                           whiteSpace: 'nowrap',
+                          ...(f.vertical ? { writingMode: 'vertical-rl' as const, textOrientation: 'upright' as const } : {}),
                           WebkitTextStroke: (f.stroke_color && f.stroke_width > 0)
                             ? `${f.stroke_width * 2 * sx}px ${f.stroke_color}` : undefined,
                           paintOrder: 'stroke fill' as const,
@@ -2078,16 +2079,18 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
                           position: 'relative' as const,
                         }}
                           ref={el => {
-                            // 自动缩字号到塞进框宽 (跟后端 _draw_text_field + 用户端预览一致, 所见即所得).
-                            // 否则: 后台不缩、真出图缩 → 同字号但框窄的字在成品里变小, 两字段大小不一致.
+                            // 自动缩字号塞进框 (跟后端 + 用户端预览一致). 竖排按框高缩, 横排按框宽缩.
                             if (!el || !el.parentElement) return
                             el.style.fontSize = `${scaledFontSize}px`
-                            const parentW = el.parentElement.clientWidth
-                            if (parentW <= 0) return
                             let cur = scaledFontSize, safety = 30
-                            while (el.scrollWidth > parentW && cur > 6 && safety-- > 0) {
-                              cur = cur * 0.92
-                              el.style.fontSize = `${cur}px`
+                            if (f.vertical) {
+                              const parentH = el.parentElement.clientHeight
+                              if (parentH <= 0) return
+                              while (el.scrollHeight > parentH && cur > 6 && safety-- > 0) { cur = cur * 0.92; el.style.fontSize = `${cur}px` }
+                            } else {
+                              const parentW = el.parentElement.clientWidth
+                              if (parentW <= 0) return
+                              while (el.scrollWidth > parentW && cur > 6 && safety-- > 0) { cur = cur * 0.92; el.style.fontSize = `${cur}px` }
                             }
                           }}>
                           {segs.map((s, j) => (
@@ -2586,18 +2589,35 @@ function FieldEditor({ field, fonts, bgWidth, hasPerson, onChange, onRemove, war
         )}
       </div>
 
+      {/* 排版方向: 横排 / 竖排. 竖排跟弧形/变形互斥 */}
+      <div>
+        <div className="text-xs text-[var(--text-3)] mb-2">排版方向</div>
+        <div className="flex rounded-lg overflow-hidden border border-[var(--border)] text-sm">
+          {([['横排', false], ['竖排', true]] as const).map(([l, v]) => (
+            <button key={l}
+              onClick={() => onChange(v ? { vertical: true, text_arc: 0, text_warp: null } : { vertical: false })}
+              className={`flex-1 py-1.5 cursor-pointer ${(!!field.vertical === v)
+                ? 'bg-[var(--text)] text-[var(--bg)]'
+                : 'text-[var(--text-2)] hover:bg-[var(--bg-hover)]'}`}>
+              {l}
+            </button>
+          ))}
+        </div>
+        <div className="text-[10px] text-[var(--text-3)] mt-1">竖排 = 文字逐字从上往下 (竖版封面常用). 竖排时不叠加弧形/变形.</div>
+      </div>
+
       <div>
         <label className="text-xs text-[var(--text-3)]">弧形/扇形 ({(field.text_arc || 0).toFixed(0)}°)</label>
         <div className="flex items-center gap-2 mt-1">
           <input type="range" min={-150} max={150} step={5} value={field.text_arc || 0}
-            onChange={e => onChange({ text_arc: +e.target.value, text_warp: null })}
+            onChange={e => onChange({ text_arc: +e.target.value, text_warp: null, vertical: false })}
             className="flex-1 accent-current cursor-pointer"/>
           <button onClick={() => onChange({ text_arc: 0 })}
             className="text-[10px] text-[var(--text-3)] hover:text-[var(--text)] cursor-pointer">归零</button>
         </div>
         <div className="flex gap-1.5 mt-1.5">
           {[{ l: '上弧', v: 90 }, { l: '下弧', v: -90 }, { l: '扇形', v: 140 }, { l: '直', v: 0 }].map(p => (
-            <button key={p.l} onClick={() => onChange({ text_arc: p.v, text_warp: null })}
+            <button key={p.l} onClick={() => onChange({ text_arc: p.v, text_warp: null, vertical: false })}
               className="px-2.5 py-1 rounded-lg border border-[var(--border)] text-[10px] text-[var(--text-2)] hover:border-[var(--text)] cursor-pointer">{p.l}</button>
           ))}
         </div>
@@ -2615,7 +2635,7 @@ function FieldEditor({ field, fonts, bgWidth, hasPerson, onChange, onRemove, war
         </div>
         <div className="flex gap-1.5 mt-1.5 flex-wrap">
           {([['梯形', 'trap'], ['倒梯形', 'invtrap'], ['不规则', 'irregular']] as const).map(([l, k]) => (
-            <button key={l} onClick={() => { onChange({ text_warp: presetWarp(k), text_arc: 0 }); onWarpMode?.(true) }}
+            <button key={l} onClick={() => { onChange({ text_warp: presetWarp(k), text_arc: 0, vertical: false }); onWarpMode?.(true) }}
               className="px-2.5 py-1 rounded-lg border border-[var(--border)] text-[10px] text-[var(--text-2)] hover:border-[var(--text)] cursor-pointer">{l}</button>
           ))}
           <button onClick={() => onChange({ text_warp: null })}

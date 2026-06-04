@@ -266,6 +266,7 @@ export interface CoverTextField {
   underline_length_pct?: number                            // 下划线长度 = 文字宽 % (20-100, 居中)
   text_arc?: number                   // 弧形/扇形度数 0=直 >0 上弧 ∩ <0 下弧 ∪
   text_warp?: number[][] | null       // 自由变形: 4角偏移 [[dx,dy]×4] TL,TR,BR,BL, 单位=box比例 (跟弧形互斥)
+  vertical?: boolean                  // 竖排 (竖版): 逐字从上往下 (跟弧形/变形互斥)
   align: 'left' | 'center' | 'right'
   rotation: number                    // 旋转角度 (°), -45 ~ +45
   layer?: 'front' | 'behind'          // 相对人物的图层: front=人物前(默认) / behind=人物后(人物压字)

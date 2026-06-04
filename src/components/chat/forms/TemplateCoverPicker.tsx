@@ -980,21 +980,31 @@ export function TemplatePreview({ template, userTexts, textOverrides, extraField
                 lineHeight: 1,
                 textAlign,
                 whiteSpace: 'nowrap',
+                ...(f.vertical ? { writingMode: 'vertical-rl' as const, textOrientation: 'upright' as const } : {}),
                 ...strokeCss,
                 ...shadowCss,
                 position: 'relative' as const,
               }}
                 ref={el => {
                   if (!el || !el.parentElement) return
-                  // 真正缩字号 8% 直到塞下 box (不用 CSS scale, 跟后端 _draw_text_field 一致)
-                  const parentW = el.parentElement.clientWidth
-                  if (parentW <= 0) return
+                  // 真正缩字号 8% 直到塞下 box (跟后端 _draw_text_field 一致). 竖排按框高, 横排按框宽.
                   let cur = fontSize
                   el.style.fontSize = `${cur / tplW * 100}cqw`
                   let safety = 30
-                  while (el.scrollWidth > parentW && cur > 12 && safety-- > 0) {
-                    cur = Math.floor(cur * 0.92)
-                    el.style.fontSize = `${cur / tplW * 100}cqw`
+                  if (f.vertical) {
+                    const parentH = el.parentElement.clientHeight
+                    if (parentH <= 0) return
+                    while (el.scrollHeight > parentH && cur > 12 && safety-- > 0) {
+                      cur = Math.floor(cur * 0.92)
+                      el.style.fontSize = `${cur / tplW * 100}cqw`
+                    }
+                  } else {
+                    const parentW = el.parentElement.clientWidth
+                    if (parentW <= 0) return
+                    while (el.scrollWidth > parentW && cur > 12 && safety-- > 0) {
+                      cur = Math.floor(cur * 0.92)
+                      el.style.fontSize = `${cur / tplW * 100}cqw`
+                    }
                   }
                 }}
               >

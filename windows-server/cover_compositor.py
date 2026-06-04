@@ -164,6 +164,11 @@ def _draw_text_field(img: Image.Image, field: dict, user_text: str):
     if not segments:
         return
 
+    # 竖排 (竖版): 逐字从上往下排, 单独一条渲染路径 (跟弧形/自由变形互斥)
+    if field.get('vertical'):
+        _draw_vertical_field(img, field, segments)
+        return
+
     # 自动缩字号: 测量总宽, 超过 box_w 就缩 (描边宽度也算总宽里, stroke 扩两侧)
     cur_size = font_size
     while cur_size > 12:
@@ -281,6 +286,85 @@ def _draw_text_field(img: Image.Image, field: dict, user_text: str):
     paste_y = box_cy - layer.height // 2
 
     img.alpha_composite(layer, (paste_x, paste_y))
+
+
+def _draw_vertical_field(img: Image.Image, field: dict, segments: list):
+    """竖版: 逐字从上往下排, 每字水平居中. 自动缩字号到塞进 box 高度. 含描边/阴影/多色.
+    自包含 (从 field 自己读所有配置), 跟弧形/自由变形互斥."""
+    measure = ImageDraw.Draw(img)
+    font_file = field.get('font_file', 'SourceHanSansCN-Heavy.otf')
+    font_size = int(field.get('font_size', 80))
+    color_rgb = _hex_to_rgb(field.get('color', '#FFFFFF'))
+    highlight_rgb = _hex_to_rgb(field.get('highlight_color') or field.get('color', '#FFFFFF'))
+    stroke_color = field.get('stroke_color')
+    stroke_width = int(field.get('stroke_width', 0))
+    rotation = float(field.get('rotation') or 0)
+    box_x = int(field.get('x', 0)); box_y = int(field.get('y', 0))
+    box_w = int(field.get('w', 200)); box_h = int(field.get('h', 80))
+    shadow_color = field.get('shadow_color')
+    shadow_ox = int(field.get('shadow_offset_x', 0) or 0)
+    shadow_oy = int(field.get('shadow_offset_y', 0) or 0)
+    shadow_blur = int(field.get('shadow_blur', 0) or 0)
+
+    # 拍平成逐字 (含各自颜色)
+    chars = []
+    for seg_text, is_hl in segments:
+        fill = highlight_rgb if is_hl else color_rgb
+        for ch in seg_text:
+            if ch in '\r\n\t':
+                continue
+            chars.append((ch, fill))
+    if not chars:
+        return
+    n = len(chars)
+
+    # 自动缩字号: n 个字竖着叠起来塞进 box 高
+    cur = font_size
+    while cur > 12:
+        font = _load_font(font_file, cur)
+        a, d = font.getmetrics()
+        if (a + d) * n + stroke_width * 2 <= box_h:
+            break
+        cur = int(cur * 0.92)
+    font = _load_font(font_file, cur)
+    asc, desc = font.getmetrics()
+    line_h = asc + desc
+    char_w = max(_measure_text(measure, ch, font) for ch, _ in chars)
+
+    margin = max(stroke_width * 2 + 4, int(cur * 0.3),
+                 abs(shadow_ox) + shadow_blur * 3 + 4, abs(shadow_oy) + shadow_blur * 3 + 4)
+    layer_w = char_w + margin * 2
+    layer_h = line_h * n + margin * 2
+    layer = Image.new('RGBA', (layer_w, layer_h), (0, 0, 0, 0))
+
+    # 阴影: 独立层逐字画偏移 → 高斯模糊 → 作底层
+    if shadow_color:
+        sl = Image.new('RGBA', (layer_w, layer_h), (0, 0, 0, 0))
+        sd = ImageDraw.Draw(sl)
+        for i, (ch, _) in enumerate(chars):
+            cw = _measure_text(sd, ch, font)
+            sd.text((margin + (char_w - cw) / 2 + shadow_ox, margin + i * line_h + shadow_oy),
+                    ch, font=font, fill=_hex_to_rgb(shadow_color))
+        if shadow_blur > 0:
+            sl = sl.filter(ImageFilter.GaussianBlur(shadow_blur))
+        layer = sl
+
+    dr = ImageDraw.Draw(layer)
+    stroke_rgb = _hex_to_rgb(stroke_color) if stroke_color else None
+    for i, (ch, fill) in enumerate(chars):
+        cw = _measure_text(dr, ch, font)
+        x = margin + (char_w - cw) / 2.0   # 每字水平居中
+        y = margin + i * line_h
+        if stroke_rgb and stroke_width > 0:
+            dr.text((x, y), ch, font=font, fill=fill, stroke_width=stroke_width, stroke_fill=stroke_rgb)
+        else:
+            dr.text((x, y), ch, font=font, fill=fill)
+
+    if abs(rotation) > 0.01:
+        layer = layer.rotate(-rotation, expand=True, resample=Image.BICUBIC)
+    box_cx = box_x + box_w // 2
+    box_cy = box_y + box_h // 2
+    img.alpha_composite(layer, (box_cx - layer.width // 2, box_cy - layer.height // 2))
 
 
 def _draw_arc_field(img, field, segments, font, cur_size, total_w, text_h,
