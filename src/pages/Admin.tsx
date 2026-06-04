@@ -1585,6 +1585,7 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
       highlight_color: '#FFD700',
       stroke_color: '#000000', stroke_width: 6,
       shadow_color: null, shadow_offset_x: 0, shadow_offset_y: 0, shadow_blur: 0,
+      underline_style: 'none', underline_color: null,
       align: 'left', rotation: 0, max_chars: 0, placeholder: '',
     }
     setFields(prev => [...prev, newField])
@@ -1883,6 +1884,10 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
                         textShadow: f.shadow_color
                           ? `${(f.shadow_offset_x || 0) * sx}px ${(f.shadow_offset_y || 0) * sx}px ${(f.shadow_blur || 0) * sx}px ${f.shadow_color}`
                           : undefined,
+                        textDecoration: (f.underline_style && f.underline_style !== 'none') ? 'underline' : undefined,
+                        textDecorationStyle: (f.underline_style && f.underline_style !== 'none') ? (f.underline_style as any) : undefined,
+                        textDecorationColor: f.underline_color || undefined,
+                        textUnderlineOffset: (f.underline_style && f.underline_style !== 'none') ? `${Math.max(2, scaledFontSize * 0.08)}px` : undefined,
                         pointerEvents: 'none',
                       }}>
                         {segs.map((s, j) => (
@@ -2156,6 +2161,26 @@ function FieldEditor({ field, fonts, bgWidth, hasPerson, onChange, onRemove }: {
               <input type="number" value={field.shadow_offset_y || 0} onChange={e => onChange({ shadow_offset_y: +e.target.value })}
                 className="w-full h-7 bg-[var(--bg)] border border-[var(--border)] rounded px-1.5 text-sm mt-0.5"/>
             </div>
+          </div>
+        )}
+      </div>
+
+      <div className="border-t border-[var(--border)] pt-3">
+        <div className="text-xs text-[var(--text-3)] mb-2">下划线</div>
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          {([['none', '无'], ['solid', '实线'], ['wavy', '波浪'], ['double', '双线']] as const).map(([v, lbl]) => (
+            <button key={v} onClick={() => onChange({ underline_style: v })}
+              className={`px-3 py-1 rounded-lg border text-xs cursor-pointer transition-colors ${(field.underline_style || 'none') === v ? 'border-[var(--text)] bg-[var(--text)] text-[var(--bg)]' : 'border-[var(--border)] text-[var(--text-2)]'}`}>
+              {lbl}
+            </button>
+          ))}
+        </div>
+        {field.underline_style && field.underline_style !== 'none' && (
+          <div className="flex items-center gap-2 mt-2">
+            <label className="text-[10px] text-[var(--text-3)]">下划线色:</label>
+            <input type="color" value={field.underline_color || field.color} onChange={e => onChange({ underline_color: e.target.value })}
+              className="w-10 h-7 bg-[var(--bg)] border border-[var(--border)] rounded cursor-pointer"/>
+            <button onClick={() => onChange({ underline_color: null })} className="text-[10px] text-[var(--text-3)] hover:text-[var(--text)] cursor-pointer">用主色</button>
           </div>
         )}
       </div>

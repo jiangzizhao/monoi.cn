@@ -220,6 +220,30 @@ def _draw_text_field(img: Image.Image, field: dict, user_text: str):
             layer_draw.text((cur_x_in_layer, y_in_layer), seg_text, font=font, fill=fill)
         cur_x_in_layer += _measure_text(layer_draw, seg_text, font)
 
+    # 1b. 下划线 (画在主文字下方, 随 layer 一起旋转). 样式: solid / wavy / double
+    underline_style = field.get('underline_style', 'none')
+    if underline_style and underline_style != 'none':
+        import math
+        u_color = _hex_to_rgb(field.get('underline_color') or field.get('color', '#FFFFFF'))
+        u_thick = max(2, int(cur_size * 0.06))
+        u_y = y_in_layer + text_h + int(cur_size * 0.06)
+        u_x0, u_x1 = margin, margin + total_w
+        if underline_style == 'wavy':
+            amp = u_thick * 1.4
+            period = max(8.0, cur_size * 0.45)
+            pts = []
+            x = float(u_x0)
+            while x <= u_x1:
+                pts.append((x, u_y + amp * math.sin((x - u_x0) / period * 2 * math.pi)))
+                x += 2
+            if len(pts) > 1:
+                layer_draw.line(pts, fill=u_color, width=u_thick, joint='curve')
+        elif underline_style == 'double':
+            layer_draw.line([(u_x0, u_y), (u_x1, u_y)], fill=u_color, width=u_thick)
+            layer_draw.line([(u_x0, u_y + u_thick * 2), (u_x1, u_y + u_thick * 2)], fill=u_color, width=u_thick)
+        else:  # solid
+            layer_draw.line([(u_x0, u_y), (u_x1, u_y)], fill=u_color, width=u_thick)
+
     # 2. 如有 rotation 旋转 (PIL rotate 正数为逆时针, CSS 正数为顺时针. 统一用 CSS 习惯, 这里取负)
     if abs(rotation) > 0.01:
         layer = layer.rotate(-rotation, expand=True, resample=Image.BICUBIC)

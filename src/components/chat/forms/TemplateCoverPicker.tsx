@@ -883,6 +883,11 @@ export function TemplatePreview({ template, userTexts, textOverrides, extraField
           ? { textShadow: `${(f.shadow_offset_x || 0) / tplW * 100}cqw ${(f.shadow_offset_y || 0) / tplW * 100}cqw ${(f.shadow_blur || 0) / tplW * 100}cqw ${shadowColor}` }
           : {}
 
+        const ulStyle = f.underline_style
+        const underlineCss = (ulStyle && ulStyle !== 'none')
+          ? { textDecorationLine: 'underline', textDecorationStyle: ulStyle as any, textDecorationColor: f.underline_color || undefined, textUnderlineOffset: '0.12em' }
+          : {}
+
         // 用户/admin 改 rotation 时, 优先用 override 的 (admin 字段), 否则用 field 自带的
         const rotation = (isAdmin ? (ovr.rotation ?? f.rotation) : f.rotation) || 0
         const hasRotation = Math.abs(rotation) > 0.01
@@ -927,6 +932,7 @@ export function TemplatePreview({ template, userTexts, textOverrides, extraField
               transformOrigin: align === 'center' ? 'center' : align === 'right' ? 'right' : 'left',
               ...strokeCss,
               ...shadowCss,
+              ...underlineCss,
             }}
               ref={el => {
                 if (!el || !el.parentElement) return

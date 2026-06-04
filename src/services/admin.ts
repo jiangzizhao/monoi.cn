@@ -246,6 +246,8 @@ export interface CoverTextField {
   shadow_offset_x: number
   shadow_offset_y: number
   shadow_blur: number
+  underline_style?: 'none' | 'solid' | 'wavy' | 'double'   // 下划线样式
+  underline_color?: string | null                          // 下划线色 (空=用主色)
   align: 'left' | 'center' | 'right'
   rotation: number                    // 旋转角度 (°), -45 ~ +45
   layer?: 'front' | 'behind'          // 相对人物的图层: front=人物前(默认) / behind=人物后(人物压字)
