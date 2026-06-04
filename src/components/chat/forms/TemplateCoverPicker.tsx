@@ -8,7 +8,7 @@ import { useChatStore, makeAssistantMsg } from '../../../store/chatStore'
 import { underlineStyle } from '../../../lib/coverUnderline'
 import { arcLayout, segmentsToArcChars } from '../../../lib/coverArc'
 import { lineStyle } from '../../../lib/coverLine'
-import { trapezoidMatrix3d } from '../../../lib/coverTrapezoid'
+import { warpMatrix3d } from '../../../lib/coverWarp'
 import { loadFont, fontFamily, parseSegments } from '../../../utils/coverFonts'
 import { PersonLibrary } from './PersonLibrary'
 
@@ -960,44 +960,49 @@ export function TemplatePreview({ template, userTexts, textOverrides, extraField
                 ))}
               </div>
             ) : (
-            <div style={{
-              fontFamily: `"${fontFamily(fontFile)}", sans-serif`,
-              fontSize: `${fontSize / tplW * 100}cqw`,
-              color,
-              fontWeight: 900,
-              lineHeight: 1,
-              textAlign,
-              whiteSpace: 'nowrap',
-              transformOrigin: align === 'center' ? 'center' : align === 'right' ? 'right' : 'left',
-              ...strokeCss,
-              ...shadowCss,
-              position: 'relative' as const,
-            }}
+            // 普通 + 自由变形: 文字放在 box 大小的内层容器, 对容器做 matrix3d (跟后端 box-frame warp 同角点)
+            <div
               ref={el => {
-                if (!el || !el.parentElement) return
-                // 跟 cover_compositor.py 的 _draw_text_field 保持一致:
-                // 不用 CSS scale (scale 跟 align/center 互动会让视觉位置/大小偏离后端实际渲染),
-                // 而是真正缩字号 8% 直到塞下 box. 这样预览跟最终图视觉一致.
-                el.style.transform = ''
-                const parentW = el.parentElement.clientWidth
-                if (parentW <= 0) return
-                let cur = fontSize
-                el.style.fontSize = `${cur / tplW * 100}cqw`
-                let safety = 30
-                while (el.scrollWidth > parentW && cur > 12 && safety-- > 0) {
-                  cur = Math.floor(cur * 0.92)
-                  el.style.fontSize = `${cur / tplW * 100}cqw`
-                }
-                // 梯形变型: 字号定了再测尺寸 → matrix3d warp (跟后端同角点). origin 必须 0 0
-                const mtz = trapezoidMatrix3d(f.text_trapezoid || 0, f.text_trapezoid_skew || 0, el.offsetWidth, el.offsetHeight)
+                if (!el) return
+                const m = warpMatrix3d(f.text_warp, el.clientWidth, el.clientHeight)
                 el.style.transformOrigin = '0 0'
-                el.style.transform = mtz || ''
+                el.style.transform = m || ''
               }}
-            >
-              {segs.map((s, j) => (
-                <span key={j} style={{ color: s.highlight ? highlightColor : color }}>{s.text}</span>
-              ))}
-              {ulCss && <span style={ulCss}/>}
+              style={{
+                position: 'absolute', inset: 0, display: 'flex', alignItems: 'center',
+                justifyContent: align === 'center' ? 'center' : align === 'right' ? 'flex-end' : 'flex-start',
+              }}>
+              <div style={{
+                fontFamily: `"${fontFamily(fontFile)}", sans-serif`,
+                fontSize: `${fontSize / tplW * 100}cqw`,
+                color,
+                fontWeight: 900,
+                lineHeight: 1,
+                textAlign,
+                whiteSpace: 'nowrap',
+                ...strokeCss,
+                ...shadowCss,
+                position: 'relative' as const,
+              }}
+                ref={el => {
+                  if (!el || !el.parentElement) return
+                  // 真正缩字号 8% 直到塞下 box (不用 CSS scale, 跟后端 _draw_text_field 一致)
+                  const parentW = el.parentElement.clientWidth
+                  if (parentW <= 0) return
+                  let cur = fontSize
+                  el.style.fontSize = `${cur / tplW * 100}cqw`
+                  let safety = 30
+                  while (el.scrollWidth > parentW && cur > 12 && safety-- > 0) {
+                    cur = Math.floor(cur * 0.92)
+                    el.style.fontSize = `${cur / tplW * 100}cqw`
+                  }
+                }}
+              >
+                {segs.map((s, j) => (
+                  <span key={j} style={{ color: s.highlight ? highlightColor : color }}>{s.text}</span>
+                ))}
+                {ulCss && <span style={ulCss}/>}
+              </div>
             </div>
             )}
 

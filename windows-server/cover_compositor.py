@@ -256,12 +256,13 @@ def _draw_text_field(img: Image.Image, field: dict, user_text: str):
         else:  # solid
             layer_draw.line([(u_x0, u_y), (u_x1, u_y)], fill=u_color, width=u_thick)
 
-    # 1c. 梯形/不规则梯形变型: 把整层透视 warp 成梯形 (跟弧形互斥, 弧形已在前面 early return).
-    # 含阴影/下划线一起 warp. amount>0 上窄下宽, <0 上宽下窄; skew 左右不对称(不规则).
-    text_trapezoid = float(field.get('text_trapezoid', 0) or 0)
-    text_trap_skew = float(field.get('text_trapezoid_skew', 0) or 0)
-    if abs(text_trapezoid) >= 1 or abs(text_trap_skew) >= 1:
-        layer = _apply_trapezoid(layer, text_trapezoid, text_trap_skew)
+    # 1c. 自由变形 (透视): 拖 box 四角 → 把文字 warp 成任意四边形 (梯形只是其中一种). 跟弧形互斥.
+    # text_warp = [[dx,dy]×4] 角偏移 (TL,TR,BR,BL), 单位 = box(w,h) 的比例. None/全0 = 不变形.
+    text_warp = field.get('text_warp')
+    warped = False
+    if _warp_nontrivial(text_warp):
+        layer = _apply_box_warp(layer, text_warp, box_w, box_h, margin)
+        warped = True
 
     # 2. 如有 rotation 旋转 (PIL rotate 正数为逆时针, CSS 正数为顺时针. 统一用 CSS 习惯, 这里取负)
     if abs(rotation) > 0.01:
@@ -270,8 +271,8 @@ def _draw_text_field(img: Image.Image, field: dict, user_text: str):
     # 3. paste: layer 中心对齐到 box 中心 (跟 admin 拖框时 box 视觉一致)
     box_cx = box_x + box_w // 2
     box_cy = box_y + box_h // 2
-    # 对齐方式: 没旋转时按 align 左/中/右; 有旋转时统一用中心 (避免对齐+旋转交互混乱)
-    if abs(rotation) > 0.01 or align == 'center':
+    # 对齐方式: 没旋转时按 align 左/中/右; 旋转或变形时统一用中心 (变形层已是 box 大小, 居中=对齐box)
+    if abs(rotation) > 0.01 or align == 'center' or warped:
         paste_x = box_cx - layer.width // 2
     elif align == 'right':
         paste_x = box_x + box_w - (total_w + margin)    # 文字右缘对齐 box 右
@@ -400,33 +401,21 @@ def _draw_line_field(img: Image.Image, line: dict):
     img.alpha_composite(layer, (box_cx - layer.width // 2, box_cy - layer.height // 2))
 
 
-def _trapezoid_corners(W, H, amount, skew):
-    """梯形目标四角 (TL, TR, BR, BL) 绝对 px. 跟前端 coverTrapezoid.ts 同一套公式.
-    amount -100..100 (>0 上窄下宽 /\\, <0 上宽下窄 \\/); skew -100..100 (左右不对称 = 不规则)."""
-    maxI = 0.45
-    def clamp01(v):
-        return max(0.0, min(1.0, v))
-    a = max(-1.0, min(1.0, amount / 100.0))
-    k = max(-1.0, min(1.0, skew / 100.0))
-    tL = tR = bL = bR = 0.0
-    if a >= 0:                       # 顶边内缩 (上窄)
-        tL = clamp01(a * (1 - k)) * maxI
-        tR = clamp01(a * (1 + k)) * maxI
-    else:                            # 底边内缩 (下窄)
-        aa = -a
-        bL = clamp01(aa * (1 - k)) * maxI
-        bR = clamp01(aa * (1 + k)) * maxI
-    return [
-        (tL * W, 0.0),               # TL
-        (W - tR * W, 0.0),           # TR
-        (W - bR * W, float(H)),      # BR
-        (bL * W, float(H)),          # BL
-    ]
+def _warp_nontrivial(warp):
+    """text_warp 是否有效且非全 0 (4 个 [dx,dy] 角偏移)."""
+    if not warp or len(warp) != 4:
+        return False
+    for p in warp:
+        if not p or len(p) < 2:
+            continue
+        if abs(p[0]) > 0.005 or abs(p[1]) > 0.005:
+            return True
+    return False
 
 
 def _find_coeffs(pa, pb):
     """投影变换系数: output 的 pa 四角 → input 的 pb 四角 (给 Image.transform PERSPECTIVE).
-    纯 Python 高斯消元 (部分主元), 不依赖 numpy —— 云上 venv 没 numpy. 跟前端 coverTrapezoid.ts 同算法."""
+    纯 Python 高斯消元 (部分主元), 不依赖 numpy —— 云上 venv 没 numpy. 跟前端 coverWarp.ts 同算法."""
     A = []
     b = []
     for (x, y), (X, Y) in zip(pa, pb):
@@ -450,27 +439,23 @@ def _find_coeffs(pa, pb):
     return [b[i] / A[i][i] for i in range(n)]
 
 
-def _apply_trapezoid(layer, amount, skew):
-    """把文字 warp 成梯形. 先裁到文字紧致 bbox (让文字填满被 warp 的区域, 否则 margin
-    会让 warp 偏移/不对称), warp 后贴回原层同位置. 输出同尺寸, 梯形外透明."""
-    bbox = layer.getbbox()
-    if not bbox:
-        return layer
-    crop = layer.crop(bbox)
-    W, H = crop.size
-    if W < 2 or H < 2:
-        return layer
-    src = [(0, 0), (W, 0), (W, H), (0, H)]         # 裁出的文字矩形四角
-    dst = _trapezoid_corners(W, H, amount, skew)    # 目标梯形四角
+def _apply_box_warp(layer, warp, box_w, box_h, margin):
+    """按 box 框把文字透视 warp 成任意四边形. layer = 紧致文字层 (带 margin, 含阴影/下划线).
+    做法: 建够大画布 → 文字层居中贴入 → 对 box 区域 4 角做 src→dst 透视 (文字随之变形).
+    text_warp[i] = [dx,dy] 角偏移, 单位 = box(w,h) 比例; 角顺序 TL,TR,BR,BL."""
+    pad = int(margin + max(box_w, box_h) * 0.4)     # 留够余量, 角往外拖也不裁
+    cw, ch = int(box_w + pad * 2), int(box_h + pad * 2)
+    canvas = Image.new('RGBA', (cw, ch), (0, 0, 0, 0))
+    canvas.alpha_composite(layer, ((cw - layer.width) // 2, (ch - layer.height) // 2))
+    bx0, by0, bx1, by1 = pad, pad, pad + box_w, pad + box_h
+    base = [(bx0, by0), (bx1, by0), (bx1, by1), (bx0, by1)]   # box 区域 TL,TR,BR,BL
+    dst = [(base[i][0] + (warp[i][0] or 0) * box_w, base[i][1] + (warp[i][1] or 0) * box_h) for i in range(4)]
     try:
-        coeffs = _find_coeffs(dst, src)             # output(dst) → input(src)
-        warped = crop.transform((W, H), Image.PERSPECTIVE, coeffs, resample=Image.BICUBIC)
+        coeffs = _find_coeffs(dst, base)            # output(dst 四边形) → input(base 矩形)
+        return canvas.transform((cw, ch), Image.PERSPECTIVE, coeffs, resample=Image.BICUBIC)
     except Exception as e:
-        print(f"[cover] 梯形 warp 失败, 跳过: {e}", flush=True)
-        return layer
-    out = Image.new('RGBA', layer.size, (0, 0, 0, 0))
-    out.alpha_composite(warped, (bbox[0], bbox[1]))
-    return out
+        print(f"[cover] 自由变形 warp 失败, 跳过: {e}", flush=True)
+        return canvas
 
 
 def _measure_text(draw: ImageDraw.ImageDraw, text: str, font) -> int:

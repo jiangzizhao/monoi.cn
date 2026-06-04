@@ -28,7 +28,7 @@ import { isLoggedIn } from '../lib/auth'
 import { underlineStyle } from '../lib/coverUnderline'
 import { arcLayout, segmentsToArcChars } from '../lib/coverArc'
 import { lineStyle } from '../lib/coverLine'
-import { trapezoidMatrix3d } from '../lib/coverTrapezoid'
+import { warpMatrix3d, presetWarp, ZERO_WARP } from '../lib/coverWarp'
 import { loadFont, fontFamily, parseSegments } from '../utils/coverFonts'
 import { TemplatePreview } from '../components/chat/forms/TemplateCoverPicker'
 
@@ -1388,14 +1388,17 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
   const [drawing, setDrawing] = useState<{ startX: number; startY: number; curX: number; curY: number } | null>(null)
   // Canva 风格交互: move / resize / rotate. mousedown 记下, 全局 mousemove 算位移
   const interactionRef = useRef<{
-    type: 'move' | 'resize' | 'rotate'
+    type: 'move' | 'resize' | 'rotate' | 'warp'
     fieldId: string
     kind?: 'field' | 'line'   // 默认 field; 'line' 时操作 lines 而非 fields
     startMouseX: number; startMouseY: number
     corner?: 'nw' | 'ne' | 'sw' | 'se'
+    cornerIdx?: number        // warp: 拖的是第几个角 (0=TL,1=TR,2=BR,3=BL)
     centerX?: number; centerY?: number
     startRotation?: number
   } | null>(null)
+  // 自由变形模式: 开了之后选中文字字段, 角手柄变成"拖角变形"(紫色) 而非缩放
+  const [warpMode, setWarpMode] = useState(false)
 
   // 拉字体列表 (跟用户端 cover-fonts 一样)
   useEffect(() => {
@@ -1481,6 +1484,18 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
         if (Math.abs(delta) < 0.5) return
         if (isLine) setLines(prev => prev.map(l => l._id === it.fieldId ? { ...l, rotation: Math.round((l.rotation || 0) + delta) } : l))
         else setFields(prev => prev.map(f => f._id === it.fieldId ? { ...f, rotation: Math.round((f.rotation || 0) + delta) } : f))
+        interactionRef.current = { ...it, startMouseX: e.clientX, startMouseY: e.clientY }
+      } else if (it.type === 'warp' && it.cornerIdx !== undefined) {
+        // 拖一个角 → 累加该角偏移 (单位 = box 比例). 设了 warp 就清弧形 (互斥)
+        if (dx === 0 && dy === 0) return
+        const idx = it.cornerIdx
+        setFields(prev => prev.map(f => {
+          if (f._id !== it.fieldId) return f
+          const w = (f.text_warp && f.text_warp.length === 4)
+            ? f.text_warp.map(p => [p[0] || 0, p[1] || 0]) : [[0, 0], [0, 0], [0, 0], [0, 0]]
+          w[idx] = [w[idx][0] + dx / Math.max(1, f.w), w[idx][1] + dy / Math.max(1, f.h)]
+          return { ...f, text_warp: w, text_arc: 0 }
+        }))
         interactionRef.current = { ...it, startMouseX: e.clientX, startMouseY: e.clientY }
       }
     }
@@ -1616,7 +1631,7 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
       stroke_color: '#000000', stroke_width: 6,
       shadow_color: null, shadow_offset_x: 0, shadow_offset_y: 0, shadow_blur: 0,
       underline_style: 'none', underline_color: null, underline_length_pct: 100,
-      text_arc: 0, text_trapezoid: 0, text_trapezoid_skew: 0,
+      text_arc: 0, text_warp: null,
       align: 'left', rotation: 0, max_chars: 0, placeholder: '',
     }
     setFields(prev => [...prev, newField])
@@ -1977,42 +1992,60 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
                           ))}
                         </div>
                       ) : (
+                      // 普通 + 自由变形: 文字放在 box 大小的内层容器, 对容器做 matrix3d (跟后端 box-frame warp 同角点)
                       <div style={{
-                        fontFamily: `"${fontFamily(f.font_file)}", sans-serif`,
-                        fontSize: `${scaledFontSize}px`,
-                        color: f.color,
-                        fontWeight: 900,
-                        lineHeight: 1,
-                        textAlign: f.align as any,
-                        whiteSpace: 'nowrap',
-                        WebkitTextStroke: (f.stroke_color && f.stroke_width > 0)
-                          ? `${f.stroke_width * 2 * sx}px ${f.stroke_color}` : undefined,
-                        paintOrder: 'stroke fill' as const,
-                        textShadow: f.shadow_color
-                          ? `${(f.shadow_offset_x || 0) * sx}px ${(f.shadow_offset_y || 0) * sx}px ${(f.shadow_blur || 0) * sx}px ${f.shadow_color}`
-                          : undefined,
-                        position: 'relative' as const,
-                        pointerEvents: 'none',
-                      }}
-                        ref={el => {
-                          if (!el) return
-                          // 梯形变型: 测元素尺寸 → matrix3d warp (跟后端同一套角点). transform-origin 必须 0 0
-                          const m = trapezoidMatrix3d(f.text_trapezoid || 0, f.text_trapezoid_skew || 0, el.offsetWidth, el.offsetHeight)
-                          el.style.transformOrigin = '0 0'
-                          el.style.transform = m || ''
-                        }}
-                      >
-                        {segs.map((s, j) => (
-                          <span key={j} style={{ color: s.highlight ? (f.highlight_color || f.color) : f.color }}>{s.text}</span>
-                        ))}
-                        {(us => us && <span style={us}/>)(underlineStyle(f))}
+                        position: 'absolute', inset: 0, display: 'flex', alignItems: 'center',
+                        justifyContent: justify, pointerEvents: 'none',
+                        transformOrigin: '0 0',
+                        transform: warpMatrix3d(f.text_warp, f.w * sx, f.h * sy) || undefined,
+                      }}>
+                        <div style={{
+                          fontFamily: `"${fontFamily(f.font_file)}", sans-serif`,
+                          fontSize: `${scaledFontSize}px`,
+                          color: f.color,
+                          fontWeight: 900,
+                          lineHeight: 1,
+                          textAlign: f.align as any,
+                          whiteSpace: 'nowrap',
+                          WebkitTextStroke: (f.stroke_color && f.stroke_width > 0)
+                            ? `${f.stroke_width * 2 * sx}px ${f.stroke_color}` : undefined,
+                          paintOrder: 'stroke fill' as const,
+                          textShadow: f.shadow_color
+                            ? `${(f.shadow_offset_x || 0) * sx}px ${(f.shadow_offset_y || 0) * sx}px ${(f.shadow_blur || 0) * sx}px ${f.shadow_color}`
+                            : undefined,
+                          position: 'relative' as const,
+                        }}>
+                          {segs.map((s, j) => (
+                            <span key={j} style={{ color: s.highlight ? (f.highlight_color || f.color) : f.color }}>{s.text}</span>
+                          ))}
+                          {(us => us && <span style={us}/>)(underlineStyle(f))}
+                        </div>
                       </div>
                       )}
 
                       {/* Canva 风手柄 — 选中时显示 */}
                       {isActive && (
                         <>
-                          {(['nw', 'ne', 'sw', 'se'] as const).map(corner => {
+                          {warpMode ? (
+                            // 自由变形: 4 个紫色拖角手柄, 在(可能已偏移的)角上
+                            ([['TL', 0, 0, 0], ['TR', 1, 1, 0], ['BR', 2, 1, 1], ['BL', 3, 0, 1]] as const).map(([lbl, idx, fx, fy]) => {
+                              const wv = (f.text_warp && f.text_warp.length === 4) ? f.text_warp : ZERO_WARP
+                              const bw = f.w * sx, bh = f.h * sy
+                              const hx = (fx as number) * bw + ((wv[idx as number]?.[0]) || 0) * bw
+                              const hy = (fy as number) * bh + ((wv[idx as number]?.[1]) || 0) * bh
+                              return (
+                                <div key={lbl}
+                                  onMouseDown={(e) => {
+                                    e.preventDefault(); e.stopPropagation()
+                                    interactionRef.current = { type: 'warp', fieldId: f._id, cornerIdx: idx as number, startMouseX: e.clientX, startMouseY: e.clientY }
+                                    document.body.style.cursor = 'grabbing'
+                                  }}
+                                  className="absolute w-4 h-4 bg-purple-500 border-2 border-white rounded-full shadow cursor-grab active:cursor-grabbing"
+                                  style={{ left: hx - 8, top: hy - 8, zIndex: 25 }}/>
+                              )
+                            })
+                          ) : (
+                          (['nw', 'ne', 'sw', 'se'] as const).map(corner => {
                             const pos: React.CSSProperties = {
                               position: 'absolute',
                               top: corner.startsWith('n') ? -6 : 'auto',
@@ -2032,7 +2065,8 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
                                 className="w-3 h-3 bg-blue-500 border-2 border-white rounded-sm shadow"
                                 style={pos}/>
                             )
-                          })}
+                          })
+                          )}
                           {/* 顶部旋转手柄 — 圆形带 ↻ 图标, 大一点显眼 */}
                           <div
                             onMouseDown={(e) => {
@@ -2225,6 +2259,8 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
                 hasPerson={!!personSlot}
                 onChange={patch => updateField(activeField._id, patch)}
                 onRemove={() => removeField(activeField._id)}
+                warpMode={warpMode}
+                onWarpMode={setWarpMode}
               />
             ) : (
               <div className="text-xs text-[var(--text-3)] py-6 text-center">
@@ -2314,13 +2350,15 @@ function LineEditor({ line, bgWidth, hasPerson, onChange, onRemove }: {
 }
 
 /** 右侧字段属性面板 */
-function FieldEditor({ field, fonts, bgWidth, hasPerson, onChange, onRemove }: {
+function FieldEditor({ field, fonts, bgWidth, hasPerson, onChange, onRemove, warpMode, onWarpMode }: {
   field: UiTextField
   fonts: FontOption[]
   bgWidth?: number                    // 底图宽 (px), 用来算字号占宽 % 提示
   hasPerson?: boolean                 // 模板有人物坑时才显示图层(人物前/后)开关
   onChange: (patch: Partial<UiTextField>) => void
   onRemove: () => void
+  warpMode?: boolean                  // 自由变形(拖角)模式
+  onWarpMode?: (v: boolean) => void
 }) {
   return (
     <div className="flex flex-col gap-3">
@@ -2474,45 +2512,42 @@ function FieldEditor({ field, fonts, bgWidth, hasPerson, onChange, onRemove }: {
         <label className="text-xs text-[var(--text-3)]">弧形/扇形 ({(field.text_arc || 0).toFixed(0)}°)</label>
         <div className="flex items-center gap-2 mt-1">
           <input type="range" min={-150} max={150} step={5} value={field.text_arc || 0}
-            onChange={e => onChange({ text_arc: +e.target.value, text_trapezoid: 0, text_trapezoid_skew: 0 })}
+            onChange={e => onChange({ text_arc: +e.target.value, text_warp: null })}
             className="flex-1 accent-current cursor-pointer"/>
           <button onClick={() => onChange({ text_arc: 0 })}
             className="text-[10px] text-[var(--text-3)] hover:text-[var(--text)] cursor-pointer">归零</button>
         </div>
         <div className="flex gap-1.5 mt-1.5">
           {[{ l: '上弧', v: 90 }, { l: '下弧', v: -90 }, { l: '扇形', v: 140 }, { l: '直', v: 0 }].map(p => (
-            <button key={p.l} onClick={() => onChange({ text_arc: p.v, text_trapezoid: 0, text_trapezoid_skew: 0 })}
+            <button key={p.l} onClick={() => onChange({ text_arc: p.v, text_warp: null })}
               className="px-2.5 py-1 rounded-lg border border-[var(--border)] text-[10px] text-[var(--text-2)] hover:border-[var(--text)] cursor-pointer">{p.l}</button>
           ))}
         </div>
         <div className="text-[10px] text-[var(--text-3)] mt-1">正数上弧 ∩ · 负数下弧 ∪ · 逐字沿弧线摆放 (弧形时阴影/下划线暂不叠加)</div>
       </div>
 
-      {/* 梯形 / 不规则梯形 (透视变型, 跟弧形互斥) */}
+      {/* 自由变形 (透视): 预设起步 + 拖画布四角微调. 跟弧形互斥 */}
       <div>
-        <label className="text-xs text-[var(--text-3)]">梯形变型 (强度 {(field.text_trapezoid || 0).toFixed(0)})</label>
-        <div className="flex items-center gap-2 mt-1">
-          <input type="range" min={-100} max={100} step={5} value={field.text_trapezoid || 0}
-            onChange={e => onChange({ text_trapezoid: +e.target.value, text_arc: 0 })}
-            className="flex-1 accent-current cursor-pointer"/>
-          <button onClick={() => onChange({ text_trapezoid: 0, text_trapezoid_skew: 0 })}
-            className="text-[10px] text-[var(--text-3)] hover:text-[var(--text)] cursor-pointer">归零</button>
+        <div className="flex items-center justify-between">
+          <label className="text-xs text-[var(--text-3)]">字体变形 (拖角)</label>
+          <button onClick={() => onWarpMode?.(!warpMode)}
+            className={`text-[10px] px-2 py-0.5 rounded cursor-pointer border ${warpMode ? 'bg-purple-500 text-white border-purple-500' : 'border-[var(--border)] text-[var(--text-2)] hover:border-[var(--text)]'}`}>
+            {warpMode ? '✓ 拖角中' : '✥ 拖角变形'}
+          </button>
         </div>
-        {(Math.abs(field.text_trapezoid || 0) >= 1 || Math.abs(field.text_trapezoid_skew || 0) >= 1) && (
-          <div className="flex items-center gap-2 mt-2">
-            <label className="text-[10px] text-[var(--text-3)] whitespace-nowrap">不规则 {(field.text_trapezoid_skew || 0).toFixed(0)}</label>
-            <input type="range" min={-100} max={100} step={5} value={field.text_trapezoid_skew || 0}
-              onChange={e => onChange({ text_trapezoid_skew: +e.target.value, text_arc: 0 })}
-              className="flex-1 accent-current cursor-pointer"/>
-          </div>
-        )}
         <div className="flex gap-1.5 mt-1.5 flex-wrap">
-          {[{ l: '梯形', tz: 60, sk: 0 }, { l: '倒梯形', tz: -60, sk: 0 }, { l: '不规则', tz: 60, sk: 55 }, { l: '无', tz: 0, sk: 0 }].map(p => (
-            <button key={p.l} onClick={() => onChange({ text_trapezoid: p.tz, text_trapezoid_skew: p.sk, text_arc: 0 })}
-              className="px-2.5 py-1 rounded-lg border border-[var(--border)] text-[10px] text-[var(--text-2)] hover:border-[var(--text)] cursor-pointer">{p.l}</button>
+          {([['梯形', 'trap'], ['倒梯形', 'invtrap'], ['不规则', 'irregular']] as const).map(([l, k]) => (
+            <button key={l} onClick={() => { onChange({ text_warp: presetWarp(k), text_arc: 0 }); onWarpMode?.(true) }}
+              className="px-2.5 py-1 rounded-lg border border-[var(--border)] text-[10px] text-[var(--text-2)] hover:border-[var(--text)] cursor-pointer">{l}</button>
           ))}
+          <button onClick={() => onChange({ text_warp: null })}
+            className="px-2.5 py-1 rounded-lg border border-[var(--border)] text-[10px] text-[var(--text-2)] hover:border-[var(--text)] cursor-pointer">无</button>
         </div>
-        <div className="text-[10px] text-[var(--text-3)] mt-1">强度 &gt;0 上窄下宽 /\ · &lt;0 上宽下窄 \/ · 不规则=左右不对称 (跟弧形二选一)</div>
+        <div className="text-[10px] text-[var(--text-3)] mt-1">
+          {warpMode
+            ? '在画布上拖文字框的 4 个紫色角, 把字捏成任意形状 (梯形/透视/斜…)'
+            : '先点预设起步, 或点「拖角变形」后在画布上拖 4 个角自由捏形状. 跟弧形二选一.'}
+        </div>
       </div>
 
       {hasPerson && (
