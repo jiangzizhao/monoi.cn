@@ -1970,6 +1970,8 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
                         justifyContent: hasRotation ? 'center' : justify,
                         transform: hasRotation ? `rotate(${rotation}deg)` : undefined,
                         transformOrigin: 'center',
+                        // 图层叠放: 人物前(30)在人物(20)上, 人物后(10)被人物盖; 选中时(40)置顶好编辑
+                        zIndex: isActive ? 40 : (f.layer === 'behind' ? 10 : 30),
                       }}
                     >
                       <div className="absolute -top-5 left-0 text-[10px] bg-[var(--text)] text-[var(--bg)] px-1 rounded whitespace-nowrap z-10">
@@ -2122,6 +2124,7 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
                         left: l.x * sx, top: l.y * sy, width: l.w * sx, height: l.h * sy,
                         transform: hasRotation ? `rotate(${rotation}deg)` : undefined,
                         transformOrigin: 'center',
+                        zIndex: isActive ? 40 : (l.layer === 'behind' ? 15 : 35),
                       }}
                     >
                       <div className="absolute -top-5 left-0 text-[10px] bg-emerald-600 text-white px-1 rounded whitespace-nowrap z-10">
@@ -2198,6 +2201,8 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
                         height: personSlot.h * sy,
                         transform: personSlot.rotation ? `rotate(${personSlot.rotation}deg)` : undefined,
                         transformOrigin: 'center',
+                        // 人物层在中间(20): 人物前文字(30)盖人物, 人物后文字(10)被人物盖; 选中人物时置顶
+                        zIndex: personSelected ? 40 : 20,
                       }}
                     >
                       {samplePersonUrl && (
