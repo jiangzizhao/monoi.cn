@@ -256,6 +256,13 @@ def _draw_text_field(img: Image.Image, field: dict, user_text: str):
         else:  # solid
             layer_draw.line([(u_x0, u_y), (u_x1, u_y)], fill=u_color, width=u_thick)
 
+    # 1c. 梯形/不规则梯形变型: 把整层透视 warp 成梯形 (跟弧形互斥, 弧形已在前面 early return).
+    # 含阴影/下划线一起 warp. amount>0 上窄下宽, <0 上宽下窄; skew 左右不对称(不规则).
+    text_trapezoid = float(field.get('text_trapezoid', 0) or 0)
+    text_trap_skew = float(field.get('text_trapezoid_skew', 0) or 0)
+    if abs(text_trapezoid) >= 1 or abs(text_trap_skew) >= 1:
+        layer = _apply_trapezoid(layer, text_trapezoid, text_trap_skew)
+
     # 2. 如有 rotation 旋转 (PIL rotate 正数为逆时针, CSS 正数为顺时针. 统一用 CSS 习惯, 这里取负)
     if abs(rotation) > 0.01:
         layer = layer.rotate(-rotation, expand=True, resample=Image.BICUBIC)
@@ -391,6 +398,66 @@ def _draw_line_field(img: Image.Image, line: dict):
     box_cx = bx + bw // 2
     box_cy = by + bh // 2
     img.alpha_composite(layer, (box_cx - layer.width // 2, box_cy - layer.height // 2))
+
+
+def _trapezoid_corners(W, H, amount, skew):
+    """梯形目标四角 (TL, TR, BR, BL) 绝对 px. 跟前端 coverTrapezoid.ts 同一套公式.
+    amount -100..100 (>0 上窄下宽 /\\, <0 上宽下窄 \\/); skew -100..100 (左右不对称 = 不规则)."""
+    maxI = 0.45
+    def clamp01(v):
+        return max(0.0, min(1.0, v))
+    a = max(-1.0, min(1.0, amount / 100.0))
+    k = max(-1.0, min(1.0, skew / 100.0))
+    tL = tR = bL = bR = 0.0
+    if a >= 0:                       # 顶边内缩 (上窄)
+        tL = clamp01(a * (1 - k)) * maxI
+        tR = clamp01(a * (1 + k)) * maxI
+    else:                            # 底边内缩 (下窄)
+        aa = -a
+        bL = clamp01(aa * (1 - k)) * maxI
+        bR = clamp01(aa * (1 + k)) * maxI
+    return [
+        (tL * W, 0.0),               # TL
+        (W - tR * W, 0.0),           # TR
+        (W - bR * W, float(H)),      # BR
+        (bL * W, float(H)),          # BL
+    ]
+
+
+def _find_coeffs(pa, pb):
+    """投影变换系数: output 的 pa 四角 → input 的 pb 四角 (给 Image.transform PERSPECTIVE)."""
+    import numpy as _np
+    A = []
+    for (x, y), (X, Y) in zip(pa, pb):
+        A.append([x, y, 1, 0, 0, 0, -X * x, -X * y])
+        A.append([0, 0, 0, x, y, 1, -Y * x, -Y * y])
+    A = _np.array(A, dtype=_np.float64)
+    B = _np.array([c for p in pb for c in p], dtype=_np.float64)
+    res = _np.linalg.solve(A, B)
+    return res.tolist()
+
+
+def _apply_trapezoid(layer, amount, skew):
+    """把文字 warp 成梯形. 先裁到文字紧致 bbox (让文字填满被 warp 的区域, 否则 margin
+    会让 warp 偏移/不对称), warp 后贴回原层同位置. 输出同尺寸, 梯形外透明."""
+    bbox = layer.getbbox()
+    if not bbox:
+        return layer
+    crop = layer.crop(bbox)
+    W, H = crop.size
+    if W < 2 or H < 2:
+        return layer
+    src = [(0, 0), (W, 0), (W, H), (0, H)]         # 裁出的文字矩形四角
+    dst = _trapezoid_corners(W, H, amount, skew)    # 目标梯形四角
+    try:
+        coeffs = _find_coeffs(dst, src)             # output(dst) → input(src)
+        warped = crop.transform((W, H), Image.PERSPECTIVE, coeffs, resample=Image.BICUBIC)
+    except Exception as e:
+        print(f"[cover] 梯形 warp 失败, 跳过: {e}", flush=True)
+        return layer
+    out = Image.new('RGBA', layer.size, (0, 0, 0, 0))
+    out.alpha_composite(warped, (bbox[0], bbox[1]))
+    return out
 
 
 def _measure_text(draw: ImageDraw.ImageDraw, text: str, font) -> int:

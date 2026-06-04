@@ -28,6 +28,7 @@ import { isLoggedIn } from '../lib/auth'
 import { underlineStyle } from '../lib/coverUnderline'
 import { arcLayout, segmentsToArcChars } from '../lib/coverArc'
 import { lineStyle } from '../lib/coverLine'
+import { trapezoidMatrix3d } from '../lib/coverTrapezoid'
 import { loadFont, fontFamily, parseSegments } from '../utils/coverFonts'
 import { TemplatePreview } from '../components/chat/forms/TemplateCoverPicker'
 
@@ -1615,7 +1616,7 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
       stroke_color: '#000000', stroke_width: 6,
       shadow_color: null, shadow_offset_x: 0, shadow_offset_y: 0, shadow_blur: 0,
       underline_style: 'none', underline_color: null, underline_length_pct: 100,
-      text_arc: 0,
+      text_arc: 0, text_trapezoid: 0, text_trapezoid_skew: 0,
       align: 'left', rotation: 0, max_chars: 0, placeholder: '',
     }
     setFields(prev => [...prev, newField])
@@ -1992,7 +1993,15 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
                           : undefined,
                         position: 'relative' as const,
                         pointerEvents: 'none',
-                      }}>
+                      }}
+                        ref={el => {
+                          if (!el) return
+                          // 梯形变型: 测元素尺寸 → matrix3d warp (跟后端同一套角点). transform-origin 必须 0 0
+                          const m = trapezoidMatrix3d(f.text_trapezoid || 0, f.text_trapezoid_skew || 0, el.offsetWidth, el.offsetHeight)
+                          el.style.transformOrigin = '0 0'
+                          el.style.transform = m || ''
+                        }}
+                      >
                         {segs.map((s, j) => (
                           <span key={j} style={{ color: s.highlight ? (f.highlight_color || f.color) : f.color }}>{s.text}</span>
                         ))}
@@ -2465,18 +2474,45 @@ function FieldEditor({ field, fonts, bgWidth, hasPerson, onChange, onRemove }: {
         <label className="text-xs text-[var(--text-3)]">弧形/扇形 ({(field.text_arc || 0).toFixed(0)}°)</label>
         <div className="flex items-center gap-2 mt-1">
           <input type="range" min={-150} max={150} step={5} value={field.text_arc || 0}
-            onChange={e => onChange({ text_arc: +e.target.value })}
+            onChange={e => onChange({ text_arc: +e.target.value, text_trapezoid: 0, text_trapezoid_skew: 0 })}
             className="flex-1 accent-current cursor-pointer"/>
           <button onClick={() => onChange({ text_arc: 0 })}
             className="text-[10px] text-[var(--text-3)] hover:text-[var(--text)] cursor-pointer">归零</button>
         </div>
         <div className="flex gap-1.5 mt-1.5">
           {[{ l: '上弧', v: 90 }, { l: '下弧', v: -90 }, { l: '扇形', v: 140 }, { l: '直', v: 0 }].map(p => (
-            <button key={p.l} onClick={() => onChange({ text_arc: p.v })}
+            <button key={p.l} onClick={() => onChange({ text_arc: p.v, text_trapezoid: 0, text_trapezoid_skew: 0 })}
               className="px-2.5 py-1 rounded-lg border border-[var(--border)] text-[10px] text-[var(--text-2)] hover:border-[var(--text)] cursor-pointer">{p.l}</button>
           ))}
         </div>
         <div className="text-[10px] text-[var(--text-3)] mt-1">正数上弧 ∩ · 负数下弧 ∪ · 逐字沿弧线摆放 (弧形时阴影/下划线暂不叠加)</div>
+      </div>
+
+      {/* 梯形 / 不规则梯形 (透视变型, 跟弧形互斥) */}
+      <div>
+        <label className="text-xs text-[var(--text-3)]">梯形变型 (强度 {(field.text_trapezoid || 0).toFixed(0)})</label>
+        <div className="flex items-center gap-2 mt-1">
+          <input type="range" min={-100} max={100} step={5} value={field.text_trapezoid || 0}
+            onChange={e => onChange({ text_trapezoid: +e.target.value, text_arc: 0 })}
+            className="flex-1 accent-current cursor-pointer"/>
+          <button onClick={() => onChange({ text_trapezoid: 0, text_trapezoid_skew: 0 })}
+            className="text-[10px] text-[var(--text-3)] hover:text-[var(--text)] cursor-pointer">归零</button>
+        </div>
+        {(Math.abs(field.text_trapezoid || 0) >= 1 || Math.abs(field.text_trapezoid_skew || 0) >= 1) && (
+          <div className="flex items-center gap-2 mt-2">
+            <label className="text-[10px] text-[var(--text-3)] whitespace-nowrap">不规则 {(field.text_trapezoid_skew || 0).toFixed(0)}</label>
+            <input type="range" min={-100} max={100} step={5} value={field.text_trapezoid_skew || 0}
+              onChange={e => onChange({ text_trapezoid_skew: +e.target.value, text_arc: 0 })}
+              className="flex-1 accent-current cursor-pointer"/>
+          </div>
+        )}
+        <div className="flex gap-1.5 mt-1.5 flex-wrap">
+          {[{ l: '梯形', tz: 60, sk: 0 }, { l: '倒梯形', tz: -60, sk: 0 }, { l: '不规则', tz: 60, sk: 55 }, { l: '无', tz: 0, sk: 0 }].map(p => (
+            <button key={p.l} onClick={() => onChange({ text_trapezoid: p.tz, text_trapezoid_skew: p.sk, text_arc: 0 })}
+              className="px-2.5 py-1 rounded-lg border border-[var(--border)] text-[10px] text-[var(--text-2)] hover:border-[var(--text)] cursor-pointer">{p.l}</button>
+          ))}
+        </div>
+        <div className="text-[10px] text-[var(--text-3)] mt-1">强度 &gt;0 上窄下宽 /\ · &lt;0 上宽下窄 \/ · 不规则=左右不对称 (跟弧形二选一)</div>
       </div>
 
       {hasPerson && (

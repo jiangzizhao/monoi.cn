@@ -8,6 +8,7 @@ import { useChatStore, makeAssistantMsg } from '../../../store/chatStore'
 import { underlineStyle } from '../../../lib/coverUnderline'
 import { arcLayout, segmentsToArcChars } from '../../../lib/coverArc'
 import { lineStyle } from '../../../lib/coverLine'
+import { trapezoidMatrix3d } from '../../../lib/coverTrapezoid'
 import { loadFont, fontFamily, parseSegments } from '../../../utils/coverFonts'
 import { PersonLibrary } from './PersonLibrary'
 
@@ -987,6 +988,10 @@ export function TemplatePreview({ template, userTexts, textOverrides, extraField
                   cur = Math.floor(cur * 0.92)
                   el.style.fontSize = `${cur / tplW * 100}cqw`
                 }
+                // 梯形变型: 字号定了再测尺寸 → matrix3d warp (跟后端同角点). origin 必须 0 0
+                const mtz = trapezoidMatrix3d(f.text_trapezoid || 0, f.text_trapezoid_skew || 0, el.offsetWidth, el.offsetHeight)
+                el.style.transformOrigin = '0 0'
+                el.style.transform = mtz || ''
               }}
             >
               {segs.map((s, j) => (
