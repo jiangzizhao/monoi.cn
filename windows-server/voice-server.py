@@ -980,6 +980,159 @@ def get_audio(name: str):
     return FileResponse(path, media_type="audio/wav", filename=safe)
 
 
+# ============== 视频字幕: ASR 识别 → 用户改字 → ffmpeg drawtext 烧录 ==============
+
+_SUB_FONT = os.path.join(os.environ.get('FONTS_DIR') or '/data/monoi-server/fonts', 'SourceHanSansCN-Heavy.otf')
+
+
+def _split_subtitle_segments(segments, max_chars=16):
+    """把 whisper 句级 segments 切成适合做字幕的短句 (≤max_chars), 用词级时间戳分配时间."""
+    out = []
+    for seg in segments:
+        words = seg.get("words") or []
+        text = (seg.get("text") or "").strip()
+        if not text:
+            continue
+        if not words or len(text) <= max_chars:
+            out.append({"start": float(seg["start"]), "end": float(seg["end"]), "text": text})
+            continue
+        chunk_words, chunk_text = [], ""
+        for w in words:
+            wt = (w.get("word") or "").strip()
+            if chunk_words and len(chunk_text) + len(wt) > max_chars:
+                out.append({"start": float(chunk_words[0]["start"]), "end": float(chunk_words[-1]["end"]),
+                            "text": chunk_text.strip()})
+                chunk_words, chunk_text = [], ""
+            chunk_words.append(w); chunk_text += wt
+        if chunk_words:
+            out.append({"start": float(chunk_words[0]["start"]), "end": float(chunk_words[-1]["end"]),
+                        "text": chunk_text.strip()})
+    return [s for s in out if s["text"] and s["end"] > s["start"]]
+
+
+def _wrap_cjk(text, per_line=16):
+    text = (text or "").replace("\n", " ").strip()
+    if len(text) <= per_line:
+        return text
+    lines = [text[i:i + per_line] for i in range(0, len(text), per_line)]
+    return "\n".join(lines[:2])   # 最多 2 行, 字幕别太高
+
+
+class SubtitleTranscribeReq(BaseModel):
+    video_oss_key: Optional[str] = None
+    video_url: Optional[str] = None       # 没 OSS key 时 (如数字人本地视频) 给可下载 URL
+
+
+@app.post("/api/voice/subtitle/transcribe")
+def subtitle_transcribe(req: SubtitleTranscribeReq):
+    """识别视频语音 → 返回可编辑字幕条 [{start,end,text}] + 视频 OSS key (供烧录步骤复用)."""
+    import subprocess, tempfile, uuid as _uuid, shutil as _sh
+    from oss_helper import oss_download, oss_upload
+    if not req.video_oss_key and not req.video_url:
+        raise HTTPException(400, "缺 video_oss_key 或 video_url")
+    job = f"sub_{int(time.time()*1000)}_{_uuid.uuid4().hex[:6]}"
+    work = os.path.join(tempfile.gettempdir(), job); os.makedirs(work, exist_ok=True)
+    video_path = os.path.join(work, "in.mp4")
+    oss_key = req.video_oss_key
+    try:
+        if oss_key:
+            oss_download(oss_key, video_path)
+        else:
+            import urllib.request
+            url = req.video_url
+            if url.startswith("/"):
+                url = "http://127.0.0.1:18765" + url   # 数字人视频在主服务本地
+            urllib.request.urlretrieve(url, video_path)
+            oss_key = f"subtitle_src/{job}.mp4"
+            oss_upload(oss_key, video_path, content_type="video/mp4")
+        audio_path = os.path.join(work, "a.wav")
+        subprocess.run(["ffmpeg", "-y", "-i", video_path, "-vn", "-ar", "16000", "-ac", "1", "-f", "wav", audio_path],
+                       capture_output=True, timeout=180)
+        model = get_whisper()
+        seg_iter, _info = model.transcribe(audio_path, language="zh", beam_size=5, word_timestamps=True)
+        segments = []
+        for s in seg_iter:
+            words = [{"start": w.start, "end": w.end, "word": _to_simplified(w.word)} for w in (s.words or [])]
+            segments.append({"start": s.start, "end": s.end, "text": _to_simplified(s.text), "words": words})
+        return {"success": True, "video_oss_key": oss_key, "segments": _split_subtitle_segments(segments)}
+    finally:
+        _sh.rmtree(work, ignore_errors=True)
+
+
+class SubtitleSeg(BaseModel):
+    start: float
+    end: float
+    text: str
+
+
+class SubtitleBurnReq(BaseModel):
+    video_oss_key: str
+    segments: list[SubtitleSeg]
+    font_scale: float = 1.0          # 字号倍率
+    color: str = 'white'             # white / yellow
+    position: str = 'bottom'         # bottom / top / center
+
+
+@app.post("/api/voice/subtitle/burn")
+def subtitle_burn(req: SubtitleBurnReq):
+    """把(用户改好的)字幕用 ffmpeg drawtext 逐条烧到视频, 返回新视频 URL."""
+    import subprocess, tempfile, uuid as _uuid, shutil as _sh
+    from oss_helper import oss_download, oss_upload, oss_sign_get
+    if not req.segments:
+        raise HTTPException(400, "没有字幕内容")
+    job = f"subburn_{int(time.time()*1000)}_{_uuid.uuid4().hex[:6]}"
+    work = os.path.join(tempfile.gettempdir(), job); os.makedirs(work, exist_ok=True)
+    src = os.path.join(work, "in.mp4"); out = os.path.join(work, "out.mp4")
+    try:
+        oss_download(req.video_oss_key, src)
+        # 探视频高度算字号
+        h = 720
+        try:
+            pr = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0",
+                                 "-show_entries", "stream=height", "-of", "csv=p=0", src],
+                                capture_output=True, text=True, timeout=30)
+            h = int((pr.stdout or "").strip() or 720)
+        except Exception:
+            pass
+        fontsize = max(18, int(h * 0.05 * (req.font_scale or 1.0)))
+        fontcolor = 'yellow' if req.color == 'yellow' else 'white'
+        borderw = max(2, int(fontsize * 0.08))
+        if req.position == 'top':
+            ypos = str(int(h * 0.06))
+        elif req.position == 'center':
+            ypos = "(h-text_h)/2"
+        else:
+            ypos = f"h-text_h-{int(h * 0.07)}"
+        filters = []
+        for i, seg in enumerate(req.segments):
+            txt = _wrap_cjk(seg.text)
+            if not txt:
+                continue
+            tf = os.path.join(work, f"t{i}.txt")
+            with open(tf, "w", encoding="utf-8") as f:
+                f.write(txt)
+            s = max(0.0, float(seg.start)); e = max(s + 0.1, float(seg.end))
+            filters.append(
+                f"drawtext=fontfile='{_SUB_FONT}':textfile='{tf}':fontcolor={fontcolor}:"
+                f"fontsize={fontsize}:borderw={borderw}:bordercolor=black:line_spacing=8:"
+                f"x=(w-text_w)/2:y={ypos}:enable='between(t,{s:.3f},{e:.3f})'"
+            )
+        if not filters:
+            raise HTTPException(400, "没有有效字幕")
+        proc = subprocess.run(
+            ["ffmpeg", "-y", "-i", src, "-vf", ",".join(filters),
+             "-c:a", "copy", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", out],
+            capture_output=True, timeout=900
+        )
+        if proc.returncode != 0:
+            raise HTTPException(500, f"字幕烧录失败: {proc.stderr.decode('utf-8', 'ignore')[-300:]}")
+        out_key = f"subtitle_out/{job}.mp4"
+        oss_upload(out_key, out, content_type="video/mp4")
+        return {"success": True, "video_url": oss_sign_get(out_key, expires=6 * 3600), "output_oss_key": out_key}
+    finally:
+        _sh.rmtree(work, ignore_errors=True)
+
+
 # ============== 一键合成: 口播 + 多镜 b-roll + PIP overlay → 成品 mp4 ==============
 
 

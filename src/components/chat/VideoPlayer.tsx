@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { Play, Pause, Download, Loader2, FileBox, FolderOpen, CheckCircle2 } from 'lucide-react'
+import { Play, Pause, Download, Loader2, FileBox, FolderOpen, CheckCircle2, Captions } from 'lucide-react'
 import type { VideoResult } from '../../types'
 import { getToken } from '../../lib/auth'
+import { SubtitleEditor } from './SubtitleEditor'
 import {
   isFileSystemAPISupported,
   pickAndSaveDraftDir,
@@ -32,6 +33,9 @@ export function VideoPlayer({ data }: { data: VideoResult }) {
   const [draftWritten, setDraftWritten] = useState<string | null>(null)  // 成功写进剪映目录后显示
   const [draftDirSet, setDraftDirSet] = useState<boolean | null>(null)   // 用户是否配过剪映目录 (null=查询中)
   const fsSupported = isFileSystemAPISupported()
+  // 加字幕: 编辑器开关 + 烧好的带字幕视频 URL (有则替换显示)
+  const [showSub, setShowSub] = useState(false)
+  const [subtitledUrl, setSubtitledUrl] = useState<string | null>(null)
 
   // 启动时检查 IndexedDB 里有没有保存过剪映目录 handle
   useEffect(() => {
@@ -39,7 +43,7 @@ export function VideoPlayer({ data }: { data: VideoResult }) {
     getSavedDraftDir().then(h => setDraftDirSet(!!h)).catch(() => setDraftDirSet(false))
   }, [fsSupported, data.jianying_payload])
 
-  const url = resolveUrl(data.video_url)
+  const url = resolveUrl(subtitledUrl || data.video_url)
   const durationSec = data.duration_ms ? data.duration_ms / 1000 : undefined
 
   const toggle = () => {
@@ -194,10 +198,20 @@ export function VideoPlayer({ data }: { data: VideoResult }) {
             <div className="h-full bg-[var(--text)] transition-all" style={{ width: `${progress}%` }}/>
           </div>
           <div className="flex items-center justify-between mt-1.5 text-xs text-[var(--text-3)]">
-            <span>{data.audio_label || '数字人'} {data.width && data.height ? `· ${data.width}×${data.height}` : ''}</span>
+            <span>
+              {data.audio_label || '数字人'} {data.width && data.height ? `· ${data.width}×${data.height}` : ''}
+              {subtitledUrl && <span className="ml-1.5 text-green-500">· 已加字幕</span>}
+            </span>
             <span>{durationSec ? `${durationSec.toFixed(1)}s` : ''}</span>
           </div>
         </div>
+        <button
+          onClick={() => setShowSub(true)}
+          className="h-9 px-2.5 rounded-lg flex items-center gap-1 text-xs text-[var(--text-2)] hover:text-[var(--text)] hover:bg-[var(--bg-hover)] cursor-pointer flex-shrink-0"
+          title="给视频加字幕"
+        >
+          <Captions size={14}/>{subtitledUrl ? '重做字幕' : '加字幕'}
+        </button>
         <button
           onClick={handleDownload}
           disabled={downloading}
@@ -290,6 +304,15 @@ export function VideoPlayer({ data }: { data: VideoResult }) {
           )}
           {draftError && <p className="text-xs text-red-400">{draftError}</p>}
         </div>
+      )}
+
+      {showSub && (
+        <SubtitleEditor
+          transcribeInput={data.narration_oss_key ? { video_oss_key: data.narration_oss_key } : { video_url: data.video_url }}
+          previewUrl={url}
+          onClose={() => setShowSub(false)}
+          onDone={(newUrl) => { setSubtitledUrl(newUrl); setShowSub(false); setPlaying(false); setProgress(0) }}
+        />
       )}
     </div>
   )
