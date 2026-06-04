@@ -356,6 +356,12 @@ def init_billing_tables():
     except Exception:
         pass    # 已经有了, 跳过
 
+    # 给老表加 line_fields_json (装饰线条元素: 独立于文字的 实线/波浪/双线, 可拖可转)
+    try:
+        c.execute("ALTER TABLE cover_template ADD COLUMN line_fields_json TEXT")
+    except Exception:
+        pass    # 已经有了, 跳过
+
     # 5. 推广绑定 (用户首次注册时记, 终身不变)
     c.execute("""
         CREATE TABLE IF NOT EXISTS referral_binding (

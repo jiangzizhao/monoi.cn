@@ -765,12 +765,27 @@ class CoverPersonSlot(BaseModel):
     rotation: float = 0                    # 旋转角度 (°), 用户可调
 
 
+class CoverLineField(BaseModel):
+    """独立装饰线条元素 (不依赖文字). 盒子 x/y/w/h, 线横贯盒宽画在垂直中心,
+    样式 solid/wavy/double, 可旋转, 可在人物前/后. 由 '下划线要能自由移动' 演化来."""
+    x: int = 0
+    y: int = 0
+    w: int = 300
+    h: int = 40
+    style: str = 'solid'                   # solid / wavy / double
+    color: str = '#FFFFFF'
+    thickness: int = 8                     # 线粗 (px)
+    rotation: float = 0                    # 旋转角度 (°)
+    layer: str = 'front'                   # front=人物前 / behind=人物后
+
+
 class AddCoverTemplateRequest(BaseModel):
     name: str
     category: str = 'other'
     ratio: str = '3:4'                    # 9:16 / 3:4 / 16:9 / 1:1
     bg_oss_key: str                       # admin 已经把底图 PNG 传到 OSS, 给 key
     text_fields: list[CoverTextField]     # 至少 1 个
+    line_fields: list[CoverLineField] = []          # 装饰线条 (可空)
     person_slot: Optional[CoverPersonSlot] = None   # 没人物的模板留 None
     # 示例人物图 (已抠图的透明 PNG, OSS key 在 cover_persons/ 持久前缀里).
     # 用途: admin 编辑时看效果 + 用户在 TemplateCoverPicker 看缩略图能预览成品.
@@ -792,15 +807,16 @@ def admin_add_cover_template(req: AddCoverTemplateRequest, request: Request):
 
     import json as _json
     text_fields_json = _json.dumps([f.model_dump() for f in req.text_fields], ensure_ascii=False)
+    line_fields_json = _json.dumps([f.model_dump() for f in req.line_fields], ensure_ascii=False)
     person_slot_json = _json.dumps(req.person_slot.model_dump(), ensure_ascii=False) if req.person_slot else None
 
     conn = get_db()
     # sample_person_oss_key 字段不存在时先 ALTER 加 (老库一次性兼容)
     _ensure_sample_person_column(conn)
     cursor = conn.execute("""
-        INSERT INTO cover_template (name, category, ratio, bg_oss_key, text_fields_json, person_slot_json, sample_person_oss_key, uploaded_by, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (req.name, req.category, req.ratio, req.bg_oss_key, text_fields_json, person_slot_json, req.sample_person_oss_key, admin_id, time.time()))
+        INSERT INTO cover_template (name, category, ratio, bg_oss_key, text_fields_json, line_fields_json, person_slot_json, sample_person_oss_key, uploaded_by, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (req.name, req.category, req.ratio, req.bg_oss_key, text_fields_json, line_fields_json, person_slot_json, req.sample_person_oss_key, admin_id, time.time()))
     new_id = cursor.lastrowid
     conn.commit()
     conn.close()
@@ -829,6 +845,10 @@ def _parse_template_row(r):
         d['text_fields'] = _json.loads(d.pop('text_fields_json') or '[]')
     except Exception:
         d['text_fields'] = []
+    try:
+        d['line_fields'] = _json.loads(d.pop('line_fields_json', None) or '[]')
+    except Exception:
+        d['line_fields'] = []
     raw_person = d.pop('person_slot_json', None)
     if raw_person:
         try:
@@ -870,7 +890,7 @@ def admin_list_cover_templates(request: Request):
     conn = get_db()
     _ensure_sample_person_column(conn)
     rows = conn.execute("""
-        SELECT id, name, category, ratio, bg_oss_key, text_fields_json, person_slot_json, sample_person_oss_key, preview_oss_key, uploaded_by, created_at
+        SELECT id, name, category, ratio, bg_oss_key, text_fields_json, line_fields_json, person_slot_json, sample_person_oss_key, preview_oss_key, uploaded_by, created_at
         FROM cover_template ORDER BY created_at DESC
     """).fetchall()
     conn.close()
@@ -883,7 +903,7 @@ def admin_get_cover_template(template_id: int, request: Request):
     conn = get_db()
     _ensure_sample_person_column(conn)
     row = conn.execute("""
-        SELECT id, name, category, ratio, bg_oss_key, text_fields_json, person_slot_json, sample_person_oss_key, preview_oss_key, uploaded_by, created_at
+        SELECT id, name, category, ratio, bg_oss_key, text_fields_json, line_fields_json, person_slot_json, sample_person_oss_key, preview_oss_key, uploaded_by, created_at
         FROM cover_template WHERE id = ?
     """, (template_id,)).fetchone()
     conn.close()
@@ -899,6 +919,7 @@ class UpdateCoverTemplateRequest(BaseModel):
     ratio: str = '3:4'
     bg_oss_key: Optional[str] = None       # None = 不换底图
     text_fields: list[CoverTextField]
+    line_fields: list[CoverLineField] = []
     person_slot: Optional[CoverPersonSlot] = None
     # sample_person_oss_key 三态: 不传字段 (None) = 保留旧值; "" = 清掉; "kkk" = 换新值
     sample_person_oss_key: Optional[str] = None
@@ -935,13 +956,14 @@ def admin_update_cover_template(template_id: int, req: UpdateCoverTemplateReques
     else:
         new_sample = req.sample_person_oss_key or None
     text_fields_json = _json.dumps([f.model_dump() for f in req.text_fields], ensure_ascii=False)
+    line_fields_json = _json.dumps([f.model_dump() for f in req.line_fields], ensure_ascii=False)
     person_slot_json = _json.dumps(req.person_slot.model_dump(), ensure_ascii=False) if req.person_slot else None
 
     conn.execute("""
         UPDATE cover_template
-        SET name = ?, category = ?, ratio = ?, bg_oss_key = ?, text_fields_json = ?, person_slot_json = ?, sample_person_oss_key = ?
+        SET name = ?, category = ?, ratio = ?, bg_oss_key = ?, text_fields_json = ?, line_fields_json = ?, person_slot_json = ?, sample_person_oss_key = ?
         WHERE id = ?
-    """, (req.name, req.category, req.ratio, new_bg, text_fields_json, person_slot_json, new_sample, template_id))
+    """, (req.name, req.category, req.ratio, new_bg, text_fields_json, line_fields_json, person_slot_json, new_sample, template_id))
     conn.commit()
     conn.close()
     return {'success': True}

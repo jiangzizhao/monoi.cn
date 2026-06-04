@@ -43,6 +43,16 @@ export interface PersonSlotOverride {
   rotation?: number                      // 用户调整后的人物坑
 }
 
+// 独立装饰线条 (admin 设计模板时加, 用户只看不改)
+export interface CoverLineField {
+  x: number; y: number; w: number; h: number
+  style: 'solid' | 'wavy' | 'double'
+  color: string
+  thickness: number
+  rotation: number
+  layer?: 'front' | 'behind'
+}
+
 export interface CoverTemplate {
   id: number
   name: string
@@ -51,6 +61,7 @@ export interface CoverTemplate {
   bg_url: string                        // 签名 1h URL, 给前端预览
   preview_url?: string
   text_fields: UserCoverTextField[]
+  line_fields?: CoverLineField[]         // 装饰线条 (用户只读, 后端按模板画)
   person_slot?: UserCoverPersonSlot | null
   // admin 上传的示例人物图 (已抠图透明 PNG 的签名 URL, 1h 有效).
   // 用途: 模板缩略图 + 用户没传自己的人物前的默认预览. 用户上传自己的会替换.

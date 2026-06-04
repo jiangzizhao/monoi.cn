@@ -7,6 +7,7 @@ import {
 import { useChatStore, makeAssistantMsg } from '../../../store/chatStore'
 import { underlineStyle } from '../../../lib/coverUnderline'
 import { arcLayout, segmentsToArcChars } from '../../../lib/coverArc'
+import { lineStyle } from '../../../lib/coverLine'
 import { loadFont, fontFamily, parseSegments } from '../../../utils/coverFonts'
 import { PersonLibrary } from './PersonLibrary'
 
@@ -759,6 +760,25 @@ export function TemplatePreview({ template, userTexts, textOverrides, extraField
           onLoad={e => setBgSize({ w: (e.target as HTMLImageElement).naturalWidth, h: (e.target as HTMLImageElement).naturalHeight })}
           className="absolute inset-0 w-full h-full object-cover pointer-events-none"/>
       )}
+
+      {/* 1b. 装饰线条 (admin 设计, 用户只读. z: behind=15 在人物(20)下, front=35 在前) */}
+      {(template.line_fields || []).map((l, i) => {
+        const rot = l.rotation || 0
+        return (
+          <div key={`line_${i}`} className="absolute pointer-events-none"
+            style={{
+              left: `${l.x / tplW * 100}%`,
+              top: `${l.y / tplH * 100}%`,
+              width: `${l.w / tplW * 100}%`,
+              height: `${l.h / tplH * 100}%`,
+              transform: Math.abs(rot) > 0.01 ? `rotate(${rot}deg)` : undefined,
+              transformOrigin: 'center',
+              zIndex: l.layer === 'behind' ? 15 : 35,
+            }}>
+            <span style={lineStyle(l.style, l.color, `${l.thickness / tplW * 100}cqw`)}/>
+          </div>
+        )
+      })}
 
       {/* 2. 抠完的人物 — 也支持拖移/缩放/旋转 (跟字段一样的手柄) */}
       {personPreviewUrl && personSlot && (() => {

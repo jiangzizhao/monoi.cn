@@ -2237,9 +2237,11 @@ def list_cover_templates():
             cols = [c[1] for c in conn.execute("PRAGMA table_info(cover_template)").fetchall()]
             has_sample = 'sample_person_oss_key' in cols
             sample_col = ', sample_person_oss_key' if has_sample else ''
+            has_line = 'line_fields_json' in cols
+            line_col = ', line_fields_json' if has_line else ''
             rows = conn.execute(f"""
                 SELECT id, name, category, ratio, bg_oss_key, text_fields_json,
-                       person_slot_json, preview_oss_key, created_at{sample_col}
+                       person_slot_json, preview_oss_key, created_at{sample_col}{line_col}
                 FROM cover_template ORDER BY category, created_at DESC
             """).fetchall()
         finally:
@@ -2271,6 +2273,13 @@ def list_cover_templates():
             text_fields = _json.loads(r['text_fields_json'] or '[]')
         except Exception:
             text_fields = []
+        # 装饰线条 (老库没这列就空)
+        line_fields = []
+        if has_line:
+            try:
+                line_fields = _json.loads(r['line_fields_json'] or '[]')
+            except Exception:
+                line_fields = []
         # person_slot 是可选的 (没人物的模板返 null), 前端要这个判断有没有人物坑显示上传按钮
         person_slot = None
         try:
@@ -2299,6 +2308,7 @@ def list_cover_templates():
             'bg_url': bg_url,
             'preview_url': preview_url,
             'text_fields': text_fields,
+            'line_fields': line_fields,
             'person_slot': person_slot,
             'sample_person_url': sample_person_url,
             'created_at': r['created_at'],
@@ -2474,8 +2484,10 @@ def render_cover_from_template(req: RenderCoverFromTemplateRequest):
     conn = _sq.connect(db_path, timeout=2)
     conn.row_factory = _sq.Row
     try:
-        row = conn.execute("""
-            SELECT bg_oss_key, text_fields_json, person_slot_json, ratio
+        _cols = [c[1] for c in conn.execute("PRAGMA table_info(cover_template)").fetchall()]
+        _line_col = ', line_fields_json' if 'line_fields_json' in _cols else ''
+        row = conn.execute(f"""
+            SELECT bg_oss_key, text_fields_json, person_slot_json, ratio{_line_col}
             FROM cover_template WHERE id = ?
         """, (req.template_id,)).fetchone()
     finally:
@@ -2487,6 +2499,12 @@ def render_cover_from_template(req: RenderCoverFromTemplateRequest):
         text_fields = _json.loads(row['text_fields_json'] or '[]')
     except Exception:
         text_fields = []
+    line_fields = []
+    if _line_col:
+        try:
+            line_fields = _json.loads(row['line_fields_json'] or '[]')
+        except Exception:
+            line_fields = []
     person_slot = None
     if row['person_slot_json']:
         try:
@@ -2533,6 +2551,7 @@ def render_cover_from_template(req: RenderCoverFromTemplateRequest):
                 text_overrides=req.text_overrides or None,
                 extra_fields=req.extra_fields or None,
                 hidden_labels=req.hidden_labels or None,
+                line_fields=line_fields or None,
             )
         except Exception as e:
             raise HTTPException(500, f'封面合成失败: {e}')

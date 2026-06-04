@@ -346,6 +346,53 @@ def _draw_arc_field(img, field, segments, font, cur_size, total_w, text_h,
     img.alpha_composite(layer, (box_cx - layer.width // 2, box_cy - layer.height // 2))
 
 
+def _draw_line_field(img: Image.Image, line: dict):
+    """独立装饰线条: 在 box(x/y/w/h) 内, 横贯盒宽画一条线于垂直中心,
+    样式 solid/wavy/double, 可旋转. 单独 layer 画 → 旋转 → 居中贴 box 中心 (跟文字字段一致)."""
+    import math
+    if not line:
+        return
+    style = line.get('style', 'solid') or 'solid'
+    color = _hex_to_rgb(line.get('color', '#FFFFFF'))
+    thick = max(1, int(line.get('thickness', 8) or 8))
+    rotation = float(line.get('rotation') or 0)
+    bx = int(line.get('x', 0)); by = int(line.get('y', 0))
+    bw = int(line.get('w', 200)); bh = int(line.get('h', 40))
+    if bw < 1:
+        return
+
+    amp = thick * 1.4 if style == 'wavy' else 0
+    gap = thick * 2 if style == 'double' else 0
+    pad = int(thick * 2 + amp + gap + 6)
+    lw = bw + pad * 2
+    lh = bh + pad * 2
+    layer = Image.new('RGBA', (lw, lh), (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer)
+    cy = lh / 2.0          # 线画在 layer 垂直中心 (= box 垂直中心)
+    x0, x1 = float(pad), float(pad + bw)
+
+    if style == 'wavy':
+        period = max(12.0, thick * 5.0)
+        pts = []
+        x = x0
+        while x <= x1:
+            pts.append((x, cy + amp * math.sin((x - x0) / period * 2 * math.pi)))
+            x += 2
+        if len(pts) > 1:
+            d.line(pts, fill=color, width=thick, joint='curve')
+    elif style == 'double':
+        d.line([(x0, cy - gap / 2), (x1, cy - gap / 2)], fill=color, width=thick)
+        d.line([(x0, cy + gap / 2), (x1, cy + gap / 2)], fill=color, width=thick)
+    else:  # solid
+        d.line([(x0, cy), (x1, cy)], fill=color, width=thick)
+
+    if abs(rotation) > 0.01:
+        layer = layer.rotate(-rotation, expand=True, resample=Image.BICUBIC)   # CSS+ → PIL 取负
+    box_cx = bx + bw // 2
+    box_cy = by + bh // 2
+    img.alpha_composite(layer, (box_cx - layer.width // 2, box_cy - layer.height // 2))
+
+
 def _measure_text(draw: ImageDraw.ImageDraw, text: str, font) -> int:
     """量文本宽度. 跨 PIL 版本"""
     bbox = draw.textbbox((0, 0), text, font=font)
@@ -405,6 +452,7 @@ def render_cover(
     text_overrides: Optional[dict] = None,
     extra_fields: Optional[list] = None,
     hidden_labels: Optional[list] = None,
+    line_fields: Optional[list] = None,
 ) -> Image.Image:
     """合成一张封面.
 
@@ -483,11 +531,20 @@ def render_cover(
 
         (behind_fields if merged.get('layer') == 'behind' else front_fields).append((merged, user_text))
 
-    # 4. 绘制顺序: 人物后的字 → 贴人物 → 人物前的字
+    # 3b. 装饰线条按 layer 分组 (跟文字同一套 front/behind)
+    behind_lines, front_lines = [], []
+    for ln in line_fields or []:
+        (behind_lines if (ln or {}).get('layer') == 'behind' else front_lines).append(ln)
+
+    # 4. 绘制顺序: 人物后的字+线 → 贴人物 → 人物前的字+线 (线画在同层文字之上)
     for merged, user_text in behind_fields:
         _draw_text_field(bg, merged, user_text)
+    for ln in behind_lines:
+        _draw_line_field(bg, ln)
     _paste_person()
     for merged, user_text in front_fields:
         _draw_text_field(bg, merged, user_text)
+    for ln in front_lines:
+        _draw_line_field(bg, ln)
 
     return bg

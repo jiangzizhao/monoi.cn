@@ -20,12 +20,14 @@ import {
   adminApiUsage,
   type AdminUserRow, type AdminOrderRow, type AdminWithdrawalRow, type AdminStats,
   type AdminBgmRow, type AdminFontRow, type AdminCoverTemplate, type CoverTextField, type CoverPersonSlot,
+  type CoverLineField,
   type ApiUsageResp,
 } from '../services/admin'
 import { fetchMyProfile } from '../services/billing'
 import { isLoggedIn } from '../lib/auth'
 import { underlineStyle } from '../lib/coverUnderline'
 import { arcLayout, segmentsToArcChars } from '../lib/coverArc'
+import { lineStyle } from '../lib/coverLine'
 import { loadFont, fontFamily, parseSegments } from '../utils/coverFonts'
 import { TemplatePreview } from '../components/chat/forms/TemplateCoverPicker'
 
@@ -1204,6 +1206,7 @@ interface FontOption { file: string; label: string; tag?: string; source?: strin
 
 /** 单字段配置 (admin 在拖框编辑器里编辑的对象). 比 server CoverTextField 多个 id, 给 React key 用 */
 interface UiTextField extends CoverTextField { _id: string }
+interface UiLineField extends CoverLineField { _id: string }
 
 function CoverTemplateTab() {
   const [list, setList] = useState<AdminCoverTemplate[]>([])
@@ -1356,6 +1359,13 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
     }))
   )
   const [activeFieldId, setActiveFieldId] = useState<string | null>(null)
+  // 装饰线条 (独立元素, 跟文字字段一套拖拽机器)
+  const [lines, setLines] = useState<UiLineField[]>(
+    (initial?.line_fields || []).map(l => ({
+      ...l, _id: `l_${Math.random().toString(36).slice(2, 8)}`,
+    }))
+  )
+  const [activeLineId, setActiveLineId] = useState<string | null>(null)
   const [personSlot, setPersonSlot] = useState<CoverPersonSlot | null>(initial?.person_slot || null)
   // 'text' 拖框 → 加文字字段; 'person' 拖框 → 设/换人物坑; 'person_edit' → 选中人物坑编辑属性
   const [drawMode, setDrawMode] = useState<'text' | 'person'>('text')
@@ -1379,6 +1389,7 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
   const interactionRef = useRef<{
     type: 'move' | 'resize' | 'rotate'
     fieldId: string
+    kind?: 'field' | 'line'   // 默认 field; 'line' 时操作 lines 而非 fields
     startMouseX: number; startMouseY: number
     corner?: 'nw' | 'ne' | 'sw' | 'se'
     centerX?: number; centerY?: number
@@ -1419,23 +1430,38 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
       // 屏幕 px 位移 → 底图 px 位移 (canvas 显示尺寸 vs 底图 natural 尺寸)
       const scale = bgNaturalSize.w / rect.width
 
+      const isLine = it.kind === 'line'
+      const dx = Math.round((e.clientX - it.startMouseX) * scale)
+      const dy = Math.round((e.clientY - it.startMouseY) * scale)
+
       if (it.type === 'move') {
-        const dx = Math.round((e.clientX - it.startMouseX) * scale)
-        const dy = Math.round((e.clientY - it.startMouseY) * scale)
         if (dx === 0 && dy === 0) return
-        setFields(prev => prev.map(f => f._id === it.fieldId ? { ...f, x: f.x + dx, y: f.y + dy } : f))
+        if (isLine) setLines(prev => prev.map(l => l._id === it.fieldId ? { ...l, x: l.x + dx, y: l.y + dy } : l))
+        else setFields(prev => prev.map(f => f._id === it.fieldId ? { ...f, x: f.x + dx, y: f.y + dy } : f))
         interactionRef.current = { ...it, startMouseX: e.clientX, startMouseY: e.clientY }
       } else if (it.type === 'resize' && it.corner) {
-        const dx = Math.round((e.clientX - it.startMouseX) * scale)
-        const dy = Math.round((e.clientY - it.startMouseY) * scale)
         if (dx === 0 && dy === 0) return
-        setFields(prev => prev.map(f => {
-          if (f._id !== it.fieldId) return f
-          let { x, y, w, h } = f
-          if (it.corner === 'nw') { x += dx; y += dy; w -= dx; h -= dy }
-          else if (it.corner === 'ne') { y += dy; w += dx; h -= dy }
-          else if (it.corner === 'sw') { x += dx; w -= dx; h += dy }
+        const corner = it.corner
+        const resizeBox = (b: { x: number; y: number; w: number; h: number }) => {
+          let { x, y, w, h } = b
+          if (corner === 'nw') { x += dx; y += dy; w -= dx; h -= dy }
+          else if (corner === 'ne') { y += dy; w += dx; h -= dy }
+          else if (corner === 'sw') { x += dx; w -= dx; h += dy }
           else { w += dx; h += dy }
+          return { x, y, w, h }
+        }
+        if (isLine) setLines(prev => prev.map(l => {
+          if (l._id !== it.fieldId) return l
+          let { x, y, w, h } = resizeBox(l)
+          w = Math.max(20, w); h = Math.max(10, h)
+          // 线粗跟 box 高度同比例缩放 (拖角变长变粗)
+          const hRatio = h / Math.max(1, l.h)
+          const newThick = Math.max(1, Math.round((l.thickness || 8) * hRatio))
+          return { ...l, x, y, w, h, thickness: newThick }
+        }))
+        else setFields(prev => prev.map(f => {
+          if (f._id !== it.fieldId) return f
+          let { x, y, w, h } = resizeBox(f)
           w = Math.max(20, w); h = Math.max(20, h)
           // 字号跟 box 高度同比例缩放 (Canva 一致): 新字号 = 旧字号 × (新 h / 旧 h)
           const hRatio = h / Math.max(1, f.h)
@@ -1452,7 +1478,8 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
         if (delta > 180) delta -= 360
         if (delta < -180) delta += 360
         if (Math.abs(delta) < 0.5) return
-        setFields(prev => prev.map(f => f._id === it.fieldId ? { ...f, rotation: Math.round((f.rotation || 0) + delta) } : f))
+        if (isLine) setLines(prev => prev.map(l => l._id === it.fieldId ? { ...l, rotation: Math.round((l.rotation || 0) + delta) } : l))
+        else setFields(prev => prev.map(f => f._id === it.fieldId ? { ...f, rotation: Math.round((f.rotation || 0) + delta) } : f))
         interactionRef.current = { ...it, startMouseX: e.clientX, startMouseY: e.clientY }
       }
     }
@@ -1602,6 +1629,10 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
     setFields(prev => prev.filter(f => f._id !== id))
     if (activeFieldId === id) setActiveFieldId(null)
   }
+  const removeLine = (id: string) => {
+    setLines(prev => prev.filter(l => l._id !== id))
+    if (activeLineId === id) setActiveLineId(null)
+  }
 
   /** admin 上传示例人物: 走用户端那个 cover-remove-bg, 拿到抠图后的透明 PNG OSS key.
    * 这里复用用户端的 stroke 配置 — 如果 person_slot 有 stroke 就用它, 没就给个 0px 中性配置. */
@@ -1673,6 +1704,7 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
     setSaving(true); setEditorErr('')
     try {
       const cleanFields: CoverTextField[] = fields.map(({ _id, ...f }) => f)
+      const cleanLines: CoverLineField[] = lines.map(({ _id, ...l }) => l)
       if (isEdit && initial) {
         await adminUpdateCoverTemplate(initial.id, {
           name: name.trim(), category, ratio,
@@ -1680,6 +1712,7 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
           // 用户换了 (重新上传) 就传新的
           bg_oss_key: bgOssKey === initial.bg_oss_key ? null : bgOssKey,
           text_fields: cleanFields,
+          line_fields: cleanLines,
           person_slot: personSlot,
           // 示例人物: 没改 (samplePersonChanged=false) → keep_sample_person=true 保留旧值
           // 改了 → keep_sample_person=false, sample_person_oss_key 用新值 (可能是空清掉)
@@ -1691,6 +1724,7 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
           name: name.trim(), category, ratio,
           bg_oss_key: bgOssKey,
           text_fields: cleanFields,
+          line_fields: cleanLines,
           person_slot: personSlot,
           sample_person_oss_key: samplePersonOssKey || null,
         })
@@ -1704,6 +1738,32 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
   }
 
   const activeField = fields.find(f => f._id === activeFieldId) || null
+  const activeLine = lines.find(l => l._id === activeLineId) || null
+
+  // 加一条装饰线条 (默认横贯画布中部, 居中, 实线白色)
+  const addLine = () => {
+    const bw = bgNaturalSize.w || 1080
+    const bh = bgNaturalSize.h || 1440
+    const w = Math.round(bw * 0.5)
+    const h = Math.round(Math.max(30, bw * 0.04))
+    const newLine: UiLineField = {
+      _id: `l_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      x: Math.round((bw - w) / 2),
+      y: Math.round(bh / 2 - h / 2),
+      w, h,
+      style: 'solid',
+      color: '#FFFFFF',
+      thickness: Math.max(4, Math.round(bw * 0.012)),
+      rotation: 0,
+      layer: 'front',
+    }
+    setLines(prev => [...prev, newLine])
+    setActiveLineId(newLine._id)
+    setActiveFieldId(null); setPersonSelected(false)
+  }
+  const updateLine = (id: string, patch: Partial<UiLineField>) => {
+    setLines(prev => prev.map(l => l._id === id ? { ...l, ...patch } : l))
+  }
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={onClose}>
@@ -1773,10 +1833,16 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
                 </button>
               </div>
 
+              {/* 加装饰线条: 点一下加一条 (默认横在画布中部), 再到画布上拖/缩放/旋转 */}
+              <button onClick={addLine}
+                className="flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg border border-[var(--border)] text-xs text-[var(--text-2)] hover:border-[var(--text)] cursor-pointer mb-3">
+                <Plus size={12}/> 加装饰线条
+              </button>
+
               {/* 人物坑 (最多 1) */}
               {personSlot && (
                 <button
-                  onClick={() => { setPersonSelected(true); setActiveFieldId(null) }}
+                  onClick={() => { setPersonSelected(true); setActiveFieldId(null); setActiveLineId(null) }}
                   className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs cursor-pointer mb-1 ${
                     personSelected ? 'bg-pink-500 text-white' : 'text-pink-400 bg-pink-500/10 hover:bg-pink-500/20'
                   }`}>
@@ -1792,7 +1858,7 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
               </div>
               <div className="flex flex-col gap-1 overflow-y-auto">
                 {fields.map((f, i) => (
-                  <button key={f._id} onClick={() => { setActiveFieldId(f._id); setPersonSelected(false) }}
+                  <button key={f._id} onClick={() => { setActiveFieldId(f._id); setPersonSelected(false); setActiveLineId(null) }}
                     className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs cursor-pointer ${
                       activeFieldId === f._id ? 'bg-[var(--text)] text-[var(--bg)]' : 'text-[var(--text-2)] hover:bg-[var(--bg-hover)]'
                     }`}>
@@ -1801,12 +1867,31 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
                     <span className="text-[10px] opacity-60">{f.w}×{f.h}</span>
                   </button>
                 ))}
-                {fields.length === 0 && !personSlot && (
+                {fields.length === 0 && !personSlot && lines.length === 0 && (
                   <div className="text-xs text-[var(--text-3)] py-4 text-center">
                     暂无字段, 在右侧底图上 <span className="text-amber-500">按住鼠标拖一个矩形</span> 添加
                   </div>
                 )}
               </div>
+
+              {/* 装饰线条列表 */}
+              {lines.length > 0 && (
+                <>
+                  <div className="text-xs text-[var(--text-3)] mb-2 mt-3">装饰线条 ({lines.length})</div>
+                  <div className="flex flex-col gap-1 overflow-y-auto">
+                    {lines.map((l, i) => (
+                      <button key={l._id} onClick={() => { setActiveLineId(l._id); setActiveFieldId(null); setPersonSelected(false) }}
+                        className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs cursor-pointer ${
+                          activeLineId === l._id ? 'bg-[var(--text)] text-[var(--bg)]' : 'text-[var(--text-2)] hover:bg-[var(--bg-hover)]'
+                        }`}>
+                        <span className="font-mono text-[10px] opacity-60">线{i + 1}</span>
+                        <span className="flex-1 text-left truncate">{l.style === 'wavy' ? '波浪线' : l.style === 'double' ? '双线' : '实线'}{l.layer === 'behind' ? ' · 人物后' : ''}</span>
+                        <span className="text-[10px] opacity-60">{l.w}×{l.thickness}</span>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
 
             {editorErr && <div className="text-xs text-red-400">{editorErr}</div>}
@@ -1969,6 +2054,87 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
                   )
                 })}
 
+                {/* 装饰线条框 (绿色, 区分文字蓝/人物粉) — 框里渲染线条预览 */}
+                {bgNaturalSize.w > 0 && lines.map((l, i) => {
+                  const imgEl = canvasRef.current?.querySelector('img')
+                  const rect = imgEl?.getBoundingClientRect()
+                  if (!rect) return null
+                  const sx = rect.width / bgNaturalSize.w
+                  const sy = rect.height / bgNaturalSize.h
+                  const rotation = l.rotation || 0
+                  const hasRotation = Math.abs(rotation) > 0.01
+                  const isActive = activeLineId === l._id
+                  return (
+                    <div key={l._id} data-field-box
+                      onMouseDown={(e) => {
+                        e.preventDefault(); e.stopPropagation()
+                        setActiveLineId(l._id); setActiveFieldId(null); setPersonSelected(false)
+                        interactionRef.current = { type: 'move', kind: 'line', fieldId: l._id, startMouseX: e.clientX, startMouseY: e.clientY }
+                        document.body.style.cursor = 'move'
+                      }}
+                      className={`absolute border-2 cursor-move select-none ${
+                        isActive ? 'border-emerald-500' : 'border-emerald-400/70 bg-emerald-400/5 hover:border-amber-400'
+                      }`}
+                      style={{
+                        left: l.x * sx, top: l.y * sy, width: l.w * sx, height: l.h * sy,
+                        transform: hasRotation ? `rotate(${rotation}deg)` : undefined,
+                        transformOrigin: 'center',
+                      }}
+                    >
+                      <div className="absolute -top-5 left-0 text-[10px] bg-emerald-600 text-white px-1 rounded whitespace-nowrap z-10">
+                        线{i + 1}{l.layer === 'behind' ? ' · 人物后' : ''}
+                      </div>
+                      <span style={lineStyle(l.style, l.color, `${Math.max(1, l.thickness * sx)}px`)}/>
+                      {isActive && (
+                        <>
+                          {(['nw', 'ne', 'sw', 'se'] as const).map(corner => {
+                            const pos: React.CSSProperties = {
+                              position: 'absolute',
+                              top: corner.startsWith('n') ? -6 : 'auto',
+                              bottom: corner.startsWith('s') ? -6 : 'auto',
+                              left: corner.endsWith('w') ? -6 : 'auto',
+                              right: corner.endsWith('e') ? -6 : 'auto',
+                              cursor: `${corner}-resize`,
+                            }
+                            return (
+                              <div key={corner}
+                                onMouseDown={(e) => {
+                                  e.preventDefault(); e.stopPropagation()
+                                  interactionRef.current = { type: 'resize', kind: 'line', fieldId: l._id, corner,
+                                    startMouseX: e.clientX, startMouseY: e.clientY }
+                                  document.body.style.cursor = `${corner}-resize`
+                                }}
+                                className="w-3 h-3 bg-emerald-500 border-2 border-white rounded-sm shadow"
+                                style={pos}/>
+                            )
+                          })}
+                          <div
+                            onMouseDown={(e) => {
+                              e.preventDefault(); e.stopPropagation()
+                              const imgEl2 = canvasRef.current?.querySelector('img')
+                              const r2 = imgEl2?.getBoundingClientRect()
+                              if (!r2) return
+                              const cx = r2.left + (l.x + l.w / 2) * sx
+                              const cy = r2.top + (l.y + l.h / 2) * sy
+                              interactionRef.current = {
+                                type: 'rotate', kind: 'line', fieldId: l._id,
+                                startMouseX: e.clientX, startMouseY: e.clientY,
+                                centerX: cx, centerY: cy, startRotation: rotation,
+                              }
+                              document.body.style.cursor = 'crosshair'
+                            }}
+                            className="absolute w-6 h-6 bg-emerald-500 border-2 border-white rounded-full shadow-lg cursor-grab active:cursor-grabbing flex items-center justify-center text-white text-[10px] font-bold"
+                            style={{ top: -32, left: '50%', transform: 'translateX(-50%)', zIndex: 20 }}
+                            title="拖动旋转"
+                          >↻</div>
+                          <div className="absolute pointer-events-none border-l border-emerald-500"
+                            style={{ top: -20, left: '50%', width: 0, height: 12, transform: 'translateX(-0.5px)' }}/>
+                        </>
+                      )}
+                    </div>
+                  )
+                })}
+
                 {/* 人物坑框 (粉色, 跟文字框颜色区分) — 有示例人物图就把图渲在框里 */}
                 {bgNaturalSize.w > 0 && personSlot && (() => {
                   const imgEl = canvasRef.current?.querySelector('img')
@@ -2034,6 +2200,14 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
                 onSampleUpload={handleSamplePersonFile}
                 onSampleClear={clearSamplePerson}
               />
+            ) : activeLine ? (
+              <LineEditor
+                line={activeLine}
+                bgWidth={bgNaturalSize.w}
+                hasPerson={!!personSlot}
+                onChange={patch => updateLine(activeLine._id, patch)}
+                onRemove={() => removeLine(activeLine._id)}
+              />
             ) : activeField ? (
               <FieldEditor
                 field={activeField}
@@ -2051,6 +2225,80 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
             )}
           </div>
         </div>
+      </div>
+    </div>
+  )
+}
+
+/** 右侧装饰线条属性面板 */
+function LineEditor({ line, bgWidth, hasPerson, onChange, onRemove }: {
+  line: UiLineField
+  bgWidth?: number
+  hasPerson?: boolean
+  onChange: (patch: Partial<UiLineField>) => void
+  onRemove: () => void
+}) {
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <div className="text-sm font-medium">编辑线条</div>
+        <button onClick={onRemove} className="text-xs text-red-400 hover:text-red-500 cursor-pointer">删除</button>
+      </div>
+
+      <div>
+        <div className="text-xs text-[var(--text-3)] mb-2">样式</div>
+        <div className="flex gap-1.5">
+          {([['solid', '实线'], ['wavy', '波浪'], ['double', '双线']] as const).map(([v, label]) => (
+            <button key={v} onClick={() => onChange({ style: v })}
+              className={`px-3 py-1 rounded-lg border text-xs cursor-pointer transition-colors ${(line.style || 'solid') === v ? 'border-[var(--text)] bg-[var(--text)] text-[var(--bg)]' : 'border-[var(--border)] text-[var(--text-2)]'}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <label className="text-xs text-[var(--text-3)]">颜色</label>
+        <input type="color" value={line.color || '#FFFFFF'} onChange={e => onChange({ color: e.target.value })}
+          className="w-10 h-7 bg-[var(--bg)] border border-[var(--border)] rounded cursor-pointer"/>
+        <span className="text-[10px] text-[var(--text-3)]">{line.color}</span>
+      </div>
+
+      <div>
+        <label className="text-xs text-[var(--text-3)]">粗细 ({line.thickness}px)</label>
+        <input type="range" min={1} max={Math.max(40, Math.round((bgWidth || 1080) * 0.05))} step={1} value={line.thickness || 8}
+          onChange={e => onChange({ thickness: +e.target.value })}
+          className="w-full accent-current cursor-pointer mt-1"/>
+      </div>
+
+      <div>
+        <label className="text-xs text-[var(--text-3)]">旋转角度 ({(line.rotation || 0).toFixed(0)}°)</label>
+        <div className="flex items-center gap-2 mt-1">
+          <input type="range" min={-180} max={180} step={1} value={line.rotation || 0}
+            onChange={e => onChange({ rotation: +e.target.value })}
+            className="flex-1 accent-current cursor-pointer"/>
+          <button onClick={() => onChange({ rotation: 0 })}
+            className="text-[10px] text-[var(--text-3)] hover:text-[var(--text)] cursor-pointer">归零</button>
+        </div>
+        <div className="text-[10px] text-[var(--text-3)] mt-0.5">±90° 可做竖线 · 拖画布上的 ↻ 也能转</div>
+      </div>
+
+      {hasPerson && (
+        <div className="border-t border-[var(--border)] pt-3">
+          <div className="text-xs text-[var(--text-3)] mb-2">图层 (相对人物)</div>
+          <div className="flex rounded-lg overflow-hidden border border-[var(--border)] text-sm">
+            {(['front', 'behind'] as const).map(opt => (
+              <button key={opt} onClick={() => onChange({ layer: opt })}
+                className={`flex-1 py-1.5 cursor-pointer ${(line.layer || 'front') === opt ? 'bg-[var(--text)] text-[var(--bg)]' : 'text-[var(--text-2)] hover:bg-[var(--bg-hover)]'}`}>
+                {opt === 'front' ? '人物前' : '人物后'}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="text-[10px] text-[var(--text-3)] leading-relaxed border-t border-[var(--border)] pt-2">
+        线条是独立元素: 在中间画布上直接拖动位置 / 拖角缩放 (变长变粗) / 拖 ↻ 旋转.
       </div>
     </div>
   )

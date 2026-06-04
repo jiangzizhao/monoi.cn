@@ -266,6 +266,16 @@ export interface CoverPersonSlot {
   rotation?: number                    // 旋转角度 (°), 后端字段, 跟 CoverTextField 一致
 }
 
+// 独立装饰线条 (不依赖文字): 盒子 x/y/w/h, 线横贯盒宽画在垂直中心. 可拖/缩放/旋转/前后层.
+export interface CoverLineField {
+  x: number; y: number; w: number; h: number
+  style: 'solid' | 'wavy' | 'double'
+  color: string
+  thickness: number                   // 线粗 (px)
+  rotation: number                    // 旋转角度 (°)
+  layer?: 'front' | 'behind'
+}
+
 export interface AdminCoverTemplate {
   id: number
   name: string
@@ -275,6 +285,7 @@ export interface AdminCoverTemplate {
   bg_url?: string                     // 后端签好的 1h 签名 URL (给 admin 缩略图)
   preview_oss_key?: string | null
   text_fields: CoverTextField[]
+  line_fields?: CoverLineField[]       // 装饰线条
   person_slot: CoverPersonSlot | null  // 没人物的模板是 null
   sample_person_oss_key?: string | null   // admin 上传的示例人物 (已抠图透明 PNG) OSS key
   sample_person_url?: string              // 后端签的 1h URL, admin 编辑 + 用户预览用
@@ -296,6 +307,7 @@ export async function adminAddCoverTemplate(req: {
   ratio: string
   bg_oss_key: string
   text_fields: CoverTextField[]
+  line_fields?: CoverLineField[]
   person_slot?: CoverPersonSlot | null
   sample_person_oss_key?: string | null
 }): Promise<{ success: boolean; id: number }> {
@@ -308,6 +320,7 @@ export async function adminUpdateCoverTemplate(template_id: number, req: {
   ratio: string
   bg_oss_key?: string | null       // 不换底图传 null, 后端保留旧值
   text_fields: CoverTextField[]
+  line_fields?: CoverLineField[]
   person_slot?: CoverPersonSlot | null
   // sample_person: 默认 keep_sample_person=true 保留旧值;
   // 想改要先 keep_sample_person=false, 然后 sample_person_oss_key 填新值 (或空清掉)
