@@ -199,12 +199,29 @@ def _draw_text_field(img: Image.Image, field: dict, user_text: str):
     shadow_oy = int(field.get('shadow_offset_y', 0) or 0)
     shadow_blur = int(field.get('shadow_blur', 0) or 0)
 
+    # 文字背景底色块 (圆角矩形垫在文字后, 提升可读性/突出标题)
+    bg_color = field.get('bg_color')
+    bg_radius = int(field.get('bg_radius', 0) or 0)
+    bg_pad_x = int(cur_size * 0.28) if bg_color else 0
+    bg_pad_y = int(cur_size * 0.16) if bg_color else 0
+
     margin = max(stroke_width * 2 + 4, int(cur_size * 0.3),
-                 abs(shadow_ox) + shadow_blur * 3 + 4, abs(shadow_oy) + shadow_blur * 3 + 4)
+                 abs(shadow_ox) + shadow_blur * 3 + 4, abs(shadow_oy) + shadow_blur * 3 + 4,
+                 bg_pad_x + 4, bg_pad_y + 4)
     layer_w = total_w + margin * 2
     layer_h = text_h + margin * 2
     layer = Image.new('RGBA', (layer_w, layer_h), (0, 0, 0, 0))
-    # 阴影: 独立层画偏移的阴影文字 → 高斯模糊 → 作为底层 (主文字随后画其上, 阴影在下)
+    # 1) 最底层: 文字背景色块
+    if bg_color:
+        bgd = ImageDraw.Draw(layer)
+        rx0, ry0 = margin - bg_pad_x, margin - bg_pad_y
+        rx1, ry1 = margin + total_w + bg_pad_x, margin + text_h + bg_pad_y
+        radius = int((ry1 - ry0) / 2 * max(0, min(100, bg_radius)) / 100)
+        try:
+            bgd.rounded_rectangle([rx0, ry0, rx1, ry1], radius=radius, fill=_hex_to_rgb(bg_color))
+        except Exception:
+            bgd.rectangle([rx0, ry0, rx1, ry1], fill=_hex_to_rgb(bg_color))
+    # 2) 阴影: 独立层画偏移的阴影文字 → 高斯模糊 → 叠在背景块之上、文字之下
     if shadow_color:
         shadow_layer = Image.new('RGBA', (layer_w, layer_h), (0, 0, 0, 0))
         sdraw = ImageDraw.Draw(shadow_layer)
@@ -216,7 +233,7 @@ def _draw_text_field(img: Image.Image, field: dict, user_text: str):
             sx += _measure_text(sdraw, _seg, font)
         if shadow_blur > 0:
             shadow_layer = shadow_layer.filter(ImageFilter.GaussianBlur(shadow_blur))
-        layer = shadow_layer
+        layer.alpha_composite(shadow_layer)
     layer_draw = ImageDraw.Draw(layer)
 
     cur_x_in_layer = margin
@@ -331,13 +348,30 @@ def _draw_vertical_field(img: Image.Image, field: dict, segments: list):
     line_h = asc + desc
     char_w = max(_measure_text(measure, ch, font) for ch, _ in chars)
 
+    bg_color = field.get('bg_color')
+    bg_radius = int(field.get('bg_radius', 0) or 0)
+    bg_pad_x = int(cur * 0.28) if bg_color else 0
+    bg_pad_y = int(cur * 0.16) if bg_color else 0
+
     margin = max(stroke_width * 2 + 4, int(cur * 0.3),
-                 abs(shadow_ox) + shadow_blur * 3 + 4, abs(shadow_oy) + shadow_blur * 3 + 4)
+                 abs(shadow_ox) + shadow_blur * 3 + 4, abs(shadow_oy) + shadow_blur * 3 + 4,
+                 bg_pad_x + 4, bg_pad_y + 4)
     layer_w = char_w + margin * 2
     layer_h = line_h * n + margin * 2
     layer = Image.new('RGBA', (layer_w, layer_h), (0, 0, 0, 0))
 
-    # 阴影: 独立层逐字画偏移 → 高斯模糊 → 作底层
+    # 文字背景色块 (竖排: 整列后面垫圆角块)
+    if bg_color:
+        bgd = ImageDraw.Draw(layer)
+        rx0, ry0 = margin - bg_pad_x, margin - bg_pad_y
+        rx1, ry1 = margin + char_w + bg_pad_x, margin + line_h * n + bg_pad_y
+        radius = int(min(rx1 - rx0, ry1 - ry0) / 2 * max(0, min(100, bg_radius)) / 100)
+        try:
+            bgd.rounded_rectangle([rx0, ry0, rx1, ry1], radius=radius, fill=_hex_to_rgb(bg_color))
+        except Exception:
+            bgd.rectangle([rx0, ry0, rx1, ry1], fill=_hex_to_rgb(bg_color))
+
+    # 阴影: 独立层逐字画偏移 → 高斯模糊 → 叠在背景之上文字之下
     if shadow_color:
         sl = Image.new('RGBA', (layer_w, layer_h), (0, 0, 0, 0))
         sd = ImageDraw.Draw(sl)
@@ -347,7 +381,7 @@ def _draw_vertical_field(img: Image.Image, field: dict, segments: list):
                     ch, font=font, fill=_hex_to_rgb(shadow_color))
         if shadow_blur > 0:
             sl = sl.filter(ImageFilter.GaussianBlur(shadow_blur))
-        layer = sl
+        layer.alpha_composite(sl)
 
     dr = ImageDraw.Draw(layer)
     stroke_rgb = _hex_to_rgb(stroke_color) if stroke_color else None

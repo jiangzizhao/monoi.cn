@@ -18,6 +18,8 @@ export interface UserCoverTextField {
   shadow_offset_x: number
   shadow_offset_y: number
   shadow_blur: number
+  bg_color?: string | null            // 文字背景底色块 (空=不加)
+  bg_radius?: number                  // 背景块圆角 0-100
   underline_style?: 'none' | 'solid' | 'wavy' | 'double'   // 下划线样式
   underline_color?: string | null                          // 下划线色 (空=用主色)
   underline_length_pct?: number                            // 下划线长度 = 文字宽 % (20-100, 居中)

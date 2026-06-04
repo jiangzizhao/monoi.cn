@@ -1687,6 +1687,7 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
       highlight_color: '#FFD700',
       stroke_color: '#000000', stroke_width: 6,
       shadow_color: null, shadow_offset_x: 0, shadow_offset_y: 0, shadow_blur: 0,
+      bg_color: null, bg_radius: 30,
       underline_style: 'none', underline_color: null, underline_length_pct: 100,
       text_arc: 0, text_warp: null,
       align: 'left', rotation: 0, max_chars: 0, placeholder: '',
@@ -2076,6 +2077,7 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
                           textShadow: f.shadow_color
                             ? `${(f.shadow_offset_x || 0) * sx}px ${(f.shadow_offset_y || 0) * sx}px ${(f.shadow_blur || 0) * sx}px ${f.shadow_color}`
                             : undefined,
+                          ...(f.bg_color ? { backgroundColor: f.bg_color, padding: '0.16em 0.28em', borderRadius: `${0.66 * (f.bg_radius ?? 30) / 100}em` } : {}),
                           position: 'relative' as const,
                         }}
                           ref={el => {
@@ -2556,6 +2558,32 @@ function FieldEditor({ field, fonts, bgWidth, hasPerson, onChange, onRemove, war
               <label className="text-[10px] text-[var(--text-3)]">竖偏移 Y</label>
               <input type="number" value={field.shadow_offset_y || 0} onChange={e => onChange({ shadow_offset_y: +e.target.value })}
                 className="w-full h-7 bg-[var(--bg)] border border-[var(--border)] rounded px-1.5 text-sm mt-0.5"/>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* 文字背景: 文字后垫一个圆角底色块 (突出标题, 小红书常用) */}
+      <div className="border-t border-[var(--border)] pt-3">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs text-[var(--text-3)]">文字背景 (底色块)</span>
+          <button onClick={() => onChange(field.bg_color ? { bg_color: null } : { bg_color: '#FFE14D' })}
+            className="text-[10px] text-[var(--text-2)] hover:text-[var(--text)] cursor-pointer underline">
+            {field.bg_color ? '关闭背景' : '开启背景'}
+          </button>
+        </div>
+        {field.bg_color && (
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1.5">
+              <label className="text-[10px] text-[var(--text-3)]">颜色</label>
+              <input type="color" value={field.bg_color || '#FFE14D'} onChange={e => onChange({ bg_color: e.target.value })}
+                className="w-9 h-7 bg-[var(--bg)] border border-[var(--border)] rounded cursor-pointer"/>
+            </div>
+            <div className="flex-1 flex items-center gap-1.5">
+              <label className="text-[10px] text-[var(--text-3)] whitespace-nowrap">圆角 {field.bg_radius ?? 30}</label>
+              <input type="range" min={0} max={100} step={5} value={field.bg_radius ?? 30}
+                onChange={e => onChange({ bg_radius: +e.target.value })}
+                className="flex-1 accent-current cursor-pointer"/>
             </div>
           </div>
         )}

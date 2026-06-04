@@ -981,6 +981,7 @@ export function TemplatePreview({ template, userTexts, textOverrides, extraField
                 textAlign,
                 whiteSpace: 'nowrap',
                 ...(f.vertical ? { writingMode: 'vertical-rl' as const, textOrientation: 'upright' as const } : {}),
+                ...(f.bg_color ? { backgroundColor: f.bg_color, padding: '0.16em 0.28em', borderRadius: `${0.66 * (f.bg_radius ?? 30) / 100}em` } : {}),
                 ...strokeCss,
                 ...shadowCss,
                 position: 'relative' as const,
