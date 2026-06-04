@@ -425,16 +425,29 @@ def _trapezoid_corners(W, H, amount, skew):
 
 
 def _find_coeffs(pa, pb):
-    """投影变换系数: output 的 pa 四角 → input 的 pb 四角 (给 Image.transform PERSPECTIVE)."""
-    import numpy as _np
+    """投影变换系数: output 的 pa 四角 → input 的 pb 四角 (给 Image.transform PERSPECTIVE).
+    纯 Python 高斯消元 (部分主元), 不依赖 numpy —— 云上 venv 没 numpy. 跟前端 coverTrapezoid.ts 同算法."""
     A = []
+    b = []
     for (x, y), (X, Y) in zip(pa, pb):
-        A.append([x, y, 1, 0, 0, 0, -X * x, -X * y])
-        A.append([0, 0, 0, x, y, 1, -Y * x, -Y * y])
-    A = _np.array(A, dtype=_np.float64)
-    B = _np.array([c for p in pb for c in p], dtype=_np.float64)
-    res = _np.linalg.solve(A, B)
-    return res.tolist()
+        A.append([x, y, 1, 0, 0, 0, -X * x, -X * y]); b.append(X)
+        A.append([0, 0, 0, x, y, 1, -Y * x, -Y * y]); b.append(Y)
+    n = 8
+    for col in range(n):
+        piv = max(range(col, n), key=lambda r: abs(A[r][col]))
+        if abs(A[piv][col]) < 1e-9:
+            raise ValueError('singular matrix')
+        A[col], A[piv] = A[piv], A[col]
+        b[col], b[piv] = b[piv], b[col]
+        d = A[col][col]
+        for r in range(n):
+            if r == col:
+                continue
+            fct = A[r][col] / d
+            for c in range(col, n):
+                A[r][c] -= fct * A[col][c]
+            b[r] -= fct * b[col]
+    return [b[i] / A[i][i] for i in range(n)]
 
 
 def _apply_trapezoid(layer, amount, skew):
