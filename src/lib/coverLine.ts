@@ -3,7 +3,7 @@
 // thicknessCss = 已换算到目标单位的线粗 (Admin.tsx 用 px, TemplateCoverPicker 用 cqw).
 import type { CSSProperties } from 'react'
 
-const BRUSH_URL = '/cover-brush.png'   // 真实笔刷图 (public/), 跟后端同一张
+const BRUSH_URL = '/cover-brush.png?v=2'   // 真实笔刷图 (public/), 跟后端同一张. ?v 换图防缓存
 
 export function lineStyle(
   style: string | undefined,
