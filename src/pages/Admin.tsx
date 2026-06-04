@@ -1816,18 +1816,18 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
   const activeLine = lines.find(l => l._id === activeLineId) || null
 
   // 加一条装饰线条 (默认横贯画布中部, 居中, 实线白色)
-  const addLine = () => {
+  const addLine = (brush = false) => {
     const bw = bgNaturalSize.w || 1080
     const bh = bgNaturalSize.h || 1440
-    const w = Math.round(bw * 0.5)
-    const h = Math.round(Math.max(30, bw * 0.04))
+    const w = Math.round(bw * (brush ? 0.62 : 0.5))
+    const h = Math.round(brush ? bw * 0.18 : Math.max(30, bw * 0.04))   // 笔刷给更高的框
     const newLine: UiLineField = {
       _id: `l_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       x: Math.round((bw - w) / 2),
       y: Math.round(bh / 2 - h / 2),
       w, h,
-      style: 'solid',
-      color: '#FFFFFF',
+      style: brush ? 'brush' : 'solid',
+      color: brush ? '#FFE14D' : '#FFFFFF',
       thickness: Math.max(4, Math.round(bw * 0.012)),
       rotation: 0,
       layer: 'front',
@@ -1908,11 +1908,17 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
                 </button>
               </div>
 
-              {/* 加装饰线条: 点一下加一条 (默认横在画布中部), 再到画布上拖/缩放/旋转 */}
-              <button onClick={addLine}
-                className="flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg border border-[var(--border)] text-xs text-[var(--text-2)] hover:border-[var(--text)] cursor-pointer mb-3">
-                <Plus size={12}/> 加装饰线条
-              </button>
+              {/* 加装饰线条 / 加笔刷: 点一下加一个, 再到画布上拖/缩放/旋转 */}
+              <div className="flex gap-1.5 mb-3">
+                <button onClick={() => addLine(false)}
+                  className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg border border-[var(--border)] text-xs text-[var(--text-2)] hover:border-[var(--text)] cursor-pointer">
+                  <Plus size={12}/> 加装饰线条
+                </button>
+                <button onClick={() => addLine(true)}
+                  className="flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg border border-[var(--border)] text-xs text-[var(--text-2)] hover:border-[var(--text)] cursor-pointer">
+                  <Plus size={12}/> 加笔刷
+                </button>
+              </div>
 
               {/* 人物坑 (最多 1) */}
               {personSlot && (
@@ -1962,7 +1968,7 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
                             activeLineId === l._id ? 'bg-[var(--text)] text-[var(--bg)]' : 'text-[var(--text-2)] hover:bg-[var(--bg-hover)]'
                           }`}>
                           <span className="font-mono text-[10px] opacity-60">线{i + 1}</span>
-                          <span className="flex-1 text-left truncate">{l.style === 'wavy' ? '波浪线' : l.style === 'double' ? '双线' : '实线'}{l.layer === 'behind' ? ' · 人物后' : ''}</span>
+                          <span className="flex-1 text-left truncate">{l.style === 'wavy' ? '波浪线' : l.style === 'double' ? '双线' : l.style === 'brush' ? '笔刷' : '实线'}{l.layer === 'behind' ? ' · 人物后' : ''}</span>
                           <span className="text-[10px] opacity-60">{l.w}×{l.thickness}</span>
                         </button>
                       ))}
@@ -2377,7 +2383,7 @@ function LineEditor({ line, bgWidth, hasPerson, onChange, onRemove }: {
       <div>
         <div className="text-xs text-[var(--text-3)] mb-2">样式</div>
         <div className="flex gap-1.5">
-          {([['solid', '实线'], ['wavy', '波浪'], ['double', '双线']] as const).map(([v, label]) => (
+          {([['solid', '实线'], ['wavy', '波浪'], ['double', '双线'], ['brush', '笔刷']] as const).map(([v, label]) => (
             <button key={v} onClick={() => onChange({ style: v })}
               className={`px-3 py-1 rounded-lg border text-xs cursor-pointer transition-colors ${(line.style || 'solid') === v ? 'border-[var(--text)] bg-[var(--text)] text-[var(--bg)]' : 'border-[var(--border)] text-[var(--text-2)]'}`}>
               {label}
@@ -2568,37 +2574,27 @@ function FieldEditor({ field, fonts, bgWidth, hasPerson, onChange, onRemove, war
       <div className="border-t border-[var(--border)] pt-3">
         <div className="flex items-center justify-between mb-2">
           <span className="text-xs text-[var(--text-3)]">文字背景 (底色块)</span>
-          <button onClick={() => onChange(field.bg_color ? { bg_color: null } : { bg_color: '#FFE14D' })}
+          <button onClick={() => onChange(field.bg_color ? { bg_color: null } : { bg_color: '#FFE14D', bg_style: 'rect' })}
             className="text-[10px] text-[var(--text-2)] hover:text-[var(--text)] cursor-pointer underline">
             {field.bg_color ? '关闭背景' : '开启背景'}
           </button>
         </div>
         {field.bg_color && (
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center gap-3 flex-wrap">
-              <div className="flex items-center gap-1.5">
-                <label className="text-[10px] text-[var(--text-3)]">颜色</label>
-                <input type="color" value={field.bg_color || '#FFE14D'} onChange={e => onChange({ bg_color: e.target.value })}
-                  className="w-9 h-7 bg-[var(--bg)] border border-[var(--border)] rounded cursor-pointer"/>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <label className="text-[10px] text-[var(--text-3)]">形状</label>
-                {([['方块', 'rect'], ['笔刷', 'brush']] as const).map(([l, v]) => (
-                  <button key={v} onClick={() => onChange({ bg_style: v })}
-                    className={`px-2.5 py-1 rounded border text-[10px] cursor-pointer ${(field.bg_style || 'rect') === v ? 'border-[var(--text)] bg-[var(--text)] text-[var(--bg)]' : 'border-[var(--border)] text-[var(--text-2)] hover:border-[var(--text)]'}`}>{l}</button>
-                ))}
-              </div>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1.5">
+              <label className="text-[10px] text-[var(--text-3)]">颜色</label>
+              <input type="color" value={field.bg_color || '#FFE14D'} onChange={e => onChange({ bg_color: e.target.value, bg_style: 'rect' })}
+                className="w-9 h-7 bg-[var(--bg)] border border-[var(--border)] rounded cursor-pointer"/>
             </div>
-            {(field.bg_style || 'rect') !== 'brush' && (
-              <div className="flex items-center gap-1.5">
-                <label className="text-[10px] text-[var(--text-3)] whitespace-nowrap">圆角 {field.bg_radius ?? 30}</label>
-                <input type="range" min={0} max={100} step={5} value={field.bg_radius ?? 30}
-                  onChange={e => onChange({ bg_radius: +e.target.value })}
-                  className="flex-1 accent-current cursor-pointer"/>
-              </div>
-            )}
+            <div className="flex-1 flex items-center gap-1.5">
+              <label className="text-[10px] text-[var(--text-3)] whitespace-nowrap">圆角 {field.bg_radius ?? 30}</label>
+              <input type="range" min={0} max={100} step={5} value={field.bg_radius ?? 30}
+                onChange={e => onChange({ bg_radius: +e.target.value })}
+                className="flex-1 accent-current cursor-pointer"/>
+            </div>
           </div>
         )}
+        <div className="text-[10px] text-[var(--text-3)] mt-1.5">想要笔刷涂抹效果? 用左边「加笔刷」(独立可拖)</div>
       </div>
 
       <div className="border-t border-[var(--border)] pt-3">

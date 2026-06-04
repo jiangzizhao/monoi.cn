@@ -507,9 +507,24 @@ def _draw_arc_field(img, field, segments, font, cur_size, total_w, text_h,
     img.alpha_composite(layer, (box_cx - layer.width // 2, box_cy - layer.height // 2))
 
 
+_BRUSH_IMG = None
+
+
+def _load_brush():
+    """加载真实纹理笔刷图 (白笔刷透明底, alpha=笔触), 缓存. 跟 cover_compositor.py 同目录."""
+    global _BRUSH_IMG
+    if _BRUSH_IMG is None:
+        try:
+            p = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cover-brush.png')
+            _BRUSH_IMG = Image.open(p).convert('RGBA')
+        except Exception as e:
+            print(f"[cover] 笔刷图加载失败: {e}", flush=True)
+            _BRUSH_IMG = False
+    return _BRUSH_IMG if _BRUSH_IMG else None
+
+
 def _draw_line_field(img: Image.Image, line: dict):
-    """独立装饰线条: 在 box(x/y/w/h) 内, 横贯盒宽画一条线于垂直中心,
-    样式 solid/wavy/double, 可旋转. 单独 layer 画 → 旋转 → 居中贴 box 中心 (跟文字字段一致)."""
+    """独立装饰元素: 线条(solid/wavy/double) 或 笔刷(brush, 贴真实笔刷图着色). box(x/y/w/h) 可拖/缩放/旋转."""
     import math
     if not line:
         return
@@ -520,6 +535,18 @@ def _draw_line_field(img: Image.Image, line: dict):
     bx = int(line.get('x', 0)); by = int(line.get('y', 0))
     bw = int(line.get('w', 200)); bh = int(line.get('h', 40))
     if bw < 1:
+        return
+
+    # 笔刷: 真实纹理笔刷图着色后填满 box, 旋转, 居中贴
+    if style == 'brush':
+        brush = _load_brush()
+        if brush is not None:
+            bimg = brush.resize((max(1, bw), max(1, bh)), Image.BILINEAR)
+            solid = Image.new('RGBA', bimg.size, color + (255,))
+            solid.putalpha(bimg.split()[3])
+            if abs(rotation) > 0.01:
+                solid = solid.rotate(-rotation, expand=True, resample=Image.BICUBIC)
+            img.alpha_composite(solid, (bx + bw // 2 - solid.width // 2, by + bh // 2 - solid.height // 2))
         return
 
     amp = thick * 1.4 if style == 'wavy' else 0

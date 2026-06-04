@@ -51,7 +51,7 @@ export interface PersonSlotOverride {
 // 独立装饰线条 (admin 设计模板时加, 用户只看不改)
 export interface CoverLineField {
   x: number; y: number; w: number; h: number
-  style: 'solid' | 'wavy' | 'double'
+  style: 'solid' | 'wavy' | 'double' | 'brush'
   color: string
   thickness: number
   rotation: number

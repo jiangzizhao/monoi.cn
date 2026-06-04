@@ -289,7 +289,7 @@ export interface CoverPersonSlot {
 // 独立装饰线条 (不依赖文字): 盒子 x/y/w/h, 线横贯盒宽画在垂直中心. 可拖/缩放/旋转/前后层.
 export interface CoverLineField {
   x: number; y: number; w: number; h: number
-  style: 'solid' | 'wavy' | 'double'
+  style: 'solid' | 'wavy' | 'double' | 'brush'
   color: string
   thickness: number                   // 线粗 (px)
   rotation: number                    // 旋转角度 (°)
