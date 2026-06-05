@@ -2424,12 +2424,17 @@ async def subtitle_transcribe_proxy(request: Request):
 
 @app.post("/api/voice/subtitle/burn")
 async def subtitle_burn_proxy(request: Request):
-    """把改好的字幕烧进视频, 返回新视频 URL. 转发 voice-server (ffmpeg 重编码, 慢, 长超时)."""
+    """把改好的字幕烧进视频, 返回新视频 URL. 转发 voice-server (ffmpeg 重编码, 慢, 长超时).
+    烧成片才扣 3 积分 (识别/改字免费; 在跑 ffmpeg 前同步扣, 不够直接 402, 不浪费算力. 管理员免扣)."""
     import requests as _req
     try:
         body = await request.json()
     except Exception:
         body = {}
+    # 烧录成片扣 3 积分 (不够 402 阻断, ffmpeg 根本不发生)
+    _uid = _user_id_from_request(request)
+    from billing import consume_credits
+    consume_credits(_uid, 'subtitle_burn', 3, ref_id=str(body.get('video_oss_key') or ''))
     try:
         resp = _req.post(f"{VOICE_SERVER_URL}/api/voice/subtitle/burn", json=body, timeout=960)
         if resp.status_code != 200:

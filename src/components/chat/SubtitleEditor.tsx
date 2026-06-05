@@ -52,9 +52,8 @@ export function SubtitleEditor({ transcribeInput, previewUrl, onClose, onDone }:
       : 'border-[var(--border)] text-[var(--text-2)] hover:border-[var(--text)]'}`
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3" onClick={onClose}>
-      <div className="w-full max-w-2xl max-h-[90vh] flex flex-col rounded-2xl bg-[var(--bg-card)] border border-[var(--border)] shadow-2xl overflow-hidden"
-        onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3">
+      <div className="w-full max-w-2xl max-h-[90vh] flex flex-col rounded-2xl bg-[var(--bg-card)] border border-[var(--border)] shadow-2xl overflow-hidden">
         {/* 头 */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
           <div className="flex items-center gap-2 text-sm font-medium"><Captions size={16}/> 加字幕</div>
@@ -121,7 +120,7 @@ export function SubtitleEditor({ transcribeInput, previewUrl, onClose, onDone }:
               {err ? <span className="text-xs text-red-400 truncate">{err}</span> : <span className="text-[10px] text-[var(--text-3)]">字幕会硬烧进视频 (发抖音/小红书自带字幕)</span>}
               <button onClick={handleBurn} disabled={phase === 'burning'}
                 className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--text)] text-[var(--bg)] text-sm cursor-pointer disabled:opacity-50 disabled:cursor-wait flex-shrink-0">
-                {phase === 'burning' ? <><Loader2 size={14} className="animate-spin"/> 生成中 (约 30-90 秒)</> : '生成带字幕的视频'}
+                {phase === 'burning' ? <><Loader2 size={14} className="animate-spin"/> 生成中 (约 30-90 秒)</> : '生成带字幕的视频 · 3 积分'}
               </button>
             </div>
           </>
