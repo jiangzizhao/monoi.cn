@@ -62,17 +62,8 @@ function createWindow() {
   // 加载 monoi 网页. dev 时可以 MONOI_URL=http://localhost:5173 测本地
   mainWin.loadURL(MONOI_URL)
 
-  // 录屏: 自动给主屏, 不弹浏览器"选择共享"框 (桌面端体验更顺).
-  // 网页里 getDisplayMedia 触发时, 这个 handler 直接返回主屏源.
-  try {
-    mainWin.webContents.session.setDisplayMediaRequestHandler((_request, callback) => {
-      desktopCapturer.getSources({ types: ['screen'] }).then((sources) => {
-        callback(sources[0] ? { video: sources[0] } : {})
-      }).catch(() => callback({}))
-    }, { useSystemPicker: false })
-  } catch (err) {
-    console.warn('[click-zoom] setDisplayMediaRequestHandler 失败, 回退浏览器选择框:', err)
-  }
+  // 录屏不再自动抓整屏 (会把 monoi 自己也录进去=套娃). 改成网页弹自定义"选窗口"面板:
+  // 网页调 desktop:list-sources 拿到窗口/屏幕缩略图列表, 用户选一个, 再用 getUserMedia(chromeMediaSourceId) 只录那个.
 
   // 新窗口 / target=_blank 等弹外部浏览器, 不在 Electron 内开 (防卡死)
   mainWin.webContents.setWindowOpenHandler((details: { url: string }) => {
@@ -100,6 +91,28 @@ app.on('second-instance', () => {
 })
 
 // ============== IPC handlers (renderer → main) ==============
+
+// 录屏"选窗口"面板: 列出可录的窗口 + 屏幕 (带缩略图). 过滤掉 monoi 自己的窗口防套娃.
+ipcMain.handle('list-screen-sources', async () => {
+  try {
+    const sources = await desktopCapturer.getSources({
+      types: ['window', 'screen'],
+      thumbnailSize: { width: 320, height: 180 },
+      fetchWindowIcons: false,
+    })
+    return sources
+      .filter((s) => !/monoi/i.test(s.name))          // 别让用户选到 monoi 自己 (套娃)
+      .map((s) => ({
+        id: s.id,
+        name: s.name,
+        isScreen: s.id.startsWith('screen:'),
+        thumbnail: s.thumbnail.isEmpty() ? '' : s.thumbnail.toDataURL(),
+      }))
+  } catch (err) {
+    console.warn('[record] list-screen-sources 失败:', err)
+    return []
+  }
+})
 
 ipcMain.handle('detect-edge', () => {
   return { path: detectEdgePath() }

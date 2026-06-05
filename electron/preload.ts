@@ -38,6 +38,10 @@ const api = {
   detectEdge: async (): Promise<{ path: string | null }> =>
     ipcRenderer.invoke('detect-edge'),
 
+  /** 录屏"选窗口": 列出可录的窗口/屏幕 (带缩略图). 用户选一个后, 网页用 getUserMedia(chromeMediaSourceId) 录它. */
+  listScreenSources: async (): Promise<{ id: string; name: string; isScreen: boolean; thumbnail: string }[]> =>
+    ipcRenderer.invoke('list-screen-sources'),
+
   /** 调本地 Edge 发布到平台. 同步阻塞: 主进程跑 Playwright, renderer 转圈等 */
   publish: async (req: PublishReq): Promise<PublishResult> =>
     ipcRenderer.invoke('publish', req),
