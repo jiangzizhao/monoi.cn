@@ -7,6 +7,17 @@ import { humanizeNetworkError } from '../../lib/errorHumanize'
 import { VocalRemoverDialog } from '../VocalRemoverDialog'
 import { listBgmLibrary, type BgmTrack } from '../../services/audio'
 import { getToken } from '../../lib/auth'
+import { subtitleTranscribe, subtitleBurn, type SubSeg } from '../../services/subtitle'
+import { loadFont, fontFamily } from '../../utils/coverFonts'
+
+// 字幕样式选项 (跟独立「加字幕」编辑器一致)
+const SUB_COLORS: [string, string][] = [
+  ['#FFFFFF', '白'], ['#000000', '黑'], ['#FFE14D', '黄'], ['#FF4D4D', '红'],
+  ['#FF8C1A', '橙'], ['#3B9EFF', '蓝'], ['#34C759', '绿'], ['#FF6FB5', '粉'],
+]
+const SUB_STROKES: [number, string][] = [[0, '无'], [0.6, '细'], [1, '中'], [1.8, '粗']]
+const fmtT = (t: number) => `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(Math.floor(t % 60)).padStart(2, '0')}`
+interface SubFontItem { file: string; label: string }
 
 // BGM 库类目中文名映射
 const BGM_CATEGORY_LABEL: Record<string, string> = {
@@ -64,6 +75,23 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
   // 合成 UI 进度: 显示已花时间 + 30s 后给取消按钮
   const [composeElapsed, setComposeElapsed] = useState(0)
   const composeAbortRef = useRef<AbortController | null>(null)
+
+  // 字幕 (合成时一起烧进去, 画中画 + 字幕一次出片)
+  const [subOn, setSubOn] = useState(false)
+  const [subSegs, setSubSegs] = useState<SubSeg[]>([])
+  const [subTranscribing, setSubTranscribing] = useState(false)
+  const [subErr, setSubErr] = useState('')
+  const [subFontFile, setSubFontFile] = useState('')
+  const [subFontScale, setSubFontScale] = useState(1.0)
+  const [subColor, setSubColor] = useState('#FFFFFF')
+  const [subStrokeWidth, setSubStrokeWidth] = useState(1.0)
+  const [subStrokeColor, setSubStrokeColor] = useState('#000000')
+  const [subShadow, setSubShadow] = useState(true)
+  const [subX, setSubX] = useState(0.5)
+  const [subY, setSubY] = useState(0.9)
+  const [subDragging, setSubDragging] = useState(false)
+  const [subFonts, setSubFonts] = useState<SubFontItem[]>([])
+  const [previewBoxH, setPreviewBoxH] = useState(0)
 
   useEffect(() => {
     if (!composing) { setComposeElapsed(0); return }
@@ -183,7 +211,20 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
       if (!res.ok || !data.success) {
         throw new Error(data.detail || data.error || `合成失败 (${res.status})`)
       }
-      setComposedUrl(data.video_url)
+      // 成品的最终 url/key — 默认就是合成结果; 若开了字幕, 在合成结果上再烧字幕
+      let finalUrl: string = data.video_url
+      let finalKey: string = data.output_oss_key
+      const subClean = subOn ? subSegs.filter(s => s.text.trim()) : []
+      if (subClean.length && data.output_oss_key) {
+        const burned = await subtitleBurn({
+          video_oss_key: data.output_oss_key, segments: subClean,
+          font_scale: subFontScale, color: subColor,
+          font_file: subFontFile, stroke_color: subStrokeColor, stroke_width: subStrokeWidth, shadow: subShadow,
+          x_pct: subX, y_pct: subY,
+        })
+        finalUrl = burned.video_url; finalKey = burned.output_oss_key
+      }
+      setComposedUrl(finalUrl)
 
       // 把成品视频注入对话, 立刻关弹窗 — 结果已经在对话流里, 弹窗里不再重复展示
       const convId = chatStore.activeId
@@ -210,11 +251,11 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
           {
             type: 'video_player',
             data: {
-              video_url: data.video_url,
+              video_url: finalUrl,
               duration_ms: data.duration ? Math.round(data.duration * 1000) : undefined,
-              audio_label: '一键合成',
+              audio_label: subClean.length ? '一键合成 (带字幕)' : '一键合成',
               source: 'ai_generated' as const,
-              narration_oss_key: data.output_oss_key,   // 给封面/后续模块用
+              narration_oss_key: finalKey,   // 给封面/后续模块用
               jianying_payload: jianyingPayload,
             },
           },
@@ -326,6 +367,75 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
     try { (e.target as HTMLElement).releasePointerCapture(e.pointerId) } catch { /* noop */ }
   }
 
+  // 字幕: 识别口播语音拿可编辑字幕条 (时间跟成品对齐, 口播是主轨)
+  const transcribeSub = async () => {
+    if (!narrationOssKey) { setSubErr('缺少口播视频, 无法识别字幕'); return }
+    setSubTranscribing(true); setSubErr('')
+    try {
+      const r = await subtitleTranscribe({ video_oss_key: narrationOssKey })
+      setSubSegs(r.segments || [])
+      if (!r.segments?.length) setSubErr('没识别到语音')
+    } catch (e: any) {
+      setSubErr(e.message || '识别失败')
+    } finally {
+      setSubTranscribing(false)
+    }
+  }
+  const updateSubText = (i: number, text: string) => setSubSegs(prev => prev.map((s, j) => j === i ? { ...s, text } : s))
+  const removeSubSeg = (i: number) => setSubSegs(prev => prev.filter((_, j) => j !== i))
+
+  // 字幕拉字体列表 (开字幕时才拉)
+  useEffect(() => {
+    if (!subOn || subFonts.length) return
+    fetch(directBase + '/api/voice/cover-fonts').then(r => r.json()).then(d => {
+      const list: SubFontItem[] = (d.fonts || []).map((f: any) => ({ file: f.file, label: f.label || f.file }))
+      setSubFonts(list); list.slice(0, 16).forEach(f => loadFont(f.file))
+    }).catch(() => { /* 用默认字体 */ })
+  }, [subOn])  // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (subFontFile) loadFont(subFontFile) }, [subFontFile])
+  useEffect(() => {
+    const el = previewRef.current
+    if (!el) return
+    setPreviewBoxH(el.getBoundingClientRect().height)
+    const ro = new ResizeObserver(es => setPreviewBoxH(es[0].contentRect.height))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  // 字幕拖动 (中心点比例)
+  const onSubPointerDown = (e: React.PointerEvent) => {
+    e.preventDefault()
+    try { (e.target as HTMLElement).setPointerCapture(e.pointerId) } catch { /* noop */ }
+    setSubDragging(true)
+  }
+  const onSubPointerMove = (e: React.PointerEvent) => {
+    if (!subDragging || !previewRef.current) return
+    const r = previewRef.current.getBoundingClientRect()
+    if (!r.width || !r.height) return
+    setSubX(Math.min(0.95, Math.max(0.05, (e.clientX - r.left) / r.width)))
+    setSubY(Math.min(0.95, Math.max(0.05, (e.clientY - r.top) / r.height)))
+  }
+  const onSubPointerUp = (e: React.PointerEvent) => {
+    setSubDragging(false)
+    try { (e.target as HTMLElement).releasePointerCapture(e.pointerId) } catch { /* noop */ }
+  }
+  const subPreviewText = subSegs[0]?.text || '字幕预览'
+  const subFontPx = Math.max(10, previewBoxH * 0.05 * subFontScale)
+  const subStrokePx = subStrokeWidth > 0 ? Math.max(1, subFontPx * 0.07 * subStrokeWidth) : 0
+  const subPreviewStyle: React.CSSProperties = {
+    fontFamily: subFontFile ? `"${fontFamily(subFontFile)}", sans-serif` : 'sans-serif',
+    color: subColor, fontSize: subFontPx, fontWeight: 800, lineHeight: 1.25, textAlign: 'center',
+    maxWidth: '86%', whiteSpace: 'pre-wrap',
+    textShadow: subShadow ? '2px 2px 5px rgba(0,0,0,0.75)' : 'none',
+    WebkitTextStroke: subStrokePx > 0 ? `${subStrokePx}px ${subStrokeColor}` : undefined,
+    paintOrder: 'stroke fill', pointerEvents: 'auto', touchAction: 'none',
+    cursor: subDragging ? 'grabbing' : 'grab',
+  } as React.CSSProperties
+  const subBtn = (active: boolean) =>
+    `px-2.5 py-1 rounded-lg border text-xs cursor-pointer transition-colors ${active
+      ? 'border-[var(--text)] bg-[var(--text)] text-[var(--bg)]'
+      : 'border-[var(--border)] text-[var(--text-2)] hover:border-[var(--text)]'}`
+
   const fmt = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`
 
   const modal = (
@@ -376,6 +486,12 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
                   objectPosition: `center ${FACE_Y_POS[faceY]}`,
                 }}
               />
+              {/* 字幕示意层 (开字幕时显示, 可拖动; 跟画中画同框, 一起看效果) */}
+              {subOn && subSegs.length > 0 && (
+                <div className="absolute pointer-events-none" style={{ left: `${subX * 100}%`, top: `${subY * 100}%`, transform: 'translate(-50%, -50%)', width: '86%', display: 'flex', justifyContent: 'center' }}>
+                  <span onPointerDown={onSubPointerDown} onPointerMove={onSubPointerMove} onPointerUp={onSubPointerUp} style={subPreviewStyle}>{subPreviewText}</span>
+                </div>
+              )}
             </div>
           </div>
 
@@ -542,6 +658,84 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
             这是预览示意图. 当前 PIP 样式 / 位置 / 大小会在最终合成时按这个布局生效.
             点上方时间轴上的镜头可跳转, 同步看到对应 b-roll. 多素材按时长平均切.
           </p>
+
+          {/* 字幕配置 (合成时一起烧进画面, 画中画 + 字幕一次出片) */}
+          <div className="border border-[var(--border)] rounded-xl p-3 flex flex-col gap-3">
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-medium text-[var(--text-2)]">字幕 (合成时一起烧进画面)</div>
+              <div className="flex gap-2">
+                <button onClick={() => { setSubOn(true); if (!subSegs.length && !subTranscribing) transcribeSub() }} className={subBtn(subOn)}>开</button>
+                <button onClick={() => setSubOn(false)} className={subBtn(!subOn)}>关</button>
+              </div>
+            </div>
+
+            {subOn && (
+              <>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button onClick={transcribeSub} disabled={subTranscribing}
+                    className="px-3 py-1.5 rounded-lg border border-[var(--border)] text-xs text-[var(--text-2)] hover:border-[var(--text)] cursor-pointer disabled:opacity-50">
+                    {subTranscribing ? '识别中…' : (subSegs.length ? '重新识别' : '识别字幕')}
+                  </button>
+                  {subSegs.length > 0 && <span className="text-[11px] text-[var(--text-3)]">已识别 {subSegs.length} 句 (可改错别字 / 删多余)</span>}
+                  {subErr && <span className="text-[11px] text-red-400">{subErr}</span>}
+                </div>
+
+                {subSegs.length > 0 && (
+                  <div className="max-h-40 overflow-y-auto flex flex-col gap-1.5 pr-1">
+                    {subSegs.map((s, i) => (
+                      <div key={i} className="flex items-center gap-2">
+                        <span className="text-[10px] text-[var(--text-3)] font-mono w-10 flex-shrink-0">{fmtT(s.start)}</span>
+                        <input value={s.text} onChange={e => updateSubText(i, e.target.value)}
+                          className="flex-1 min-w-0 px-2 py-1 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-xs focus:border-[var(--text)] outline-none"/>
+                        <button onClick={() => removeSubSeg(i)} className="text-[var(--text-3)] hover:text-red-400 cursor-pointer flex-shrink-0 text-xs" title="删除">✕</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-[var(--text-3)] w-12">字体</span>
+                  <select value={subFontFile} onChange={e => setSubFontFile(e.target.value)}
+                    className="flex-1 px-2 py-1.5 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-xs text-[var(--text)] outline-none cursor-pointer">
+                    <option value="">默认 (思源黑体)</option>
+                    {subFonts.map(f => <option key={f.file} value={f.file}>{f.label}</option>)}
+                  </select>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-[var(--text-3)] w-12">字号</span>
+                  <input type="range" min={0.6} max={1.6} step={0.05} value={subFontScale} onChange={e => setSubFontScale(parseFloat(e.target.value))} className="flex-1 accent-[var(--text)] cursor-pointer"/>
+                  <span className="text-[11px] text-[var(--text-3)] w-9 text-right tabular-nums">{Math.round(subFontScale * 100)}%</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-[var(--text-3)] w-12">颜色</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {SUB_COLORS.map(([c, l]) => <button key={c} title={l} onClick={() => setSubColor(c)} className={`w-5 h-5 rounded-full border-2 cursor-pointer ${subColor === c ? 'border-[var(--text)] scale-110' : 'border-[var(--border)]'}`} style={{ background: c }}/>)}
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <span className="text-xs text-[var(--text-3)] w-12">描边</span>
+                  <div className="flex gap-1.5">
+                    {SUB_STROKES.map(([w, l]) => <button key={l} onClick={() => setSubStrokeWidth(w)} className={subBtn(subStrokeWidth === w)}>{l}</button>)}
+                  </div>
+                  {subStrokeWidth > 0 && (['#000000', '#FFFFFF'] as const).map(c => <button key={c} title={c === '#000000' ? '黑边' : '白边'} onClick={() => setSubStrokeColor(c)} className={`w-5 h-5 rounded-full border-2 cursor-pointer ${subStrokeColor === c ? 'border-[var(--text)] scale-110' : 'border-[var(--border)]'}`} style={{ background: c }}/>)}
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-[var(--text-3)] w-12">阴影</span>
+                  <div className="flex gap-2">
+                    <button onClick={() => setSubShadow(true)} className={subBtn(subShadow)}>开</button>
+                    <button onClick={() => setSubShadow(false)} className={subBtn(!subShadow)}>关</button>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-[var(--text-3)] w-12">位置</span>
+                  <div className="flex gap-2">
+                    {([['底部', 0.9], ['中间', 0.5], ['顶部', 0.1]] as const).map(([l, y]) => <button key={l} onClick={() => { setSubX(0.5); setSubY(y) }} className={subBtn(Math.abs(subX - 0.5) < 0.02 && Math.abs(subY - y) < 0.02)}>{l}</button>)}
+                  </div>
+                </div>
+                <span className="text-[11px] text-[var(--text-3)]">字幕跟画中画在上面预览里一起看 · 可直接拖动字幕到任意位置 · 合成时一次烧进视频 (+3 积分)</span>
+              </>
+            )}
+          </div>
 
           {/* BGM 配置 */}
           <div className="border border-[var(--border)] rounded-xl p-3 flex flex-col gap-3">
@@ -813,7 +1007,7 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
                 : 'bg-[var(--text)] text-[var(--bg)] hover:opacity-80 cursor-pointer'
             }`}
           >
-            {composing ? <><Loader2 size={14} className="animate-spin"/> 合成中 {composeElapsed}s</> : (composedUrl ? '重新合成' : '一键合成')}
+            {composing ? <><Loader2 size={14} className="animate-spin"/> 合成中 {composeElapsed}s</> : (composedUrl ? '重新合成' : (subOn && subSegs.length ? '一键合成 (带字幕)' : '一键合成'))}
           </button>
         </div>
       </div>
