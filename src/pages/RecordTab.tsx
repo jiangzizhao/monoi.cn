@@ -9,6 +9,7 @@ import { useNavigate } from 'react-router-dom'
 import { Camera, Monitor, Mic, Square, Download, AlertCircle, RotateCcw, Settings, Video, Scissors, Music, X as XIcon } from 'lucide-react'
 import type Konva from 'konva'
 import { WhiteboardEditor } from '../components/whiteboard/WhiteboardEditor'
+import { ScreenshotAnnotator } from '../components/ScreenshotAnnotator'
 import { Logo } from '../components/Logo'
 import { useChatStore, makeAssistantMsg } from '../store/chatStore'
 // 转 mp4 走 OSS 临时上传 (5 分钟后让 lifecycle 清, 成本可忽略)
@@ -117,6 +118,8 @@ export default function RecordTab() {
   // 桌面端"选窗口"面板
   const [showSourcePicker, setShowSourcePicker] = useState(false)
   const [sources, setSources] = useState<{ id: string; name: string; isScreen: boolean; thumbnail: string }[]>([])
+  // 截屏标注: 抓当前屏幕帧 → 进批注编辑器
+  const [shotDataUrl, setShotDataUrl] = useState<string | null>(null)
   // 缩放状态用 ref (在 raf 循环里逐帧改, 不触发 re-render)
   const zoomRef = useRef({ scale: 1, fx: 0.5, fy: 0.5, targetScale: 1, tFx: 0.5, tFy: 0.5, lastClickT: 0 })
   const clickZoomRef = useRef(clickZoom)
@@ -306,6 +309,18 @@ export default function RecordTab() {
     } catch (e: any) {
       setError(`录这个窗口失败: ${e.message || e}. 换一个窗口试试`)
     }
+  }
+
+  // 截屏: 抓当前屏幕画面的一帧 → 进批注编辑器 (画箭头/写字)
+  const captureScreenshot = () => {
+    const v = screenVideoRef.current
+    if (!v || !v.videoWidth) { setError('先选要录/截的窗口, 等画面出来再截屏'); return }
+    const c = document.createElement('canvas')
+    c.width = v.videoWidth; c.height = v.videoHeight
+    const ctx = c.getContext('2d')
+    if (!ctx) return
+    ctx.drawImage(v, 0, 0, c.width, c.height)
+    setShotDataUrl(c.toDataURL('image/png'))
   }
   /** 枚举 Chrome 看到的所有摄像头 + 麦克风 — 调试 + 让用户切换源. */
   const refreshCameras = async (): Promise<MediaDeviceInfo[]> => {
@@ -705,6 +720,9 @@ export default function RecordTab() {
       <video ref={screenVideoRef} className="hidden" muted playsInline/>
       <video ref={cameraVideoRef} className="hidden" muted playsInline/>
 
+      {/* 截屏标注编辑器 */}
+      {shotDataUrl && <ScreenshotAnnotator imageDataUrl={shotDataUrl} onClose={() => setShotDataUrl(null)}/>}
+
       {/* 桌面端"选窗口"面板: 选你要录的窗口/屏幕 (选窗口不会套娃; 点哪放大在录窗口最大化时最准) */}
       {showSourcePicker && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/55 p-4" onClick={() => setShowSourcePicker(false)}>
@@ -1066,6 +1084,12 @@ export default function RecordTab() {
             {phase === 'previewing' && (
               <>
                 <span className="flex-1 text-sm text-[var(--text-2)]">画面已就绪, 点 → 开始录制</span>
+                {screenStream && (
+                  <button onClick={captureScreenshot}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-[var(--border)] text-[var(--text-2)] hover:border-[var(--text)] text-sm cursor-pointer">
+                    <Scissors size={14}/> 截屏标注
+                  </button>
+                )}
                 <button onClick={startRecording}
                   className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-red-500 hover:bg-red-600 text-white text-sm font-medium cursor-pointer">
                   <span className="w-2 h-2 rounded-full bg-white"/> 开始录制
