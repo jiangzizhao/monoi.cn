@@ -110,6 +110,30 @@ export default function RecordTab() {
   // 白板模式: Konva stage ref, canvas loop 里画到主 canvas
   const whiteboardStageRef = useRef<Konva.Stage | null>(null)
 
+  // 桌面端「点哪自动放大」: electron 全局监听鼠标点击 → 发坐标过来 → 画布合成时缩放到该点.
+  // 网页(无 window.monoiDesktop)下整个特性自动关闭, 零副作用.
+  const isDesktop = typeof (window as any).monoiDesktop?.onScreenClick === 'function'
+  const [clickZoom, setClickZoom] = useState(true)   // 桌面端默认开
+  // 缩放状态用 ref (在 raf 循环里逐帧改, 不触发 re-render)
+  const zoomRef = useRef({ scale: 1, fx: 0.5, fy: 0.5, targetScale: 1, tFx: 0.5, tFy: 0.5, lastClickT: 0 })
+  const clickZoomRef = useRef(clickZoom)
+  useEffect(() => { clickZoomRef.current = clickZoom }, [clickZoom])
+
+  // 订阅桌面端鼠标点击 → 触发缩放 (只在录屏/预览 + 屏幕模式 + 开关打开时生效)
+  useEffect(() => {
+    if (!isDesktop) return
+    const desktop = (window as any).monoiDesktop
+    const unsub = desktop.onScreenClick((d: { xPct: number; yPct: number }) => {
+      if (!clickZoomRef.current) return
+      const z = zoomRef.current
+      z.targetScale = 1.9
+      z.tFx = Math.min(0.92, Math.max(0.08, d.xPct))
+      z.tFy = Math.min(0.92, Math.max(0.08, d.yPct))
+      z.lastClickT = performance.now()
+    })
+    return () => { try { unsub && unsub() } catch { /* noop */ } }
+  }, [isDesktop])
+
   const isUnsupported = typeof navigator !== 'undefined'
     && !(navigator.mediaDevices?.getDisplayMedia)
 
@@ -193,7 +217,13 @@ export default function RecordTab() {
         // 屏幕: contain 模式 (源 16:9 输出 9:16 时上下黑边, 不裁切丢内容)
         ctx.fillStyle = '#000000'
         ctx.fillRect(0, 0, canvas.width, canvas.height)
-        drawContain(ctx, screenV, canvas.width, canvas.height)
+        // 点哪自动放大: 逐帧把当前 scale/中心 缓动到目标; 停止点击 1.6s 后自动缩回
+        const z = zoomRef.current
+        if (z.targetScale > 1 && performance.now() - z.lastClickT > 1600) z.targetScale = 1
+        z.scale += (z.targetScale - z.scale) * 0.14
+        z.fx += (z.tFx - z.fx) * 0.18
+        z.fy += (z.tFy - z.fy) * 0.18
+        drawContainZoom(ctx, screenV, canvas.width, canvas.height, z.scale, z.fx, z.fy)
       } else {
         // 没源时全黑
         ctx.fillStyle = '#000000'
@@ -885,6 +915,21 @@ export default function RecordTab() {
 
               {showPipSettings && (
                 <div ref={pipPanelRef} className="rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] p-4 flex flex-col gap-3 msg-enter">
+                  {isDesktop && (
+                    <>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="text-xs font-medium text-[var(--text-2)]">点哪自动放大</div>
+                          <div className="text-[10px] text-[var(--text-3)]">录屏时鼠标点哪, 画面就放大到哪 (停手 1.6 秒自动缩回)</div>
+                        </div>
+                        <div className="flex gap-2 text-xs">
+                          <button onClick={() => setClickZoom(true)} className={`px-3 py-1 rounded-lg border cursor-pointer transition-colors ${clickZoom ? 'border-[var(--text)] bg-[var(--text)] text-[var(--bg)]' : 'border-[var(--border)] text-[var(--text-2)]'}`}>开</button>
+                          <button onClick={() => setClickZoom(false)} className={`px-3 py-1 rounded-lg border cursor-pointer transition-colors ${!clickZoom ? 'border-[var(--text)] bg-[var(--text)] text-[var(--bg)]' : 'border-[var(--border)] text-[var(--text-2)]'}`}>关</button>
+                        </div>
+                      </div>
+                      <div className="border-t border-[var(--border-subtle)]"/>
+                    </>
+                  )}
                   <div className="text-xs font-medium text-[var(--text-2)]">输出尺寸</div>
                   <div className="flex flex-wrap items-center gap-2 text-xs">
                     {(['16:9', '9:16', '1:1', '3:4'] as OutputRatio[]).map(r => (
@@ -1059,6 +1104,21 @@ function drawContain(ctx: CanvasRenderingContext2D, v: HTMLVideoElement, dw: num
   const w = sw * scale, h = sh * scale
   const x = (dw - w) / 2, y = (dh - h) / 2
   ctx.drawImage(v, x, y, w, h)
+}
+
+/** contain + 缩放: scale=1 等同 drawContain; scale>1 时裁出以 (fx,fy) 为中心的窗口放大铺进同一画面区域 (点哪放大哪). */
+function drawContainZoom(ctx: CanvasRenderingContext2D, v: HTMLVideoElement, dw: number, dh: number, zScale: number, fx: number, fy: number) {
+  const sw = v.videoWidth, sh = v.videoHeight
+  if (!sw || !sh) return
+  const fit = Math.min(dw / sw, dh / sh)
+  const w = sw * fit, h = sh * fit
+  const x = (dw - w) / 2, y = (dh - h) / 2
+  if (zScale <= 1.01) { ctx.drawImage(v, x, y, w, h); return }
+  const cropW = sw / zScale, cropH = sh / zScale
+  let sx = fx * sw - cropW / 2, sy = fy * sh - cropH / 2
+  sx = Math.max(0, Math.min(sw - cropW, sx))
+  sy = Math.max(0, Math.min(sh - cropH, sy))
+  ctx.drawImage(v, sx, sy, cropW, cropH, x, y, w, h)
 }
 
 /** 在 canvas 上画 PIP 摄像头 — 形状 clip + 边框. circle 用方形 (1:1) 才是真圆. */
