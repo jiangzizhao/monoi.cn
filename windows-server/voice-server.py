@@ -1010,12 +1010,12 @@ def _split_subtitle_segments(segments, max_chars=16):
     return [s for s in out if s["text"] and s["end"] > s["start"]]
 
 
-def _wrap_cjk(text, per_line=16):
+def _wrap_cjk(text, per_line=16, max_lines=3):
     text = (text or "").replace("\n", " ").strip()
     if len(text) <= per_line:
         return text
     lines = [text[i:i + per_line] for i in range(0, len(text), per_line)]
-    return "\n".join(lines[:2])   # 最多 2 行, 字幕别太高
+    return "\n".join(lines[:max_lines])   # 控制行数, 字幕别太高
 
 
 class SubtitleTranscribeReq(BaseModel):
@@ -1085,16 +1085,20 @@ def subtitle_burn(req: SubtitleBurnReq):
     src = os.path.join(work, "in.mp4"); out = os.path.join(work, "out.mp4")
     try:
         oss_download(req.video_oss_key, src)
-        # 探视频高度算字号
-        h = 720
+        # 探视频宽高: 字号按高度, 每行字数按宽度 (竖屏宽窄, 不按宽度限行就会超出屏幕)
+        w, h = 720, 720
         try:
             pr = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0",
-                                 "-show_entries", "stream=height", "-of", "csv=p=0", src],
+                                 "-show_entries", "stream=width,height", "-of", "csv=p=0", src],
                                 capture_output=True, text=True, timeout=30)
-            h = int((pr.stdout or "").strip() or 720)
+            parts = (pr.stdout or "").strip().split(",")
+            if len(parts) >= 2:
+                w, h = int(parts[0]), int(parts[1])
         except Exception:
             pass
         fontsize = max(18, int(h * 0.05 * (req.font_scale or 1.0)))
+        # 每行最多放几个全角字 = 视频宽度的 86% / 单字宽(≈fontsize). 竖屏自动少放, 保证不超屏.
+        per_line = max(6, int(w * 0.86 / fontsize))
         fontcolor = 'yellow' if req.color == 'yellow' else 'white'
         borderw = max(2, int(fontsize * 0.08))
         if req.position == 'top':
@@ -1105,7 +1109,8 @@ def subtitle_burn(req: SubtitleBurnReq):
             ypos = f"h-text_h-{int(h * 0.07)}"
         filters = []
         for i, seg in enumerate(req.segments):
-            txt = _wrap_cjk(seg.text)
+            # 烧录时也转简体 (兜底: 老的繁体片段 / 用户没改的); 按宽度换行防超屏
+            txt = _wrap_cjk(_to_simplified(seg.text), per_line)
             if not txt:
                 continue
             tf = os.path.join(work, f"t{i}.txt")
