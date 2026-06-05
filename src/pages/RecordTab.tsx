@@ -299,15 +299,16 @@ export default function RecordTab() {
       if (label.includes('chrome') || label.includes('monoi') || label.includes('vercel') || label.includes('edge') || label.includes('safari')) {
         setError('警告: 你选的是当前浏览器, 录出来画面会无限套娃. 建议点"重选" 改选别的应用窗口 (PPT / 文档 / 笔记 等)')
       }
+      screenStream?.getTracks().forEach(t => t.stop())   // 换源时停掉旧屏幕流
       setScreenStream(s)
-      if (cameraStream || (!cameraStream && phase === 'setup')) setPhase('previewing')
+      if (phase === 'setup') setPhase('previewing')       // 录制中切换不动 phase, 录制不中断
     } catch (e: any) {
       if (e.name === 'NotAllowedError') setError('你拒绝了屏幕共享权限')
       else setError(`获取屏幕失败: ${e.message || e}`)
     }
   }
 
-  // 桌面端: 选定某个窗口/屏幕后, 用 chromeMediaSourceId 只录它 (不套娃)
+  // 桌面端: 选定某个窗口/屏幕后, 用 chromeMediaSourceId 只录它 (不套娃). 录制中换源 = 无缝切显示窗口.
   const captureSource = async (sourceId: string) => {
     setShowSourcePicker(false); setError('')
     try {
@@ -315,8 +316,9 @@ export default function RecordTab() {
         audio: false,   // 系统声音不录; 旁白走麦克风 (单独的 cameraStream/mic)
         video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: sourceId } },
       }) as MediaStream
+      screenStream?.getTracks().forEach(t => t.stop())   // 换源时停掉旧屏幕流
       setScreenStream(s)
-      if (cameraStream || (!cameraStream && phase === 'setup')) setPhase('previewing')
+      if (phase === 'setup') setPhase('previewing')       // 录制中切换不动 phase, 录制不中断
     } catch (e: any) {
       setError(`录这个窗口失败: ${e.message || e}. 换一个窗口试试`)
     }
@@ -926,6 +928,15 @@ export default function RecordTab() {
                 <div className="flex flex-col gap-2">
                   {(phase === 'previewing' || phase === 'recording') && (
                     <div className="flex items-center flex-wrap gap-1.5 rounded-xl border border-[var(--border)] bg-[var(--bg-card)] px-2.5 py-1.5">
+                      {screenStream && (
+                        <>
+                          <button onClick={requestScreen}
+                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-[var(--border)] text-xs text-[var(--text-2)] hover:border-[var(--text)] cursor-pointer">
+                            <Monitor size={12}/> 切换窗口
+                          </button>
+                          <span className="w-px h-4 bg-[var(--border)] mx-0.5"/>
+                        </>
+                      )}
                       <span className="text-[11px] text-[var(--text-3)] mr-1">画面标注 (会录进视频):</span>
                       {([['none', '手'], ['arrow', '箭头'], ['pen', '画笔'], ['text', '文字'], ['rect', '方框']] as const).map(([t, l]) => (
                         <button key={t} onClick={() => setAnnTool(t)}
