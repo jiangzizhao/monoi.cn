@@ -57,6 +57,15 @@ const api = {
   /** 用户点了"立即重启更新", 关 app + 替换 .exe + 启动新版 */
   relaunchToUpdate: async (): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke('updater:relaunch-to-update'),
+
+  // ============ 录屏「点哪自动放大」 ============
+  // 主进程全局监听鼠标点击, 发 desktop:screen-click {xPct,yPct}; 网页 RecordTab 订阅后缩放到该点.
+  /** 订阅鼠标点击坐标 (屏幕比例 0-1). 返回取消订阅函数. */
+  onScreenClick: (cb: (d: { xPct: number; yPct: number }) => void): (() => void) => {
+    const listener = (_e: unknown, d: { xPct: number; yPct: number }) => cb(d)
+    ipcRenderer.on('desktop:screen-click', listener)
+    return () => ipcRenderer.removeListener('desktop:screen-click', listener)
+  },
 }
 
 contextBridge.exposeInMainWorld('monoiDesktop', api)
