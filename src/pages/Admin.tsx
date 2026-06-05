@@ -1841,8 +1841,9 @@ function CoverTemplateEditor({ initial, onClose, onSaved }: {
   }
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={onClose}>
-      <div onClick={e => e.stopPropagation()}
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+      {/* 点弹窗外面不关闭 (防误触丢设计稿), 只能点右上角 X 或保存关 */}
+      <div
         className="relative bg-[var(--bg-card)] border border-[var(--border)] rounded-2xl shadow-ios-lg w-full max-w-6xl max-h-[92vh] flex flex-col">
         <div className="flex items-center justify-between p-4 border-b border-[var(--border)]">
           <div className="text-base font-semibold">{isEdit ? `编辑模板: ${initial?.name || ''}` : '新建封面模板'}</div>
