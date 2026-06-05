@@ -120,6 +120,14 @@ export default function RecordTab() {
   const [sources, setSources] = useState<{ id: string; name: string; isScreen: boolean; thumbnail: string }[]>([])
   // 截屏标注: 抓当前屏幕帧 → 进批注编辑器
   const [shotDataUrl, setShotDataUrl] = useState<string | null>(null)
+  // 录制中实时标注 (画到合成画布上 → 进录像). 形状存 ref, 在 raf 循环逐帧画.
+  const [annTool, setAnnTool] = useState<'none' | 'arrow' | 'pen' | 'text' | 'rect'>('none')
+  const [annColor, setAnnColor] = useState('#FF3B30')
+  const [annThick, setAnnThick] = useState(false)
+  const annShapesRef = useRef<AnnShape[]>([])
+  const annDrawingRef = useRef(false)
+  const annToolRef = useRef(annTool)
+  useEffect(() => { annToolRef.current = annTool }, [annTool])
   // 缩放状态用 ref (在 raf 循环里逐帧改, 不触发 re-render)
   const zoomRef = useRef({ scale: 1, fx: 0.5, fy: 0.5, targetScale: 1, tFx: 0.5, tFy: 0.5, lastClickT: 0 })
   const clickZoomRef = useRef(clickZoom)
@@ -241,6 +249,9 @@ export default function RecordTab() {
         drawPip(ctx, canvas, cameraV, pipShape, pipPos, pipSize)
       }
 
+      // 3. 实时标注 (箭头/笔/字) 画在最上层 → 进录像
+      if (annShapesRef.current.length) drawAnnotations(ctx, annShapesRef.current)
+
       rafRef.current = requestAnimationFrame(draw)
     }
     rafRef.current = requestAnimationFrame(draw)
@@ -322,6 +333,44 @@ export default function RecordTab() {
     ctx.drawImage(v, 0, 0, c.width, c.height)
     setShotDataUrl(c.toDataURL('image/png'))
   }
+
+  // ===== 录制中实时标注: 在合成画布上画箭头/笔/字, 直接进录像 =====
+  // 画布是高分辨率(RATIO_SIZE), 显示是 CSS 缩放过的; 把指针坐标换算回画布坐标存形状.
+  const annPoint = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const cv = canvasRef.current
+    if (!cv) return null
+    const r = cv.getBoundingClientRect()
+    if (!r.width || !r.height) return null
+    return { x: (e.clientX - r.left) * (cv.width / r.width), y: (e.clientY - r.top) * (cv.height / r.height) }
+  }
+  const annDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (annToolRef.current === 'none') return
+    const p = annPoint(e)
+    if (!p) return
+    const cv = canvasRef.current!
+    const w = cv.height * (annThick ? 0.011 : 0.006)
+    if (annTool === 'text') {
+      const t = window.prompt('输入文字:')
+      if (t && t.trim()) annShapesRef.current.push({ tool: 'text', color: annColor, width: w, x: p.x, y: p.y, text: t.trim(), fontSize: cv.height * 0.045 })
+      return
+    }
+    annDrawingRef.current = true
+    try { (e.target as HTMLElement).setPointerCapture(e.pointerId) } catch { /* noop */ }
+    if (annTool === 'arrow') annShapesRef.current.push({ tool: 'arrow', color: annColor, width: w, points: [p.x, p.y, p.x, p.y] })
+    else if (annTool === 'rect') annShapesRef.current.push({ tool: 'rect', color: annColor, width: w, x: p.x, y: p.y, w: 0, h: 0 })
+    else if (annTool === 'pen') annShapesRef.current.push({ tool: 'pen', color: annColor, width: w, points: [p.x, p.y] })
+  }
+  const annMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!annDrawingRef.current) return
+    const p = annPoint(e); if (!p) return
+    const arr = annShapesRef.current; const last = arr[arr.length - 1]; if (!last) return
+    if (last.tool === 'arrow') last.points = [last.points![0], last.points![1], p.x, p.y]
+    else if (last.tool === 'rect') { last.w = p.x - (last.x || 0); last.h = p.y - (last.y || 0) }
+    else if (last.tool === 'pen') last.points!.push(p.x, p.y)
+  }
+  const annUp = () => { annDrawingRef.current = false }
+  const annUndo = () => { annShapesRef.current = annShapesRef.current.slice(0, -1) }
+  const annClear = () => { annShapesRef.current = [] }
   /** 枚举 Chrome 看到的所有摄像头 + 麦克风 — 调试 + 让用户切换源. */
   const refreshCameras = async (): Promise<MediaDeviceInfo[]> => {
     try {
@@ -874,8 +923,31 @@ export default function RecordTab() {
                 </>
               ) : (
                 // 屏幕 / 仅摄像头模式: 显示合成 canvas, 录制时也显示让用户能看见正在录的内容
-                <div className="rounded-2xl border border-[var(--border)] bg-black overflow-hidden flex items-center justify-center" style={{ minHeight: '300px' }}>
-                  <canvas ref={canvasRef} className="block max-w-full max-h-[60vh]"/>
+                <div className="flex flex-col gap-2">
+                  {(phase === 'previewing' || phase === 'recording') && (
+                    <div className="flex items-center flex-wrap gap-1.5 rounded-xl border border-[var(--border)] bg-[var(--bg-card)] px-2.5 py-1.5">
+                      <span className="text-[11px] text-[var(--text-3)] mr-1">画面标注 (会录进视频):</span>
+                      {([['none', '手'], ['arrow', '箭头'], ['pen', '画笔'], ['text', '文字'], ['rect', '方框']] as const).map(([t, l]) => (
+                        <button key={t} onClick={() => setAnnTool(t)}
+                          className={`px-2.5 py-1 rounded-lg border text-xs cursor-pointer transition-colors ${annTool === t ? 'border-[var(--text)] bg-[var(--text)] text-[var(--bg)]' : 'border-[var(--border)] text-[var(--text-2)] hover:border-[var(--text)]'}`}>{l}</button>
+                      ))}
+                      <span className="w-px h-4 bg-[var(--border)] mx-0.5"/>
+                      {['#FF3B30', '#FFCC00', '#34C759', '#0A84FF', '#FFFFFF'].map(c => (
+                        <button key={c} onClick={() => setAnnColor(c)} title="颜色"
+                          className={`w-5 h-5 rounded-full border-2 cursor-pointer ${annColor === c ? 'border-[var(--text)] scale-110' : 'border-[var(--border)]'}`} style={{ background: c }}/>
+                      ))}
+                      <button onClick={() => setAnnThick(v => !v)}
+                        className={`px-2 py-1 rounded-lg border text-xs cursor-pointer ${annThick ? 'border-[var(--text)] bg-[var(--text)] text-[var(--bg)]' : 'border-[var(--border)] text-[var(--text-2)]'}`}>{annThick ? '粗' : '细'}</button>
+                      <button onClick={annUndo} className="px-2 py-1 rounded-lg border border-[var(--border)] text-[var(--text-2)] text-xs cursor-pointer hover:border-[var(--text)]">撤销</button>
+                      <button onClick={annClear} className="px-2 py-1 rounded-lg border border-[var(--border)] text-[var(--text-2)] text-xs cursor-pointer hover:border-[var(--text)]">清除</button>
+                    </div>
+                  )}
+                  <div className="rounded-2xl border border-[var(--border)] bg-black overflow-hidden flex items-center justify-center" style={{ minHeight: '300px' }}>
+                    <canvas ref={canvasRef}
+                      onPointerDown={annDown} onPointerMove={annMove} onPointerUp={annUp}
+                      className="block max-w-full max-h-[60vh]"
+                      style={{ cursor: annTool === 'none' ? 'default' : 'crosshair', touchAction: 'none' }}/>
+                  </div>
                 </div>
               )}
 
@@ -1207,6 +1279,47 @@ function drawContainZoom(ctx: CanvasRenderingContext2D, v: HTMLVideoElement, dw:
   sx = Math.max(0, Math.min(sw - cropW, sx))
   sy = Math.max(0, Math.min(sh - cropH, sy))
   ctx.drawImage(v, sx, sy, cropW, cropH, x, y, w, h)
+}
+
+// 录制中实时标注形状
+interface AnnShape {
+  tool: 'arrow' | 'pen' | 'text' | 'rect'
+  color: string
+  width: number
+  points?: number[]
+  x?: number; y?: number; w?: number; h?: number
+  text?: string; fontSize?: number
+}
+
+/** 把标注形状画到合成画布最上层 (raw canvas ctx) — 这样会被 captureStream 录进视频. */
+function drawAnnotations(ctx: CanvasRenderingContext2D, shapes: AnnShape[]) {
+  ctx.save()
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round'
+  for (const s of shapes) {
+    ctx.lineWidth = s.width; ctx.strokeStyle = s.color; ctx.fillStyle = s.color
+    if (s.tool === 'pen' && s.points && s.points.length >= 2) {
+      ctx.beginPath(); ctx.moveTo(s.points[0], s.points[1])
+      for (let i = 2; i < s.points.length; i += 2) ctx.lineTo(s.points[i], s.points[i + 1])
+      ctx.stroke()
+    } else if (s.tool === 'arrow' && s.points) {
+      const [x1, y1, x2, y2] = s.points
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke()
+      const a = Math.atan2(y2 - y1, x2 - x1); const len = Math.max(14, s.width * 4.5)
+      ctx.beginPath(); ctx.moveTo(x2, y2)
+      ctx.lineTo(x2 - len * Math.cos(a - Math.PI / 7), y2 - len * Math.sin(a - Math.PI / 7))
+      ctx.lineTo(x2 - len * Math.cos(a + Math.PI / 7), y2 - len * Math.sin(a + Math.PI / 7))
+      ctx.closePath(); ctx.fill()
+    } else if (s.tool === 'rect') {
+      ctx.strokeRect(s.x || 0, s.y || 0, s.w || 0, s.h || 0)
+    } else if (s.tool === 'text' && s.text) {
+      ctx.font = `bold ${s.fontSize || 40}px sans-serif`
+      ctx.textBaseline = 'top'
+      ctx.lineWidth = Math.max(2, (s.fontSize || 40) * 0.12); ctx.strokeStyle = 'rgba(0,0,0,0.55)'
+      ctx.strokeText(s.text, s.x || 0, s.y || 0)   // 黑描边, 任何背景都看得清
+      ctx.fillText(s.text, s.x || 0, s.y || 0)
+    }
+  }
+  ctx.restore()
 }
 
 /** 在 canvas 上画 PIP 摄像头 — 形状 clip + 边框. circle 用方形 (1:1) 才是真圆. */
