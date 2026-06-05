@@ -40,7 +40,10 @@ export function SubtitleEditor({ transcribeInput, previewUrl, onClose, onDone }:
   const [strokeWidth, setStrokeWidth] = useState(1.0)
   const [strokeColor, setStrokeColor] = useState('#000000')
   const [shadow, setShadow] = useState(true)
-  const [position, setPosition] = useState<'bottom' | 'center' | 'top'>('bottom')
+  // 字幕位置 = 中心点比例 (0-1), 可拖动自由摆放; 预设按钮设到底/中/顶
+  const [subX, setSubX] = useState(0.5)
+  const [subY, setSubY] = useState(0.9)
+  const [dragging, setDragging] = useState(false)
   const [fonts, setFonts] = useState<FontItem[]>([])
 
   // 预览字号要跟视频实际高度挂钩 (跟后端 h*0.05 一致), 用 ResizeObserver 量预览框高度
@@ -91,13 +94,32 @@ export function SubtitleEditor({ transcribeInput, previewUrl, onClose, onDone }:
     try {
       const r = await subtitleBurn({
         video_oss_key: ossKey, segments: clean,
-        font_scale: fontScale, color, position,
+        font_scale: fontScale, color,
         font_file: fontFile, stroke_color: strokeColor, stroke_width: strokeWidth, shadow,
+        x_pct: subX, y_pct: subY,
       })
       onDone(r.video_url, r.output_oss_key)
     } catch (e: any) {
       setErr(e.message || '生成失败'); setPhase('edit')
     }
+  }
+
+  // 拖动字幕: 指针位置 → 中心点比例 (夹 5%-95% 防出框)
+  const onSubPointerDown = (e: React.PointerEvent) => {
+    e.preventDefault()
+    try { (e.target as HTMLElement).setPointerCapture(e.pointerId) } catch { /* noop */ }
+    setDragging(true)
+  }
+  const onSubPointerMove = (e: React.PointerEvent) => {
+    if (!dragging || !boxRef.current) return
+    const r = boxRef.current.getBoundingClientRect()
+    if (!r.width || !r.height) return
+    setSubX(Math.min(0.95, Math.max(0.05, (e.clientX - r.left) / r.width)))
+    setSubY(Math.min(0.95, Math.max(0.05, (e.clientY - r.top) / r.height)))
+  }
+  const onSubPointerUp = (e: React.PointerEvent) => {
+    setDragging(false)
+    try { (e.target as HTMLElement).releasePointerCapture(e.pointerId) } catch { /* noop */ }
   }
 
   // 预览字幕 CSS 样式 (近似最终 ffmpeg 烧录效果)
@@ -116,6 +138,9 @@ export function SubtitleEditor({ transcribeInput, previewUrl, onClose, onDone }:
     textShadow: shadow ? '2px 2px 5px rgba(0,0,0,0.75)' : 'none',
     WebkitTextStroke: strokePx > 0 ? `${strokePx}px ${strokeColor}` : undefined,
     paintOrder: 'stroke fill',
+    pointerEvents: 'auto',
+    touchAction: 'none',
+    cursor: dragging ? 'grabbing' : 'grab',
   } as React.CSSProperties
 
   const styleBtn = (active: boolean) =>
@@ -166,10 +191,13 @@ export function SubtitleEditor({ transcribeInput, previewUrl, onClose, onDone }:
               <div className="flex-1 min-w-0 flex items-center justify-center bg-black/40 p-3">
                 <div ref={boxRef} className="relative max-h-[58vh] rounded-lg overflow-hidden" style={{ lineHeight: 0 }}>
                   <video src={previewUrl} controls playsInline className="max-h-[58vh] max-w-full object-contain rounded-lg bg-black"/>
-                  {/* 字幕示意层 (不拦截视频控件) */}
-                  <div className="absolute inset-x-0 flex justify-center pointer-events-none px-[7%]"
-                    style={position === 'top' ? { top: '6%' } : position === 'center' ? { top: '50%', transform: 'translateY(-50%)' } : { bottom: '8%' }}>
-                    <span style={subStyle}>{previewText}</span>
+                  {/* 字幕示意层: 中心点定位, 可拖动 (整层不挡视频控件, 只字幕本身可拖) */}
+                  <div className="absolute pointer-events-none" style={{ left: `${subX * 100}%`, top: `${subY * 100}%`, transform: 'translate(-50%, -50%)', width: '86%', display: 'flex', justifyContent: 'center' }}>
+                    <span
+                      onPointerDown={onSubPointerDown}
+                      onPointerMove={onSubPointerMove}
+                      onPointerUp={onSubPointerUp}
+                      style={subStyle}>{previewText}</span>
                   </div>
                 </div>
               </div>
@@ -241,10 +269,12 @@ export function SubtitleEditor({ transcribeInput, previewUrl, onClose, onDone }:
                 <div className="flex flex-col gap-1.5">
                   <span className="text-xs text-[var(--text-3)]">位置</span>
                   <div className="flex gap-2">
-                    {([['bottom', '底部'], ['center', '中间'], ['top', '顶部']] as const).map(([v, l]) => (
-                      <button key={v} onClick={() => setPosition(v)} className={styleBtn(position === v)}>{l}</button>
+                    {([['底部', 0.9], ['中间', 0.5], ['顶部', 0.1]] as const).map(([l, y]) => (
+                      <button key={l} onClick={() => { setSubX(0.5); setSubY(y) }}
+                        className={styleBtn(Math.abs(subX - 0.5) < 0.02 && Math.abs(subY - y) < 0.02)}>{l}</button>
                     ))}
                   </div>
+                  <span className="text-[11px] text-[var(--text-3)]">↑ 快捷位置, 也可直接拖动中间预览里的字幕到任意位置</span>
                 </div>
               </div>
             </div>

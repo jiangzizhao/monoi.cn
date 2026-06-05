@@ -31,6 +31,7 @@ export async function subtitleBurn(
     video_oss_key: string; segments: SubSeg[]
     font_scale?: number; color?: string; position?: string
     font_file?: string; stroke_color?: string; stroke_width?: number; shadow?: boolean
+    x_pct?: number; y_pct?: number
   },
 ): Promise<{ video_url: string; output_oss_key: string }> {
   const res = await fetch(directBase + '/api/voice/subtitle/burn', {

@@ -985,24 +985,29 @@ def get_audio(name: str):
 _SUB_FONT = os.path.join(os.environ.get('FONTS_DIR') or '/data/monoi-server/fonts', 'SourceHanSansCN-Heavy.otf')
 
 
-def _split_subtitle_segments(segments, max_chars=16):
-    """把 whisper 句级 segments 切成适合做字幕的短句 (≤max_chars), 用词级时间戳分配时间."""
+def _split_subtitle_segments(segments, max_chars=18, pause=0.3):
+    """把 whisper 句级 segments 按"自然停顿"切成字幕短句, 用词级时间戳分配时间.
+    断点规则 (贴合每句话的停顿/语气): 词间 gap ≥ pause 秒就断; 或单句字数超 max_chars 强制断."""
     out = []
     for seg in segments:
         words = seg.get("words") or []
         text = (seg.get("text") or "").strip()
         if not text:
             continue
-        if not words or len(text) <= max_chars:
+        if not words:
+            # 没词级时间戳: 整句保留 (NLS 偶尔无 gap, 靠后端按宽度换行兜底)
             out.append({"start": float(seg["start"]), "end": float(seg["end"]), "text": text})
             continue
         chunk_words, chunk_text = [], ""
         for w in words:
             wt = (w.get("word") or "").strip()
-            if chunk_words and len(chunk_text) + len(wt) > max_chars:
-                out.append({"start": float(chunk_words[0]["start"]), "end": float(chunk_words[-1]["end"]),
-                            "text": chunk_text.strip()})
-                chunk_words, chunk_text = [], ""
+            if chunk_words:
+                gap = float(w["start"]) - float(chunk_words[-1]["end"])
+                too_long = len(chunk_text) + len(wt) > max_chars
+                if gap >= pause or too_long:          # 停顿处断句, 或太长强制断
+                    out.append({"start": float(chunk_words[0]["start"]), "end": float(chunk_words[-1]["end"]),
+                                "text": chunk_text.strip()})
+                    chunk_words, chunk_text = [], ""
             chunk_words.append(w); chunk_text += wt
         if chunk_words:
             out.append({"start": float(chunk_words[0]["start"]), "end": float(chunk_words[-1]["end"]),
@@ -1075,6 +1080,8 @@ class SubtitleBurnReq(BaseModel):
     stroke_color: str = '#000000'    # 描边颜色
     stroke_width: float = 1.0        # 描边粗细倍率, 0=无描边
     shadow: bool = False             # 是否加阴影
+    x_pct: Optional[float] = None    # 自由位置: 字幕中心点横向比例 (0-1); 传了优先于 position
+    y_pct: Optional[float] = None    # 自由位置: 字幕中心点纵向比例 (0-1)
 
 
 def _ff_color(c, default='white'):
@@ -1140,6 +1147,14 @@ def subtitle_burn(req: SubtitleBurnReq):
             ypos = "(h-text_h)/2"
         else:
             ypos = f"h-text_h-{int(h * 0.07)}"
+        # 位置: 自由 x_pct/y_pct (中心点比例) 优先, 否则用 position 预设 (横向居中). 夹在画面内防出框.
+        if req.x_pct is not None and req.y_pct is not None:
+            xp = max(0.0, min(1.0, float(req.x_pct))); yp = max(0.0, min(1.0, float(req.y_pct)))
+            xexpr = f"max(0\\,min(w-text_w\\,w*{xp:.4f}-text_w/2))"
+            yexpr = f"max(0\\,min(h-text_h\\,h*{yp:.4f}-text_h/2))"
+        else:
+            xexpr = "(w-text_w)/2"
+            yexpr = ypos
         filters = []
         for i, seg in enumerate(req.segments):
             # 烧录时也转简体 (兜底: 老的繁体片段 / 用户没改的); 按宽度换行防超屏
@@ -1153,7 +1168,7 @@ def subtitle_burn(req: SubtitleBurnReq):
             filters.append(
                 f"drawtext=fontfile='{fontfile}':textfile='{tf}':fontcolor={fontcolor}:"
                 f"fontsize={fontsize}{border_part}{shadow_part}:line_spacing=8:"
-                f"x=(w-text_w)/2:y={ypos}:enable='between(t,{s:.3f},{e:.3f})'"
+                f"x={xexpr}:y={yexpr}:enable='between(t,{s:.3f},{e:.3f})'"
             )
         if not filters:
             raise HTTPException(400, "没有有效字幕")
