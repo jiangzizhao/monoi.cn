@@ -100,8 +100,14 @@ ipcMain.handle('list-screen-sources', async () => {
       thumbnailSize: { width: 320, height: 180 },
       fetchWindowIcons: false,
     })
+    // 只排掉 monoi 桌面端自己那个窗口 (录它=套娃); 浏览器/网页/其它 App 都能选.
+    // (之前按名字含 monoi 过滤太狠, 把开着 monoi.cn 的浏览器也滤掉了 → 选不到网页)
+    const self = (mainWin?.getTitle() || '').trim()
     return sources
-      .filter((s) => !/monoi/i.test(s.name))          // 别让用户选到 monoi 自己 (套娃)
+      .filter((s) => {
+        const n = (s.name || '').trim()
+        return n !== self && n !== 'monoi 视频创作'   // 这俩是 monoi 自己的窗口标题
+      })
       .map((s) => ({
         id: s.id,
         name: s.name,
