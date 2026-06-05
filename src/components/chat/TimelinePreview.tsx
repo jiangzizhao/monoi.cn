@@ -31,12 +31,14 @@ interface Props {
 // PIP 配置 (V1: 全局, 全片统一)
 type PipShape = 'none' | 'circle' | 'rounded' | 'rounded_square'
 type PipPos = 'tl' | 'tr' | 'bl' | 'br' | 'center'
-type PipSize = 'S' | 'M' | 'L'
 type FaceY = 'top' | 'center' | 'bottom'  // 人物在 PIP 内的纵向位置
 type OutputRatio = '9:16' | '16:9' | '3:4' | '1:1'  // 最终成品比例
 
 const POS_LABEL: Record<PipPos, string> = { tl: '左上', tr: '右上', bl: '左下', br: '右下', center: '居中' }
-const SIZE_RATIO: Record<PipSize, number> = { S: 0.20, M: 0.25, L: 0.33 }
+// 预设位置 → 小窗中心点 (0-1 比例); 也可直接拖动小窗自由摆放
+const POS_XY: Record<PipPos, { x: number; y: number }> = {
+  tl: { x: 0.18, y: 0.2 }, tr: { x: 0.82, y: 0.2 }, bl: { x: 0.18, y: 0.8 }, br: { x: 0.82, y: 0.8 }, center: { x: 0.5, y: 0.5 },
+}
 const FACE_Y_LABEL: Record<FaceY, string> = { top: '人物靠上', center: '居中', bottom: '人物靠下' }
 const FACE_Y_POS: Record<FaceY, string> = { top: '20%', center: '50%', bottom: '80%' }
 const RATIO_LABEL: Record<OutputRatio, string> = { '9:16': '9:16', '16:9': '16:9', '3:4': '3:4', '1:1': '1:1' }
@@ -48,8 +50,12 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
   const [duration, setDuration] = useState(0)
   const [playing, setPlaying] = useState(false)
   const [shape, setShape] = useState<PipShape>('rounded')
-  const [pos, setPos] = useState<PipPos>('bl')
-  const [size, setSize] = useState<PipSize>('M')
+  // 画中画位置 = 小窗中心点 (0-1 比例, 可拖动自由摆放); 大小 = 宽占画面比例 (可滑动)
+  const [pipX, setPipX] = useState(0.18)
+  const [pipY, setPipY] = useState(0.8)
+  const [sizePct, setSizePct] = useState(0.25)
+  const [dragging, setDragging] = useState(false)
+  const previewRef = useRef<HTMLDivElement>(null)
   const [faceY, setFaceY] = useState<FaceY>('top')
   const [outputRatio, setOutputRatio] = useState<OutputRatio>('9:16')
   const [composing, setComposing] = useState(false)
@@ -158,7 +164,7 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
         pip: {
           enabled: shape !== 'none',
           shape: shape === 'none' ? 'rounded' : shape,
-          pos, size, face_y: faceY,
+          x_pct: pipX, y_pct: pipY, size_pct: sizePct, face_y: faceY,
         },
         output_ratio: outputRatio,
         bgm_oss_key: bgm?.oss_key || null,
@@ -289,19 +295,36 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
     v.currentTime = Math.max(0, Math.min(t, duration))
   }
 
-  // PIP 样式 (CSS 预览, 跟最终 ffmpeg 合成保持一致)
-  const pipStyle: React.CSSProperties = (() => {
-    const pad = 12
-    const s: React.CSSProperties = { position: 'absolute', overflow: 'hidden' }
-    if (pos === 'tl') { s.top = pad; s.left = pad }
-    else if (pos === 'tr') { s.top = pad; s.right = pad }
-    else if (pos === 'bl') { s.bottom = pad; s.left = pad }
-    else if (pos === 'br') { s.bottom = pad; s.right = pad }
-    else { s.top = '50%'; s.left = '50%'; s.transform = 'translate(-50%, -50%)' }
-    s.borderRadius = shape === 'circle' ? '50%' : '12px'
-    s.boxShadow = '0 4px 16px rgba(0,0,0,0.4)'
-    return s
-  })()
+  // PIP 样式 (CSS 预览, 跟最终 ffmpeg 合成保持一致): 中心点定位, 可拖动
+  const pipStyle: React.CSSProperties = {
+    position: 'absolute',
+    overflow: 'hidden',
+    left: `${pipX * 100}%`,
+    top: `${pipY * 100}%`,
+    transform: 'translate(-50%, -50%)',
+    borderRadius: shape === 'circle' ? '50%' : '12px',
+    boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+    cursor: dragging ? 'grabbing' : 'grab',
+    touchAction: 'none',
+  }
+
+  // 拖动小窗: 指针位置 → 中心点比例 (0-1), 夹在 5%-95% 防拖出画面外
+  const onPipPointerDown = (e: React.PointerEvent) => {
+    e.preventDefault()
+    try { (e.target as HTMLElement).setPointerCapture(e.pointerId) } catch { /* noop */ }
+    setDragging(true)
+  }
+  const onPipPointerMove = (e: React.PointerEvent) => {
+    if (!dragging || !previewRef.current) return
+    const r = previewRef.current.getBoundingClientRect()
+    if (!r.width || !r.height) return
+    setPipX(Math.min(0.95, Math.max(0.05, (e.clientX - r.left) / r.width)))
+    setPipY(Math.min(0.95, Math.max(0.05, (e.clientY - r.top) / r.height)))
+  }
+  const onPipPointerUp = (e: React.PointerEvent) => {
+    setDragging(false)
+    try { (e.target as HTMLElement).releasePointerCapture(e.pointerId) } catch { /* noop */ }
+  }
 
   const fmt = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`
 
@@ -322,6 +345,7 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
           {/* 预览画面: 按最终成品比例展示 (默认 9:16 抖音). video 元素始终存在 (避免切换时重新加载) */}
           <div className="flex items-center justify-center bg-black/40 rounded-xl p-2" style={{ maxHeight: '50vh' }}>
             <div
+              ref={previewRef}
               className="relative bg-black rounded-lg overflow-hidden mx-auto"
               style={{ aspectRatio: RATIO_CSS[outputRatio], height: '46vh', maxWidth: '100%' }}
             >
@@ -334,6 +358,9 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
                 ref={videoRef}
                 src={videoUrl}
                 playsInline
+                onPointerDown={currentBroll && shape !== 'none' ? onPipPointerDown : undefined}
+                onPointerMove={currentBroll && shape !== 'none' ? onPipPointerMove : undefined}
+                onPointerUp={currentBroll && shape !== 'none' ? onPipPointerUp : undefined}
                 style={!currentBroll ? {
                   // 没素材的镜头: video 全屏
                   position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover',
@@ -341,9 +368,9 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
                   // 无 PIP 模式: video 缩到 1px 隐藏 (保留音频), b-roll 全屏
                   position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none',
                 } : {
-                  // PIP 模式
+                  // PIP 模式 (可拖动)
                   ...pipStyle,
-                  width: `${SIZE_RATIO[size] * 100}%`,
+                  width: `${sizePct * 100}%`,
                   aspectRatio: shape === 'circle' ? '1/1' : '16/9',
                   objectFit: 'cover',
                   objectPosition: `center ${FACE_Y_POS[faceY]}`,
@@ -467,34 +494,32 @@ export function TimelinePreview({ videoUrl, segmentTimes, narrationOssKey, items
               </div>
             </div>
 
-            <div className="flex items-center gap-3">
-              <span className="text-xs text-[var(--text-3)] w-16">位置</span>
-              <div className="flex gap-2">
-                {(['tl', 'tr', 'bl', 'br', 'center'] as PipPos[]).map(p => (
-                  <button
-                    key={p}
-                    onClick={() => setPos(p)}
-                    className={`px-3 py-1.5 rounded-lg text-xs border transition-all cursor-pointer ${pos === p ? 'bg-[var(--text)] text-[var(--bg)] border-[var(--text)]' : 'bg-[var(--bg-card)] text-[var(--text-2)] border-[var(--border)] hover:border-[var(--text-3)]'}`}
-                  >
-                    {POS_LABEL[p]}
-                  </button>
-                ))}
+            <div className="flex items-start gap-3">
+              <span className="text-xs text-[var(--text-3)] w-16 mt-1.5">位置</span>
+              <div className="flex flex-col gap-1.5">
+                <div className="flex gap-2 flex-wrap">
+                  {(['tl', 'tr', 'bl', 'br', 'center'] as PipPos[]).map(p => (
+                    <button
+                      key={p}
+                      onClick={() => { setPipX(POS_XY[p].x); setPipY(POS_XY[p].y) }}
+                      className="px-3 py-1.5 rounded-lg text-xs border bg-[var(--bg-card)] text-[var(--text-2)] border-[var(--border)] hover:border-[var(--text)] transition-all cursor-pointer"
+                    >
+                      {POS_LABEL[p]}
+                    </button>
+                  ))}
+                </div>
+                <span className="text-[11px] text-[var(--text-3)]">↑ 快捷预设, 也可直接用手指/鼠标拖动上面的小窗到任意位置 (避开字幕)</span>
               </div>
             </div>
 
             <div className="flex items-center gap-3">
               <span className="text-xs text-[var(--text-3)] w-16">大小</span>
-              <div className="flex gap-2">
-                {(['S', 'M', 'L'] as PipSize[]).map(sz => (
-                  <button
-                    key={sz}
-                    onClick={() => setSize(sz)}
-                    className={`px-3 py-1.5 rounded-lg text-xs border transition-all cursor-pointer ${size === sz ? 'bg-[var(--text)] text-[var(--bg)] border-[var(--text)]' : 'bg-[var(--bg-card)] text-[var(--text-2)] border-[var(--border)] hover:border-[var(--text-3)]'}`}
-                  >
-                    {sz}
-                  </button>
-                ))}
-              </div>
+              <input
+                type="range" min={0.15} max={0.5} step={0.01} value={sizePct}
+                onChange={e => setSizePct(parseFloat(e.target.value))}
+                className="flex-1 accent-[var(--text)] cursor-pointer"
+              />
+              <span className="text-xs text-[var(--text-3)] w-10 text-right tabular-nums">{Math.round(sizePct * 100)}%</span>
             </div>
 
             <div className="flex items-center gap-3">

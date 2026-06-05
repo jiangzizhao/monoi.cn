@@ -1156,9 +1156,12 @@ class ComposeShot(BaseModel):
 class ComposePipConfig(BaseModel):
     enabled: bool                  # shape == 'none' 时为 False
     shape: str = 'rounded'         # 'circle' / 'rounded' / 'rounded_square'
-    pos: str = 'bl'                # 'tl' / 'tr' / 'bl' / 'br' / 'center'
-    size: str = 'M'                # 'S' / 'M' / 'L'
+    pos: str = 'bl'                # 'tl' / 'tr' / 'bl' / 'br' / 'center' (老的预设, x_pct/y_pct 没传时回退)
+    size: str = 'M'                # 'S' / 'M' / 'L' (老的预设, size_pct 没传时回退)
     face_y: str = 'top'            # 'top' / 'center' / 'bottom'
+    x_pct: Optional[float] = None  # 自由位置: 小窗中心点横向比例 (0-1, 0=左 1=右)
+    y_pct: Optional[float] = None  # 自由位置: 小窗中心点纵向比例 (0-1, 0=上 1=下)
+    size_pct: Optional[float] = None  # 自由大小: 小窗宽占画面比例 (如 0.25), 传了优先于 size
 
 
 class ComposeRequest(BaseModel):
@@ -1317,7 +1320,9 @@ def compose_footage(req: ComposeRequest):
         final_v_label = 'main'
         has_any_broll = any((si, ai) in asset_files for si in range(len(req.shots)) for ai in range(len(req.shots[si].assets)))
         if req.pip.enabled and has_any_broll:
-            pip_size = _PIP_SIZE_RATIO.get(req.pip.size, 0.25)
+            # 大小: 自由 size_pct 优先, 否则回退 S/M/L 预设; 夹住防极端值
+            pip_size = req.pip.size_pct if (req.pip.size_pct and req.pip.size_pct > 0) else _PIP_SIZE_RATIO.get(req.pip.size, 0.25)
+            pip_size = max(0.1, min(0.6, pip_size))
             pip_w = int(W * pip_size)
             # 形状决定 PIP 高度 (圆形/圆角方形 = 1:1, 圆角矩形 = 16:9)
             if req.pip.shape in ('circle', 'rounded_square'):
@@ -1358,9 +1363,15 @@ def compose_footage(req: ComposeRequest):
             pip_filter += '[pip]'
             filter_parts.append(pip_filter)
 
-            # overlay 位置
+            # overlay 位置: 自由坐标 (x_pct/y_pct = 小窗中心点比例) 优先, 否则回退预设角位
             pad = 24
-            if req.pip.pos == 'tl': overlay_xy = f"{pad}:{pad}"
+            if req.pip.x_pct is not None and req.pip.y_pct is not None:
+                cx = max(0.0, min(1.0, req.pip.x_pct)) * W
+                cy = max(0.0, min(1.0, req.pip.y_pct)) * H
+                ox = int(round(cx - pip_w / 2)); oy = int(round(cy - pip_h / 2))
+                ox = max(0, min(ox, W - pip_w)); oy = max(0, min(oy, H - pip_h))
+                overlay_xy = f"{ox}:{oy}"
+            elif req.pip.pos == 'tl': overlay_xy = f"{pad}:{pad}"
             elif req.pip.pos == 'tr': overlay_xy = f"W-w-{pad}:{pad}"
             elif req.pip.pos == 'bl': overlay_xy = f"{pad}:H-h-{pad}"
             elif req.pip.pos == 'br': overlay_xy = f"W-w-{pad}:H-h-{pad}"
