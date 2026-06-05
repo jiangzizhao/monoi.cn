@@ -96,6 +96,27 @@ function findLastScript(messages: { role: string; blocks: MessageBlock[] }[]) {
   return null
 }
 
+// 找最近的口播剪辑/数字人视频里"说的内容"全文 — 供发布文案在没有脚本卡时用.
+// 口播剪辑有 kept_segments (剪完保留的句子) → 拼成全文; 否则退回 text_preview.
+function findLastNarrationText(messages: { role: string; blocks: MessageBlock[] }[]) {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i]
+    if (msg.role !== 'assistant') continue
+    for (const block of msg.blocks) {
+      if (block.type === 'video_player') {
+        const d = (block as any).data
+        const ks = d?.kept_segments
+        if (Array.isArray(ks) && ks.length) {
+          const t = ks.map((s: any) => (s?.text || '')).join('').trim()
+          if (t) return t
+        }
+        if (d?.text_preview) return String(d.text_preview)
+      }
+    }
+  }
+  return null
+}
+
 function makeScriptCard(script: string): MessageBlock {
   return {
     type: 'script_card',
@@ -735,6 +756,7 @@ export function useChat() {
             question: '下一步',
             options: [
               { id: '__auto_footage_from_video__', label: '智能匹配素材', description: '按视频时间戳自动拆镜, 拉候选素材' },
+              { id: '帮我生成各平台的发布文案', label: '生成发布文案', description: '按这段口播内容生成各平台标题/描述/标签' },
               { id: '保留这段视频, 暂不做下一步', label: '保留视频', description: '稍后再决定' },
             ],
           },
@@ -919,6 +941,28 @@ export function useChat() {
         store.updateLastAssistantBlocks(convId, [makeScriptCard(script)])
         // 扣费已搬到 Vercel function (charge_feature 传给 /api/chat, 那边 sync 调 backend /api/billing/charge)
         // 防止改前端绕过. 老的 chargeCredit('ai_writing'/'ai_writing_regen') 不再调.
+        return
+      }
+
+      // 生成各平台发布文案: 主动把内容喂给 AI — 页面脚本 或 口播剪辑/数字人视频里"说的内容".
+      // (以前只靠对话上下文里的脚本卡, 口播剪辑没有脚本卡所以生不出来)
+      if (text === '帮我生成各平台的发布文案' || text === '再改一版发布文案') {
+        const scriptText = findLastScript(conv.messages)
+        const sourceText = scriptText || findLastNarrationText(conv.messages)
+        if (!sourceText || sourceText.trim().length < 6) {
+          store.updateLastAssistantBlocks(convId, [{ type: 'error', message: '没找到可用内容. 先生成文案, 或先做口播剪辑 / 数字人视频, 再生成发布文案.' }])
+          return
+        }
+        store.updateLastAssistantBlocks(convId, [{ type: 'loading', label: 'AI 正在生成各平台发布文案...' }])
+        const srcLabel = scriptText ? '口播文案' : '口播视频里说的内容'
+        const reroll = text === '再改一版发布文案' ? ' 换一个不同风格再写一版.' : ''
+        const prompt = `请根据下面这段${srcLabel}, 为抖音 / 小红书 / 视频号 / B站 各平台生成发布文案 (标题 / 描述 / 标签), 严格按 platform_copy 的 blocks JSON 格式输出, 并补一个 choices block.${reroll}\n\n内容:\n${sourceText}`
+        await callAI([makeUserMsg(prompt)], (chunk) => {
+          rawText += chunk
+          store.updateLastAssistantBlocks(convId, [{ type: 'loading', label: 'AI 正在生成各平台发布文案...' }])
+        }, ctrl.signal)
+        const pcBlocks = parseBlocks(rawText) as MessageBlock[]
+        store.updateLastAssistantBlocks(convId, pcBlocks.length ? pcBlocks : [{ type: 'error', message: '生成失败, 再点一次试试' }])
         return
       }
 
