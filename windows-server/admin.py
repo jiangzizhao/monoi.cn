@@ -590,7 +590,7 @@ class UpdateBgmRequest(BaseModel):
     license_note: Optional[str] = None
 
 
-@router.patch("/bgm-library/{bgm_id}")
+@router.put("/bgm-library/{bgm_id}")
 def admin_update_bgm(bgm_id: int, req: UpdateBgmRequest, request: Request):
     """改 BGM 曲名 / 类目 / 授权说明 (不动音频文件)"""
     require_admin(request)

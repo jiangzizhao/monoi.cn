@@ -184,7 +184,7 @@ export async function adminUpdateBgm(bgm_id: number, req: {
   license_note?: string | null
 }): Promise<{ success: boolean }> {
   const res = await fetch(directBase + `/api/admin/bgm-library/${bgm_id}`, {
-    method: 'PATCH',
+    method: 'PUT',
     headers: headers(),
     body: JSON.stringify(req),
   })
