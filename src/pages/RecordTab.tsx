@@ -114,6 +114,9 @@ export default function RecordTab() {
   // 网页(无 window.monoiDesktop)下整个特性自动关闭, 零副作用.
   const isDesktop = typeof (window as any).monoiDesktop?.onScreenClick === 'function'
   const [clickZoom, setClickZoom] = useState(true)   // 桌面端默认开
+  // 桌面端"选窗口"面板
+  const [showSourcePicker, setShowSourcePicker] = useState(false)
+  const [sources, setSources] = useState<{ id: string; name: string; isScreen: boolean; thumbnail: string }[]>([])
   // 缩放状态用 ref (在 raf 循环里逐帧改, 不触发 re-render)
   const zoomRef = useRef({ scale: 1, fx: 0.5, fy: 0.5, targetScale: 1, tFx: 0.5, tFy: 0.5, lastClickT: 0 })
   const clickZoomRef = useRef(clickZoom)
@@ -262,6 +265,19 @@ export default function RecordTab() {
 
   const requestScreen = async () => {
     setError('')
+    const desktop = (window as any).monoiDesktop
+    // 桌面端: 弹自定义"选窗口"面板 (列出你打开的窗口/屏幕, 选哪个录哪个, 不会套娃)
+    if (desktop?.listScreenSources) {
+      try {
+        const list = await desktop.listScreenSources()
+        setSources(Array.isArray(list) ? list : [])
+        setShowSourcePicker(true)
+      } catch (e: any) {
+        setError(`列出窗口失败: ${e.message || e}`)
+      }
+      return
+    }
+    // 网页端: 浏览器自带"选择共享"框
     try {
       const s = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: true })
       // 检测套娃: 用户选了浏览器自己 → 警告
@@ -274,6 +290,21 @@ export default function RecordTab() {
     } catch (e: any) {
       if (e.name === 'NotAllowedError') setError('你拒绝了屏幕共享权限')
       else setError(`获取屏幕失败: ${e.message || e}`)
+    }
+  }
+
+  // 桌面端: 选定某个窗口/屏幕后, 用 chromeMediaSourceId 只录它 (不套娃)
+  const captureSource = async (sourceId: string) => {
+    setShowSourcePicker(false); setError('')
+    try {
+      const s = await (navigator.mediaDevices as any).getUserMedia({
+        audio: false,   // 系统声音不录; 旁白走麦克风 (单独的 cameraStream/mic)
+        video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: sourceId } },
+      }) as MediaStream
+      setScreenStream(s)
+      if (cameraStream || (!cameraStream && phase === 'setup')) setPhase('previewing')
+    } catch (e: any) {
+      setError(`录这个窗口失败: ${e.message || e}. 换一个窗口试试`)
     }
   }
   /** 枚举 Chrome 看到的所有摄像头 + 麦克风 — 调试 + 让用户切换源. */
@@ -673,6 +704,39 @@ export default function RecordTab() {
     <div className="flex-1 flex flex-col min-h-0 bg-[var(--bg-chat)]">
       <video ref={screenVideoRef} className="hidden" muted playsInline/>
       <video ref={cameraVideoRef} className="hidden" muted playsInline/>
+
+      {/* 桌面端"选窗口"面板: 选你要录的窗口/屏幕 (选窗口不会套娃; 点哪放大在录窗口最大化时最准) */}
+      {showSourcePicker && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/55 p-4" onClick={() => setShowSourcePicker(false)}>
+          <div onClick={e => e.stopPropagation()} className="w-full max-w-3xl max-h-[85vh] flex flex-col rounded-2xl bg-[var(--bg-card)] border border-[var(--border)] shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-3 border-b border-[var(--border)] flex-shrink-0">
+              <div className="text-sm font-medium">选要录的窗口 / 屏幕</div>
+              <button onClick={() => setShowSourcePicker(false)} className="text-[var(--text-3)] hover:text-[var(--text)] cursor-pointer text-lg leading-none">✕</button>
+            </div>
+            <div className="px-5 py-2 text-[11px] text-[var(--text-3)] flex-shrink-0">选「窗口」录单个应用最干净 (不会套娃); 选「整个屏幕」会录到桌面上所有东西。建议把要讲的应用先最大化, 点哪放大最准。</div>
+            <div className="flex-1 overflow-y-auto px-5 py-3">
+              {sources.length === 0 ? (
+                <div className="text-sm text-[var(--text-3)] text-center py-10">没列到窗口。请先打开你要讲的应用 (PPT / 文档 等), 再回来点「录屏幕」。</div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {sources.map(s => (
+                    <button key={s.id} onClick={() => captureSource(s.id)}
+                      className="flex flex-col gap-1.5 rounded-xl border border-[var(--border)] hover:border-[var(--text)] p-2 cursor-pointer transition-colors text-left">
+                      <div className="aspect-video rounded-lg overflow-hidden bg-black flex items-center justify-center">
+                        {s.thumbnail ? <img src={s.thumbnail} alt="" className="w-full h-full object-contain"/> : <span className="text-[var(--text-3)] text-xs">无预览</span>}
+                      </div>
+                      <div className="flex items-center gap-1 min-w-0">
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bg-hover)] text-[var(--text-3)] flex-shrink-0">{s.isScreen ? '屏幕' : '窗口'}</span>
+                        <span className="text-xs text-[var(--text)] truncate">{s.name}</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 上半: 主内容区 (跟创作 tab ChatContainer 一致, overflow-y-auto + max-w-3xl 居中) */}
       <div className="flex-1 overflow-y-auto">
