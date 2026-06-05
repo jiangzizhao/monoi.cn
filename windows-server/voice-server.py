@@ -1069,8 +1069,33 @@ class SubtitleBurnReq(BaseModel):
     video_oss_key: str
     segments: list[SubtitleSeg]
     font_scale: float = 1.0          # 字号倍率
-    color: str = 'white'             # white / yellow
+    color: str = 'white'             # 文字颜色: 兼容旧 'white'/'yellow', 或 '#RRGGBB'
     position: str = 'bottom'         # bottom / top / center
+    font_file: str = ''              # 字体文件名 (FONTS_DIR 下), 空=默认思源黑体
+    stroke_color: str = '#000000'    # 描边颜色
+    stroke_width: float = 1.0        # 描边粗细倍率, 0=无描边
+    shadow: bool = False             # 是否加阴影
+
+
+def _ff_color(c, default='white'):
+    """前端颜色 → ffmpeg drawtext 颜色. '#RRGGBB' → '0xRRGGBB'; 命名色保留; 其它回退 default."""
+    c = (c or '').strip()
+    if c.startswith('#') and len(c) == 7:
+        return '0x' + c[1:].upper()
+    if c.lower() in ('white', 'yellow', 'black', 'red', 'orange', 'blue', 'green', 'pink', 'cyan'):
+        return c.lower()
+    return default
+
+
+def _resolve_sub_font(font_file):
+    """字体文件名 → FONTS_DIR 下绝对路径; 无效则用默认 _SUB_FONT."""
+    if font_file:
+        import re as _re
+        safe = _re.sub(r'[^A-Za-z0-9._-]', '', font_file)
+        p = os.path.join(os.environ.get('FONTS_DIR') or '/data/monoi-server/fonts', safe)
+        if os.path.exists(p):
+            return p
+    return _SUB_FONT
 
 
 @app.post("/api/voice/subtitle/burn")
@@ -1099,8 +1124,16 @@ def subtitle_burn(req: SubtitleBurnReq):
         fontsize = max(18, int(h * 0.05 * (req.font_scale or 1.0)))
         # 每行最多放几个全角字 = 视频宽度的 86% / 单字宽(≈fontsize). 竖屏自动少放, 保证不超屏.
         per_line = max(6, int(w * 0.86 / fontsize))
-        fontcolor = 'yellow' if req.color == 'yellow' else 'white'
-        borderw = max(2, int(fontsize * 0.08))
+        fontfile = _resolve_sub_font(req.font_file)
+        _legacy = {'white': '#FFFFFF', 'yellow': '#FFE14D'}   # 兼容旧值
+        fontcolor = _ff_color(_legacy.get(req.color, req.color), 'white')
+        sw = max(0.0, float(req.stroke_width if req.stroke_width is not None else 1.0))
+        borderw = int(fontsize * 0.07 * sw) if sw > 0 else 0
+        border_part = f":borderw={borderw}:bordercolor={_ff_color(req.stroke_color, 'black')}" if borderw > 0 else ''
+        shadow_part = ''
+        if req.shadow:
+            sd = max(2, int(fontsize * 0.05))
+            shadow_part = f":shadowcolor=black@0.7:shadowx={sd}:shadowy={sd}"
         if req.position == 'top':
             ypos = str(int(h * 0.06))
         elif req.position == 'center':
@@ -1118,8 +1151,8 @@ def subtitle_burn(req: SubtitleBurnReq):
                 f.write(txt)
             s = max(0.0, float(seg.start)); e = max(s + 0.1, float(seg.end))
             filters.append(
-                f"drawtext=fontfile='{_SUB_FONT}':textfile='{tf}':fontcolor={fontcolor}:"
-                f"fontsize={fontsize}:borderw={borderw}:bordercolor=black:line_spacing=8:"
+                f"drawtext=fontfile='{fontfile}':textfile='{tf}':fontcolor={fontcolor}:"
+                f"fontsize={fontsize}{border_part}{shadow_part}:line_spacing=8:"
                 f"x=(w-text_w)/2:y={ypos}:enable='between(t,{s:.3f},{e:.3f})'"
             )
         if not filters:

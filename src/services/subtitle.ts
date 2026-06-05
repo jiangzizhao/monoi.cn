@@ -27,7 +27,11 @@ export async function subtitleTranscribe(
 
 /** 把(改好的)字幕烧到视频, 返回带字幕的新视频 URL */
 export async function subtitleBurn(
-  payload: { video_oss_key: string; segments: SubSeg[]; font_scale?: number; color?: string; position?: string },
+  payload: {
+    video_oss_key: string; segments: SubSeg[]
+    font_scale?: number; color?: string; position?: string
+    font_file?: string; stroke_color?: string; stroke_width?: number; shadow?: boolean
+  },
 ): Promise<{ video_url: string; output_oss_key: string }> {
   const res = await fetch(directBase + '/api/voice/subtitle/burn', {
     method: 'POST', headers: authHeaders(), body: JSON.stringify(payload),

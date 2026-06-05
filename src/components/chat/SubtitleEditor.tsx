@@ -1,7 +1,20 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Loader2, X, Trash2, Captions } from 'lucide-react'
 import { subtitleTranscribe, subtitleBurn, type SubSeg } from '../../services/subtitle'
+import { loadFont, fontFamily } from '../../utils/coverFonts'
+
+const directBase = (import.meta as any).env?.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'
+
+// 文字颜色调色板 (跟封面常用色一致)
+const COLORS: [string, string][] = [
+  ['#FFFFFF', '白'], ['#000000', '黑'], ['#FFE14D', '黄'], ['#FF4D4D', '红'],
+  ['#FF8C1A', '橙'], ['#3B9EFF', '蓝'], ['#34C759', '绿'], ['#FF6FB5', '粉'],
+]
+// 描边粗细档位 (倍率): 跟后端 borderw = fontsize*0.07*倍率 对应
+const STROKES: [number, string][] = [[0, '无'], [0.6, '细'], [1, '中'], [1.8, '粗']]
+
+interface FontItem { file: string; label: string }
 
 function fmt(t: number) {
   const s = Math.max(0, Math.floor(t))
@@ -18,9 +31,21 @@ export function SubtitleEditor({ transcribeInput, previewUrl, onClose, onDone }:
   const [err, setErr] = useState('')
   const [ossKey, setOssKey] = useState('')
   const [segs, setSegs] = useState<SubSeg[]>([])
+  const [activeSeg, setActiveSeg] = useState(0)
+
+  // 字幕样式
+  const [fontFile, setFontFile] = useState('')          // 空 = 默认思源黑体
   const [fontScale, setFontScale] = useState(1.0)
-  const [color, setColor] = useState<'white' | 'yellow'>('white')
+  const [color, setColor] = useState('#FFFFFF')
+  const [strokeWidth, setStrokeWidth] = useState(1.0)
+  const [strokeColor, setStrokeColor] = useState('#000000')
+  const [shadow, setShadow] = useState(true)
   const [position, setPosition] = useState<'bottom' | 'center' | 'top'>('bottom')
+  const [fonts, setFonts] = useState<FontItem[]>([])
+
+  // 预览字号要跟视频实际高度挂钩 (跟后端 h*0.05 一致), 用 ResizeObserver 量预览框高度
+  const boxRef = useRef<HTMLDivElement>(null)
+  const [boxH, setBoxH] = useState(0)
 
   useEffect(() => {
     let alive = true
@@ -32,43 +57,89 @@ export function SubtitleEditor({ transcribeInput, previewUrl, onClose, onDone }:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // 拉字体列表 + 预加载给下拉/预览用
+  useEffect(() => {
+    fetch(directBase + '/api/voice/cover-fonts')
+      .then(r => r.json())
+      .then(d => {
+        const list: FontItem[] = (d.fonts || []).map((f: any) => ({ file: f.file, label: f.label || f.file }))
+        setFonts(list)
+        list.slice(0, 16).forEach(f => loadFont(f.file))
+      })
+      .catch(() => { /* 字体列表拉不到就用默认 */ })
+  }, [])
+
+  useEffect(() => { if (fontFile) loadFont(fontFile) }, [fontFile])
+
+  useEffect(() => {
+    if (phase !== 'edit' && phase !== 'burning') return
+    const el = boxRef.current
+    if (!el) return
+    setBoxH(el.getBoundingClientRect().height)
+    const ro = new ResizeObserver(es => setBoxH(es[0].contentRect.height))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [phase])
+
   const updateText = (i: number, text: string) => setSegs(prev => prev.map((s, j) => j === i ? { ...s, text } : s))
-  const removeSeg = (i: number) => setSegs(prev => prev.filter((_, j) => j !== i))
+  const removeSeg = (i: number) => { setSegs(prev => prev.filter((_, j) => j !== i)); setActiveSeg(0) }
 
   const handleBurn = async () => {
     const clean = segs.filter(s => s.text.trim())
     if (!clean.length) { setErr('字幕都空了'); return }
     setPhase('burning'); setErr('')
     try {
-      const r = await subtitleBurn({ video_oss_key: ossKey, segments: clean, font_scale: fontScale, color, position })
+      const r = await subtitleBurn({
+        video_oss_key: ossKey, segments: clean,
+        font_scale: fontScale, color, position,
+        font_file: fontFile, stroke_color: strokeColor, stroke_width: strokeWidth, shadow,
+      })
       onDone(r.video_url, r.output_oss_key)
     } catch (e: any) {
       setErr(e.message || '生成失败'); setPhase('edit')
     }
   }
 
-  const btn = (active: boolean) =>
-    `px-3 py-1 rounded-lg border text-xs cursor-pointer transition-colors ${active
+  // 预览字幕 CSS 样式 (近似最终 ffmpeg 烧录效果)
+  const previewText = segs[activeSeg]?.text || segs[0]?.text || '字幕预览效果'
+  const subFontPx = Math.max(10, boxH * 0.05 * fontScale)
+  const strokePx = strokeWidth > 0 ? Math.max(1, subFontPx * 0.07 * strokeWidth) : 0
+  const subStyle: React.CSSProperties = {
+    fontFamily: fontFile ? `"${fontFamily(fontFile)}", sans-serif` : 'sans-serif',
+    color,
+    fontSize: subFontPx,
+    fontWeight: 800,
+    lineHeight: 1.25,
+    textAlign: 'center',
+    maxWidth: '86%',
+    whiteSpace: 'pre-wrap',
+    textShadow: shadow ? '2px 2px 5px rgba(0,0,0,0.75)' : 'none',
+    WebkitTextStroke: strokePx > 0 ? `${strokePx}px ${strokeColor}` : undefined,
+    paintOrder: 'stroke fill',
+  } as React.CSSProperties
+
+  const styleBtn = (active: boolean) =>
+    `px-2.5 py-1 rounded-lg border text-xs cursor-pointer transition-colors ${active
       ? 'border-[var(--text)] bg-[var(--text)] text-[var(--bg)]'
       : 'border-[var(--border)] text-[var(--text-2)] hover:border-[var(--text)]'}`
 
   const modal = (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-3">
-      <div className="w-full max-w-2xl max-h-[90vh] flex flex-col rounded-2xl bg-[var(--bg-card)] border border-[var(--border)] shadow-2xl overflow-hidden">
+      <div className="w-full max-w-5xl max-h-[92vh] flex flex-col rounded-2xl bg-[var(--bg-card)] border border-[var(--border)] shadow-2xl overflow-hidden">
         {/* 头 */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)] flex-shrink-0">
           <div className="flex items-center gap-2 text-sm font-medium"><Captions size={16}/> 加字幕</div>
           <button onClick={onClose} className="text-[var(--text-3)] hover:text-[var(--text)] cursor-pointer"><X size={18}/></button>
         </div>
 
         {phase === 'loading' && (
-          <div className="flex flex-col items-center justify-center gap-3 py-16 text-[var(--text-3)] text-sm">
+          <div className="flex flex-col items-center justify-center gap-3 py-20 text-[var(--text-3)] text-sm">
             <Loader2 size={24} className="animate-spin"/> 正在识别语音, 生成字幕…
           </div>
         )}
 
         {phase === 'error' && (
-          <div className="flex flex-col items-center justify-center gap-3 py-16 text-sm">
+          <div className="flex flex-col items-center justify-center gap-3 py-20 text-sm">
             <p className="text-red-400">{err || '出错了'}</p>
             <button onClick={onClose} className="px-4 py-2 rounded-lg border border-[var(--border)] text-[var(--text-2)] hover:bg-[var(--bg-hover)] cursor-pointer">关闭</button>
           </div>
@@ -76,48 +147,110 @@ export function SubtitleEditor({ transcribeInput, previewUrl, onClose, onDone }:
 
         {(phase === 'edit' || phase === 'burning') && (
           <>
-            {/* 视频预览 */}
-            <div className="px-4 pt-3">
-              <video src={previewUrl} controls playsInline className="w-full max-h-[200px] object-contain rounded-lg bg-black"/>
-            </div>
+            <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
+              {/* 左: 字幕条 */}
+              <div className="lg:w-72 flex-shrink-0 lg:border-r border-b lg:border-b-0 border-[var(--border)] overflow-y-auto p-3 flex flex-col gap-2 max-h-[28vh] lg:max-h-none">
+                <div className="text-xs text-[var(--text-3)] mb-1 flex-shrink-0">识别出 {segs.length} 句 · 改错别字 / 删多余 · 点某句在右边看效果</div>
+                {segs.map((s, i) => (
+                  <div key={i} onClick={() => setActiveSeg(i)}
+                    className={`flex items-center gap-2 rounded-lg p-1 cursor-pointer ${activeSeg === i ? 'bg-[var(--bg-hover)] ring-1 ring-[var(--text-3)]' : ''}`}>
+                    <span className="text-[10px] text-[var(--text-3)] font-mono w-10 flex-shrink-0">{fmt(s.start)}</span>
+                    <input value={s.text} onChange={e => updateText(i, e.target.value)}
+                      className="flex-1 min-w-0 px-2 py-1.5 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm focus:border-[var(--text)] outline-none"/>
+                    <button onClick={(e) => { e.stopPropagation(); removeSeg(i) }} className="text-[var(--text-3)] hover:text-red-400 cursor-pointer flex-shrink-0" title="删除这句"><Trash2 size={14}/></button>
+                  </div>
+                ))}
+              </div>
 
-            {/* 样式 */}
-            <div className="px-4 py-3 flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-[var(--border)]">
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs text-[var(--text-3)]">字号</span>
-                {([['小', 0.8], ['中', 1.0], ['大', 1.3]] as const).map(([l, v]) => (
-                  <button key={l} className={btn(fontScale === v)} onClick={() => setFontScale(v)}>{l}</button>
-                ))}
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs text-[var(--text-3)]">颜色</span>
-                {([['白', 'white'], ['黄', 'yellow']] as const).map(([l, v]) => (
-                  <button key={l} className={btn(color === v)} onClick={() => setColor(v)}>{l}</button>
-                ))}
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs text-[var(--text-3)]">位置</span>
-                {([['底部', 'bottom'], ['中间', 'center'], ['顶部', 'top']] as const).map(([l, v]) => (
-                  <button key={l} className={btn(position === v)} onClick={() => setPosition(v)}>{l}</button>
-                ))}
-              </div>
-            </div>
-
-            {/* 字幕条编辑 */}
-            <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 flex flex-col gap-2">
-              <div className="text-xs text-[var(--text-3)] mb-1">识别出 {segs.length} 句, 改错别字 / 删多余的, 改好点下面按钮烧进视频:</div>
-              {segs.map((s, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <span className="text-[10px] text-[var(--text-3)] font-mono w-20 flex-shrink-0">{fmt(s.start)}–{fmt(s.end)}</span>
-                  <input value={s.text} onChange={e => updateText(i, e.target.value)}
-                    className="flex-1 min-w-0 px-2.5 py-1.5 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm focus:border-[var(--text)] outline-none"/>
-                  <button onClick={() => removeSeg(i)} className="text-[var(--text-3)] hover:text-red-400 cursor-pointer flex-shrink-0" title="删除这句"><Trash2 size={14}/></button>
+              {/* 中: 视频预览 + 字幕示意 */}
+              <div className="flex-1 min-w-0 flex items-center justify-center bg-black/40 p-3">
+                <div ref={boxRef} className="relative max-h-[58vh] rounded-lg overflow-hidden" style={{ lineHeight: 0 }}>
+                  <video src={previewUrl} controls playsInline className="max-h-[58vh] max-w-full object-contain rounded-lg bg-black"/>
+                  {/* 字幕示意层 (不拦截视频控件) */}
+                  <div className="absolute inset-x-0 flex justify-center pointer-events-none px-[7%]"
+                    style={position === 'top' ? { top: '6%' } : position === 'center' ? { top: '50%', transform: 'translateY(-50%)' } : { bottom: '8%' }}>
+                    <span style={subStyle}>{previewText}</span>
+                  </div>
                 </div>
-              ))}
+              </div>
+
+              {/* 右: 样式控制 */}
+              <div className="lg:w-64 flex-shrink-0 lg:border-l border-t lg:border-t-0 border-[var(--border)] overflow-y-auto p-3 flex flex-col gap-4">
+                {/* 字体 */}
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-xs text-[var(--text-3)]">字体</span>
+                  <select value={fontFile} onChange={e => setFontFile(e.target.value)}
+                    className="w-full px-2.5 py-1.5 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-sm text-[var(--text)] focus:border-[var(--text)] outline-none cursor-pointer">
+                    <option value="">默认 (思源黑体)</option>
+                    {fonts.map(f => <option key={f.file} value={f.file}>{f.label}</option>)}
+                  </select>
+                </div>
+
+                {/* 字号 */}
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-[var(--text-3)]">字号</span>
+                    <span className="text-[11px] text-[var(--text-3)] tabular-nums">{Math.round(fontScale * 100)}%</span>
+                  </div>
+                  <input type="range" min={0.6} max={1.6} step={0.05} value={fontScale}
+                    onChange={e => setFontScale(parseFloat(e.target.value))}
+                    className="w-full accent-[var(--text)] cursor-pointer"/>
+                </div>
+
+                {/* 颜色 */}
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-xs text-[var(--text-3)]">颜色</span>
+                  <div className="flex flex-wrap gap-2">
+                    {COLORS.map(([c, label]) => (
+                      <button key={c} title={label} onClick={() => setColor(c)}
+                        className={`w-6 h-6 rounded-full border-2 cursor-pointer transition-all ${color === c ? 'border-[var(--text)] scale-110' : 'border-[var(--border)]'}`}
+                        style={{ background: c }}/>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 描边 */}
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-xs text-[var(--text-3)]">描边</span>
+                  <div className="flex gap-2">
+                    {STROKES.map(([w, label]) => (
+                      <button key={label} onClick={() => setStrokeWidth(w)} className={styleBtn(strokeWidth === w)}>{label}</button>
+                    ))}
+                  </div>
+                  {strokeWidth > 0 && (
+                    <div className="flex gap-2 mt-1">
+                      {(['#000000', '#FFFFFF'] as const).map(c => (
+                        <button key={c} title={c === '#000000' ? '黑边' : '白边'} onClick={() => setStrokeColor(c)}
+                          className={`w-6 h-6 rounded-full border-2 cursor-pointer ${strokeColor === c ? 'border-[var(--text)] scale-110' : 'border-[var(--border)]'}`}
+                          style={{ background: c }}/>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* 阴影 */}
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-[var(--text-3)]">阴影</span>
+                  <div className="flex gap-2">
+                    <button onClick={() => setShadow(true)} className={styleBtn(shadow)}>开</button>
+                    <button onClick={() => setShadow(false)} className={styleBtn(!shadow)}>关</button>
+                  </div>
+                </div>
+
+                {/* 位置 */}
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-xs text-[var(--text-3)]">位置</span>
+                  <div className="flex gap-2">
+                    {([['bottom', '底部'], ['center', '中间'], ['top', '顶部']] as const).map(([v, l]) => (
+                      <button key={v} onClick={() => setPosition(v)} className={styleBtn(position === v)}>{l}</button>
+                    ))}
+                  </div>
+                </div>
+              </div>
             </div>
 
             {/* 底部操作 */}
-            <div className="px-4 py-3 border-t border-[var(--border)] flex items-center justify-between gap-3">
+            <div className="px-4 py-3 border-t border-[var(--border)] flex items-center justify-between gap-3 flex-shrink-0">
               {err ? <span className="text-xs text-red-400 truncate">{err}</span> : <span className="text-[10px] text-[var(--text-3)]">字幕会硬烧进视频 (发抖音/小红书自带字幕)</span>}
               <button onClick={handleBurn} disabled={phase === 'burning'}
                 className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--text)] text-[var(--bg)] text-sm cursor-pointer disabled:opacity-50 disabled:cursor-wait flex-shrink-0">
