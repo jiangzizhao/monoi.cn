@@ -6,6 +6,7 @@ import { callAI, callScriptAI, callFootageAI, callFootageAIBySegments, isScriptP
 // cutout_download) 仍在各自组件里调 chargeCredit, 不在这文件.
 import { searchPexels } from '../services/pexels'
 import { searchPixabay } from '../services/pixabay'
+import { subtitleTranscribe } from '../services/subtitle'
 import type { ChoiceOption, FootageSentenceItem, MessageBlock } from '../types'
 import { matchIntent, encodeAutoOpenId, decodeAutoOpenId, AUTOOPEN_DISMISS_ID } from '../lib/intentMatcher'
 import { isGreetingOrHelp, WELCOME_OPTIONS } from '../lib/welcomeOptions'
@@ -448,6 +449,9 @@ export function useChat() {
     if (text === '__auto_footage_from_video__') {
       displayText = '智能匹配素材 · 用上一段口播视频'
     }
+    if (text === '__auto_footage_from_dh__') {
+      displayText = '智能匹配素材 · 用数字人视频语音'
+    }
     if (text.startsWith('__dialect__')) {
       const m = text.match(/^__dialect__(\w+)__/)
       const labelMap: Record<string, string> = {
@@ -568,6 +572,75 @@ export function useChat() {
           ])
         } catch (e: any) {
           store.updateLastAssistantBlocks(convId, [{ type: 'error', message: e.message || '匹配失败' }])
+        }
+        return
+      }
+
+      // 数字人视频配素材: 数字人没有 kept_segments (音频烤进视频里), 先识别视频语音拿"真实停顿分段",
+      // 比 AI 读文字猜断句准得多. 拿到分段 → callFootageAIBySegments 只提画面词 (不再拆句).
+      // (数字人无独立口播音轨, 不走自动合成; 这里只给每句配可下载的 b-roll 候选)
+      if (text === '__auto_footage_from_dh__') {
+        // 找最近一个数字人视频的 url
+        let videoUrl = ''
+        for (let i = conv.messages.length - 1; i >= 0; i--) {
+          const msg = conv.messages[i]
+          if (msg.role !== 'assistant') continue
+          for (const block of msg.blocks) {
+            if (block.type === 'video_player' && (block as any).data?.video_url) {
+              videoUrl = (block as any).data.video_url
+              break
+            }
+          }
+          if (videoUrl) break
+        }
+        if (!videoUrl) {
+          store.updateLastAssistantBlocks(convId, [{ type: 'error', message: '没找到数字人视频. 先生成数字人视频再试.' }])
+          return
+        }
+        store.updateLastAssistantBlocks(convId, [{ type: 'loading', label: '正在识别视频语音 + 按真实停顿拆镜...' }])
+        try {
+          const { segments } = await subtitleTranscribe({ video_url: videoUrl })
+          if (!segments || segments.length === 0) throw new Error('没识别到语音')
+          const inputs = segments.map(s => ({ text: s.text, duration: Math.max(0.5, s.end - s.start) }))
+          store.updateLastAssistantBlocks(convId, [{ type: 'loading', label: `AI 正在为 ${inputs.length} 个镜头提取画面词...` }])
+          const keywords = await callFootageAIBySegments(inputs, ctrl.signal)
+          const items: FootageSentenceItem[] = segments.map((s, i) => ({
+            text: s.text,
+            scene: keywords[i]?.scene || '',
+            search_en: keywords[i]?.search_en || [],
+            search_cn: keywords[i]?.search_cn || [],
+            duration: Math.max(0.5, s.end - s.start),
+            assets: [],
+            loadingAssets: true,
+          }))
+          store.updateLastAssistantBlocks(convId, [
+            { type: 'text', content: `✓ 按视频语音拆出 ${items.length} 镜, 正在并发拉素材...` },
+            { type: 'footage_grid', data: items },
+          ])
+          const updated = [...items]
+          for (let i = 0; i < updated.length; i++) {
+            if (ctrl.signal.aborted) return
+            const kw = updated[i].search_en[0] || updated[i].search_cn[0] || updated[i].text
+            const [p, px] = await Promise.all([searchPexels(kw, 5), searchPixabay(kw, 3)])
+            updated[i] = { ...updated[i], assets: [...p, ...px], loadingAssets: false }
+            store.updateLastAssistantBlocks(convId, [
+              { type: 'text', content: `拉素材中... (${i + 1}/${items.length})` },
+              { type: 'footage_grid', data: [...updated] },
+            ])
+            await new Promise(r => setTimeout(r, 200))
+          }
+          store.updateLastAssistantBlocks(convId, [
+            { type: 'text', content: `✓ 匹配完成 ${items.length} 镜. 每镜挑你喜欢的, 可拖删/换关键词重搜, 选好后导出清单或下载到本地剪辑里用.` },
+            { type: 'footage_grid', data: [...updated] },
+          ])
+        } catch (e: any) {
+          // 兜底: 语音识别没成 → 引导手动贴文案 (AI 拆句路径)
+          store.updateLastAssistantBlocks(convId, [
+            { type: 'text', content: '视频语音识别没成功, 可以改用手动贴文案来匹配素材.' },
+            { type: 'choices', question: '下一步', options: [
+              { id: '__form_footage__', label: '手动贴文案匹配', description: '粘贴口播文案, AI 拆句配画面' },
+            ] },
+          ])
         }
         return
       }
@@ -693,7 +766,7 @@ export function useChat() {
             type: 'choices',
             question: '下一步',
             options: [
-              { id: '__form_footage__', label: '匹配素材', description: '给数字人配 b-roll 画面素材' },
+              { id: '__auto_footage_from_dh__', label: '匹配素材', description: '识别视频语音自动拆镜, 配 b-roll 画面' },
               { id: '__form_cover__', label: '生成封面', description: '给视频做个发布封面图' },
               { id: '__add_bgm_to_video__', label: '加 BGM', description: '叠背景音乐 (从 monoi BGM 库选)' },
               { id: '__form_publish__', label: '发布到平台', description: '直接发抖音 / 小红书' },
