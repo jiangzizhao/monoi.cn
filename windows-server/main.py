@@ -2402,6 +2402,43 @@ def finalize_narration_proxy(req: FinalizeNarrationRequest, request: Request):
         raise HTTPException(503, "voice-server (9001) 未启动")
 
 
+# ====== 视频字幕: 转发到 voice-server (识别 + 烧录都在 9001) ======
+# /api/voice/* 走 main-server(18765), 字幕端点实现在 voice-server, 必须在这里逐条代理, 否则前端 404.
+
+@app.post("/api/voice/subtitle/transcribe")
+async def subtitle_transcribe_proxy(request: Request):
+    """识别视频语音 → 可编辑字幕条. 转发 voice-server (whisper, 慢, 长超时). 暂不额外扣费."""
+    import requests as _req
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    try:
+        resp = _req.post(f"{VOICE_SERVER_URL}/api/voice/subtitle/transcribe", json=body, timeout=600)
+        if resp.status_code != 200:
+            raise HTTPException(resp.status_code, f"voice-server 错误: {resp.text[:200]}")
+        return resp.json()
+    except _req.exceptions.ConnectionError:
+        raise HTTPException(503, "voice-server (9001) 未启动")
+
+
+@app.post("/api/voice/subtitle/burn")
+async def subtitle_burn_proxy(request: Request):
+    """把改好的字幕烧进视频, 返回新视频 URL. 转发 voice-server (ffmpeg 重编码, 慢, 长超时)."""
+    import requests as _req
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    try:
+        resp = _req.post(f"{VOICE_SERVER_URL}/api/voice/subtitle/burn", json=body, timeout=960)
+        if resp.status_code != 200:
+            raise HTTPException(resp.status_code, f"voice-server 错误: {resp.text[:200]}")
+        return resp.json()
+    except _req.exceptions.ConnectionError:
+        raise HTTPException(503, "voice-server (9001) 未启动")
+
+
 NARRATION_OUTPUT_DIR = os.environ.get(
     "NARRATION_OUTPUT_DIR",
     r"D:\monoi-server\models\cosyvoice\narration_outputs" if os.name == 'nt'
