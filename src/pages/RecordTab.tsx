@@ -128,6 +128,8 @@ export default function RecordTab() {
   const annDrawingRef = useRef(false)
   const annToolRef = useRef(annTool)
   useEffect(() => { annToolRef.current = annTool }, [annTool])
+  // 文字工具: 点一下在画面上弹输入框 (替代 electron 禁用的 window.prompt)
+  const [annTextBox, setAnnTextBox] = useState<{ clientX: number; clientY: number; x: number; y: number } | null>(null)
   // 缩放状态用 ref (在 raf 循环里逐帧改, 不触发 re-render)
   const zoomRef = useRef({ scale: 1, fx: 0.5, fy: 0.5, targetScale: 1, tFx: 0.5, tFy: 0.5, lastClickT: 0 })
   const clickZoomRef = useRef(clickZoom)
@@ -352,8 +354,8 @@ export default function RecordTab() {
     const cv = canvasRef.current!
     const w = cv.height * (annThick ? 0.011 : 0.006)
     if (annTool === 'text') {
-      const t = window.prompt('输入文字:')
-      if (t && t.trim()) annShapesRef.current.push({ tool: 'text', color: annColor, width: w, x: p.x, y: p.y, text: t.trim(), fontSize: cv.height * 0.045 })
+      // 桌面端(electron)禁用 window.prompt, 改成画面上就地弹输入框
+      setAnnTextBox({ clientX: e.clientX, clientY: e.clientY, x: p.x, y: p.y })
       return
     }
     annDrawingRef.current = true
@@ -373,6 +375,15 @@ export default function RecordTab() {
   const annUp = () => { annDrawingRef.current = false }
   const annUndo = () => { annShapesRef.current = annShapesRef.current.slice(0, -1) }
   const annClear = () => { annShapesRef.current = [] }
+  const commitAnnText = (val: string) => {
+    if (val.trim() && annTextBox) {
+      const cv = canvasRef.current
+      const fontSize = cv ? cv.height * 0.045 : 40
+      const w = cv ? cv.height * (annThick ? 0.011 : 0.006) : 6
+      annShapesRef.current.push({ tool: 'text', color: annColor, width: w, x: annTextBox.x, y: annTextBox.y, text: val.trim(), fontSize })
+    }
+    setAnnTextBox(null)
+  }
   /** 枚举 Chrome 看到的所有摄像头 + 麦克风 — 调试 + 让用户切换源. */
   const refreshCameras = async (): Promise<MediaDeviceInfo[]> => {
     try {
@@ -773,6 +784,22 @@ export default function RecordTab() {
 
       {/* 截屏标注编辑器 */}
       {shotDataUrl && <ScreenshotAnnotator imageDataUrl={shotDataUrl} onClose={() => setShotDataUrl(null)}/>}
+
+      {/* 录制实时标注 — 文字输入框 (就地弹, 回车确认 / Esc 取消) */}
+      {annTextBox && (
+        <input
+          autoFocus
+          defaultValue=""
+          placeholder="输入文字, 回车确认"
+          onKeyDown={e => {
+            if (e.key === 'Enter') commitAnnText((e.target as HTMLInputElement).value)
+            else if (e.key === 'Escape') setAnnTextBox(null)
+          }}
+          onBlur={e => commitAnnText(e.target.value)}
+          style={{ position: 'fixed', left: Math.min(annTextBox.clientX, window.innerWidth - 180), top: annTextBox.clientY, zIndex: 200 }}
+          className="px-2 py-1 rounded-lg border-2 border-[var(--text)] bg-white text-black text-sm outline-none shadow-lg w-40"
+        />
+      )}
 
       {/* 桌面端"选窗口"面板: 选你要录的窗口/屏幕 (选窗口不会套娃; 点哪放大在录窗口最大化时最准) */}
       {showSourcePicker && (

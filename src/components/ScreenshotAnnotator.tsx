@@ -32,6 +32,11 @@ export function ScreenshotAnnotator({ imageDataUrl, onClose }: { imageDataUrl: s
   const [shapes, setShapes] = useState<Shape[]>([])
   const drawingRef = useRef(false)
   const stageRef = useRef<Konva.Stage>(null)
+  const [textBox, setTextBox] = useState<{ clientX: number; clientY: number; x: number; y: number } | null>(null)
+  const commitText = (val: string) => {
+    if (val.trim() && textBox) setShapes(prev => [...prev, { tool: 'text', color, width, x: textBox.x, y: textBox.y, text: val.trim(), fontSize: Math.max(18, width * 6) }])
+    setTextBox(null)
+  }
 
   // 加载截图
   useEffect(() => {
@@ -55,14 +60,15 @@ export function ScreenshotAnnotator({ imageDataUrl, onClose }: { imageDataUrl: s
     return p ? { x: p.x, y: p.y } : null
   }
 
-  const onDown = () => {
+  const onDown = (e?: any) => {
     const p = pointer()
     if (!p) return
     if (tool === 'text') {
-      const t = window.prompt('输入文字:')
-      if (t && t.trim()) {
-        setShapes(prev => [...prev, { tool: 'text', color, width, x: p.x, y: p.y, text: t.trim(), fontSize: Math.max(16, width * 6) }])
-      }
+      // 就地弹输入框 (electron 禁用 window.prompt)
+      const ne = e?.evt
+      const cx = ne?.clientX ?? ne?.touches?.[0]?.clientX ?? window.innerWidth / 2
+      const cy = ne?.clientY ?? ne?.touches?.[0]?.clientY ?? window.innerHeight / 2
+      setTextBox({ clientX: cx, clientY: cy, x: p.x, y: p.y })
       return
     }
     drawingRef.current = true
@@ -156,6 +162,17 @@ export function ScreenshotAnnotator({ imageDataUrl, onClose }: { imageDataUrl: s
         </div>
         <div className="text-[11px] text-[var(--text-3)] text-center">选工具 → 在图上拖画(文字是点一下输入)· 撤销/清空可改 · 下载保存 PNG</div>
       </div>
+
+      {textBox && (
+        <input
+          autoFocus defaultValue="" placeholder="输入文字, 回车确认"
+          onKeyDown={e => { if (e.key === 'Enter') commitText((e.target as HTMLInputElement).value); else if (e.key === 'Escape') setTextBox(null) }}
+          onBlur={e => commitText(e.target.value)}
+          onClick={e => e.stopPropagation()}
+          style={{ position: 'fixed', left: Math.min(textBox.clientX, window.innerWidth - 180), top: textBox.clientY, zIndex: 140 }}
+          className="px-2 py-1 rounded-lg border-2 border-[var(--text)] bg-white text-black text-sm outline-none shadow-lg w-40"
+        />
+      )}
     </div>
   )
 
