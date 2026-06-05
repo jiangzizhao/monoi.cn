@@ -835,8 +835,7 @@ def admin_add_cover_template(req: AddCoverTemplateRequest, request: Request):
     valid_cats = {'kepu', 'zhenjing', 'gushi', 'jiaocheng', 'jianji', 'zhichang', 'xuexi', 'licai', 'other'}
     if req.category not in valid_cats:
         raise HTTPException(400, f'category 必须是 {valid_cats}')
-    if req.text_fields and len(req.text_fields) > 10:
-        raise HTTPException(400, '最多 10 个文字字段')
+    # 文字字段数不限 (用户要求去掉 10 个上限)
     # 字段为空也允许 — 用户能在用户端自己加自定义文字, 模板可以是"纯底图"
 
     import json as _json
@@ -968,8 +967,7 @@ def admin_update_cover_template(template_id: int, req: UpdateCoverTemplateReques
     valid_cats = {'kepu', 'zhenjing', 'gushi', 'jiaocheng', 'jianji', 'zhichang', 'xuexi', 'licai', 'other'}
     if req.category not in valid_cats:
         raise HTTPException(400, f'category 必须是 {valid_cats}')
-    if req.text_fields and len(req.text_fields) > 10:
-        raise HTTPException(400, '最多 10 个文字字段')
+    # 文字字段数不限 (用户要求去掉 10 个上限)
 
     import json as _json
     conn = get_db()
