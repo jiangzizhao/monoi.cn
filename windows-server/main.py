@@ -3923,7 +3923,7 @@ def submit_digital_human(
             _dur = _wf.getnframes() / _wf.getframerate()
     except Exception:
         _dur = 0
-    est = max(1, round(_dur * 2)) if _dur > 0 else 20
+    est = max(1, round(_dur * 1)) if _dur > 0 else 10   # 数字人 1 积分/秒 (家里卡跑, 边际成本低; 让每天送的100够做一条)
 
     # 余额预检 (admin 免) —— 不够直接拒, 别白排队白跑 GPU
     try:
