@@ -76,6 +76,27 @@ function splitSegmentByPause(
   return result
 }
 
+// 素材匹配前把过细的句子合并成"画面单元": 每镜累计 ≥ MIN 字, 或到句末标点(。！？)才断.
+// 否则 2-4 字一镜 → 关键词没意义瞎匹配. 时间 start/end 跨合并段连续, 给合成对齐用.
+function mergeForFootage(
+  segs: { text: string; start: number; end: number }[],
+  minChars: number = 9,
+): { text: string; start: number; end: number }[] {
+  const out: { text: string; start: number; end: number }[] = []
+  let cur: { text: string; start: number; end: number } | null = null
+  const len = (s: string) => s.replace(/\s/g, '').length
+  for (const s of segs) {
+    if (!cur) cur = { text: s.text, start: s.start, end: s.end }
+    else { cur.text += s.text; cur.end = s.end }
+    if (len(cur.text) >= minChars || /[。！？!?…]\s*$/.test(cur.text)) { out.push(cur); cur = null }
+  }
+  if (cur) {
+    if (out.length && len(cur.text) < minChars) { out[out.length - 1].text += cur.text; out[out.length - 1].end = cur.end }
+    else out.push(cur)
+  }
+  return out
+}
+
 function findLastScriptPrompt(messages: { role: string; blocks: MessageBlock[] }[]) {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i]
@@ -527,7 +548,8 @@ export function useChat() {
               if (Array.isArray(ks) && ks.length > 0) {
                 // 0.15s 停顿 + 0.5s 短句下限: 抓小气口, 句子更细 (跟人说话节奏一致).
                 // 之前 0.25 + 1.0 拆出 5-6 秒长句, 像"按标点"不像"按气口".
-                segments = ks.flatMap((s: any) => splitSegmentByPause(s, 0.15, 0.5))
+                // 先按气口细拆, 再合并成"画面单元"(≥9字/到句末) — 否则 2 字一镜素材瞎匹配
+                segments = mergeForFootage(ks.flatMap((s: any) => splitSegmentByPause(s, 0.15, 0.5)))
                 break
               }
             }
@@ -622,10 +644,11 @@ export function useChat() {
         try {
           const { segments } = await subtitleTranscribe({ video_url: videoUrl })
           if (!segments || segments.length === 0) throw new Error('没识别到语音')
-          const inputs = segments.map(s => ({ text: s.text, duration: Math.max(0.5, s.end - s.start) }))
+          const segs = mergeForFootage(segments)   // 合并成画面单元(≥9字/到句末), 避免 2 字一镜瞎匹配
+          const inputs = segs.map(s => ({ text: s.text, duration: Math.max(0.5, s.end - s.start) }))
           store.updateLastAssistantBlocks(convId, [{ type: 'loading', label: `AI 正在为 ${inputs.length} 个镜头提取画面词...` }])
           const keywords = await callFootageAIBySegments(inputs, ctrl.signal)
-          const items: FootageSentenceItem[] = segments.map((s, i) => ({
+          const items: FootageSentenceItem[] = segs.map((s, i) => ({
             text: s.text,
             scene: keywords[i]?.scene || '',
             search_en: keywords[i]?.search_en || [],
