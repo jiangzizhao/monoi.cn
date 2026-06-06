@@ -368,7 +368,7 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
     return () => ro.disconnect()
   }, [peaks, keepRanges, dragSel, data.duration])
 
-  // 波形上按住拖选 → 删一段; 单击 → 跳转
+  // 波形上按住拖选 → 留下选区(像剪映, 等点"剪掉"才删); 单击 → 跳转 + 清掉选区
   useEffect(() => {
     const move = (e: MouseEvent) => {
       if (!dragRef.current) return
@@ -380,20 +380,21 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
       if (!d) return
       dragRef.current = null
       if (!d.moved) {
+        // 单击 = 跳转, 并清掉之前的选区
         const v = videoRef.current
         if (v && ready) v.currentTime = d.a
+        setCurrentTime(d.a)
         setDragSel(null)
         return
       }
+      // 拖动结束 = 留下高亮选区, 等用户点红色"剪掉"按钮再删 (不自动删, 防误操作)
       const t = xToTime(e.clientX)
-      const t0 = Math.min(d.a, t), t1 = Math.max(d.a, t)
-      if (t1 - t0 >= 0.08) deleteTimeRange(t0, t1)
-      setDragSel(null)
+      setDragSel({ a: Math.min(d.a, t), b: Math.max(d.a, t) })
     }
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
     return () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up) }
-  }, [xToTime, deleteTimeRange, ready])
+  }, [xToTime, ready])
 
   // 视频事件
   const onLoadedMetadata = () => setReady(true)
@@ -401,10 +402,28 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
   const onTimeUpdate = () => {
     const v = videoRef.current
     if (!v) return
-    setCurrentTime(v.currentTime)
-    // 不自动 seek 跳过删除段 — 视频画面流畅度优先, seek 会让画面突变.
-    // 删除段由 muted (静音) + 红色蒙层 (视觉) 标识.
-    // 真正的剪辑效果以"完成导出"后的新视频为准.
+    const t = v.currentTime
+    // 播放时跳过被删段 → 预览即成片: 一进入删除段就跳到下一段保留区间开头, 没有下一段就停.
+    if (!v.paused && !seekingRef.current) {
+      const ranges = keepRangesRef.current
+      if (ranges.length) {
+        const inKeep = ranges.some(([s, e]) => t >= s - 0.02 && t <= e + 0.02)
+        if (!inKeep) {
+          const nxt = ranges.find(([s]) => s > t + 0.02)
+          if (nxt) {
+            seekingRef.current = true
+            v.currentTime = nxt[0]
+            setCurrentTime(nxt[0])
+            return
+          }
+          v.pause()
+          v.currentTime = ranges[0][0]
+          setCurrentTime(ranges[0][0])
+          return
+        }
+      }
+    }
+    setCurrentTime(t)
   }
 
   const onSeeked = () => {
@@ -574,6 +593,19 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
 
   const fmtElapsed = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 
+  // 波形选区(剪映式手动剪) — 拖出来的高亮段, 够长才算有效
+  const waveSelLen = dragSel ? Math.abs(dragSel.b - dragSel.a) : 0
+  const hasWaveSel = waveSelLen >= 0.1
+  // "剪掉选中": 优先剪波形选区, 否则剪左边文案里拖选的词
+  const cutSelected = () => {
+    if (hasWaveSel && dragSel) {
+      deleteTimeRange(Math.min(dragSel.a, dragSel.b), Math.max(dragSel.a, dragSel.b))
+      setDragSel(null)
+      return
+    }
+    deleteSelected()
+  }
+
   return (
     <div className="flex flex-col lg:flex-row gap-3 lg:items-start">
       {/* 左: 视频文案 (转录逐句, 单击词删 / 拖选删 / 双击跳转) */}
@@ -654,14 +686,6 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
               <Loader2 size={20} className="animate-spin"/>
             </div>
           )}
-          {/* 当前在删除段时的红色蒙层 + 标识 (跟 muted 状态联动) */}
-          {isInDeletedRange && playing && (
-            <div className="absolute inset-0 bg-red-500/35 flex items-center justify-center pointer-events-none">
-              <span className="text-white text-xs font-medium bg-black/60 px-3 py-1 rounded-full">
-                已删除段 (跳过中)
-              </span>
-            </div>
-          )}
           {/* 声文字幕条: 当前正在说的那句, 叠在视频底部, 高亮当前词 (删掉的词划掉变淡) */}
           {currentSegWords.length > 0 && (
             <div className="absolute inset-x-0 bottom-0 px-4 pb-2 pt-6 bg-gradient-to-t from-black/85 to-transparent pointer-events-none text-center">
@@ -675,7 +699,7 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
           )}
         </div>
 
-        {/* 声纹波形: 绿=保留 红=删除(气口/删词). 点击跳转 · 按住拖选删一段 */}
+        {/* 声纹波形: 绿=保留 红=删除(气口/删词). 点击跳转 · 按住拖一段选中 → 点剪掉 (像剪映) */}
         <div
           ref={waveWrapRef}
           className="relative rounded-lg overflow-hidden bg-[var(--bg-hover)] cursor-pointer select-none"
@@ -685,15 +709,31 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
             dragRef.current = { a: t, moved: false }
             setDragSel({ a: t, b: t })
           }}
-          title="点击跳转 · 按住拖选一段删除"
+          title="点击跳转 · 按住拖一段选中, 再点红色「剪掉」"
         >
           <canvas ref={waveCanvasRef} className="absolute inset-0 w-full h-full" />
           <div
             className="absolute top-0 bottom-0 w-0.5 bg-[var(--text)] pointer-events-none"
             style={{ left: `${(currentTime / (data.duration || 1)) * 100}%` }}
           />
+          {/* 选中一段后浮出的"剪掉"按钮 (剪映式: 选 → 剪) */}
+          {hasWaveSel && dragSel && (
+            <button
+              type="button"
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation()
+                deleteTimeRange(Math.min(dragSel.a, dragSel.b), Math.max(dragSel.a, dragSel.b))
+                setDragSel(null)
+              }}
+              className="absolute top-1 z-10 -translate-x-1/2 px-2.5 py-1 rounded-full bg-red-500 text-white text-[11px] font-medium shadow-lg hover:bg-red-600 cursor-pointer flex items-center gap-1 whitespace-nowrap"
+              style={{ left: `${Math.min(90, Math.max(10, (((dragSel.a + dragSel.b) / 2) / (data.duration || 1)) * 100))}%` }}
+            >
+              <Scissors size={11}/> 剪掉 {waveSelLen.toFixed(1)}s
+            </button>
+          )}
         </div>
-        <div className="text-[11px] text-[var(--text-3)] text-center">{currentTime.toFixed(1)}s / {data.duration.toFixed(1)}s · 波形上点击跳转 · 拖选一段删除</div>
+        <div className="text-[11px] text-[var(--text-3)] text-center">{currentTime.toFixed(1)}s / {data.duration.toFixed(1)}s · 波形上点击跳转 · 按住拖一段 → 点「剪掉」</div>
       </div>
 
       {/* 右: 工具 + 统计 + 导出 */}
@@ -740,11 +780,11 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
         <div className="flex flex-col gap-2">
           <button
             type="button"
-            onClick={() => deleteSelected()}
-            disabled={!hasSelection}
+            onClick={cutSelected}
+            disabled={!hasSelection && !hasWaveSel}
             className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs border border-[var(--border)] bg-[var(--bg-card)] text-[var(--text)] hover:bg-red-950/30 hover:text-red-400 hover:border-red-500/40 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
           >
-            <Scissors size={12}/> 删除选中
+            <Scissors size={12}/> {hasWaveSel ? `剪掉选中 ${waveSelLen.toFixed(1)}s` : '剪掉选中'}
           </button>
           <button
             type="button"
@@ -757,7 +797,7 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
         </div>
 
         <div className="text-[11px] text-[var(--text-3)] leading-relaxed">
-          左边文案:单击词 = 删/恢复 · 拖选一段 → 「删除选中」· 双击词跳到对应位置 · 句末剪刀删整句。中间波形上也能直接拖选删一段。
+          中间波形:按住拖一段 → 点红色「剪掉」手动剪(像剪映)。左边文案:单击词 = 删/恢复 · 双击词跳到对应位置 · 句末剪刀删整句。播放时会自动跳过剪掉的部分。
         </div>
 
         {error && <div className="text-xs text-red-400">{error}</div>}
