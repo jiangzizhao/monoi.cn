@@ -59,8 +59,12 @@ function createWindow() {
     },
   })
 
-  // 加载 monoi 网页. dev 时可以 MONOI_URL=http://localhost:5173 测本地
-  mainWin.loadURL(MONOI_URL)
+  // 加载 monoi 网页. 先清 HTTP 缓存再加载 — 防网络抖动时 electron 退回很旧的缓存网页
+  // (旧缓存里 API 地址是已废弃的 nat100 → 登录 Failed to fetch). clearCache 只清缓存的 JS/HTML,
+  // 不动 localStorage, 登录态不丢. dev 时可 MONOI_URL=http://localhost:5173 测本地.
+  mainWin.webContents.session.clearCache().catch(() => { /* 清不掉也继续 */ }).finally(() => {
+    mainWin?.loadURL(MONOI_URL)
+  })
 
   // 录屏不再自动抓整屏 (会把 monoi 自己也录进去=套娃). 改成网页弹自定义"选窗口"面板:
   // 网页调 desktop:list-sources 拿到窗口/屏幕缩略图列表, 用户选一个, 再用 getUserMedia(chromeMediaSourceId) 只录那个.
