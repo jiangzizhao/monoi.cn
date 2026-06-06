@@ -213,17 +213,19 @@ export function DigitalHumanForm({ onSubmit, onClose }: Props) {
     if (pendingDelete) return
     setPendingDelete(key)
     try {
-      await fetch(
+      // 后端删除强制鉴权 → 必须带 token, 否则 401 删不掉(且别乐观更新 UI, 不然看着删了刷新又回来)
+      const res = await fetch(
         '/api/proxy?path=' + encodeURIComponent('/api/digital-human/avatars/' + key),
-        { method: 'DELETE' },
+        { method: 'DELETE', headers: { Authorization: `Bearer ${getToken() || ''}` } },
       )
+      if (!res.ok) throw new Error(`删除失败 ${res.status}`)
       setAvatars(prev => prev.filter(a => a.avatar_key !== key))
       if (selectedAvatarKey === key) {
         const next = avatars.find(a => a.avatar_key !== key)
         setSelectedAvatarKey(next?.avatar_key || '')
       }
     } catch {
-      // 忽略,UI 会保留
+      alert('删除失败,请刷新或重新登录后再试')
     } finally {
       setPendingDelete('')
     }

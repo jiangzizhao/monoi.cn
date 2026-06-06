@@ -238,9 +238,14 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
   const deleteClone = async (key: string) => {
     if (!confirm('确认删除这个克隆音色？')) return
     try {
-      await fetch('/api/proxy?path=' + encodeURIComponent('/api/voice/clone/' + key), { method: 'DELETE' })
+      // 后端删除强制鉴权(_user_id_from_request) → 必须带 token, 否则 401 静默失败删不掉
+      const res = await fetch('/api/proxy?path=' + encodeURIComponent('/api/voice/clone/' + key), {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${getToken() || ''}` },
+      })
+      if (!res.ok) { alert('删除失败,请刷新或重新登录后再试'); return }
       await loadMyClones()
-    } catch (e) { console.error(e) }
+    } catch (e) { console.error(e); alert('删除失败,请重试') }
   }
 
   useEffect(() => {
