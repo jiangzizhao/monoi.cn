@@ -201,7 +201,7 @@ export function NarrationVideoForm({ onSubmit, onClose }: Props) {
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={() => { if (!isBusy) onClose() }}>
       <div
         onClick={(e) => e.stopPropagation()}
-        className="relative bg-[var(--bg-card)] border border-[var(--border)] rounded-[22px] shadow-ios-lg w-full max-w-2xl max-h-[88vh] flex flex-col sheet-enter"
+        className={`relative bg-[var(--bg-card)] border border-[var(--border)] rounded-[22px] shadow-ios-lg w-full max-h-[88vh] flex flex-col sheet-enter ${isEditing ? 'max-w-5xl' : 'max-w-2xl'}`}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
