@@ -59,10 +59,16 @@ function createWindow() {
     },
   })
 
+  // 放行摄像头 / 麦克风 / 屏幕等权限 — monoi 是自家应用. 不设的话 electron 默认拒 getUserMedia,
+  // 表现为"摄像头用不了 / 点哪个都没反应"(浏览器会弹授权框, electron 不弹). 全放行.
+  const sess = mainWin.webContents.session
+  sess.setPermissionRequestHandler((_wc: unknown, _perm: string, cb: (granted: boolean) => void) => cb(true))
+  sess.setPermissionCheckHandler(() => true)
+
   // 加载 monoi 网页. 先清 HTTP 缓存再加载 — 防网络抖动时 electron 退回很旧的缓存网页
   // (旧缓存里 API 地址是已废弃的 nat100 → 登录 Failed to fetch). clearCache 只清缓存的 JS/HTML,
   // 不动 localStorage, 登录态不丢. dev 时可 MONOI_URL=http://localhost:5173 测本地.
-  mainWin.webContents.session.clearCache().catch(() => { /* 清不掉也继续 */ }).finally(() => {
+  sess.clearCache().catch(() => { /* 清不掉也继续 */ }).finally(() => {
     mainWin?.loadURL(MONOI_URL)
   })
 
