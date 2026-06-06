@@ -8,6 +8,15 @@ appId: cn.monoi.desktop
 productName: monoi
 copyright: Copyright © 2026 monoi.cn
 
+# 不重新编译原生依赖: uiohook-napi 是 N-API, npm 装时已带预编译二进制(跨 node/electron 通用),
+# 不该重编. 默认 @electron/rebuild 会走 node-gyp 重编 → 要 VS 编译器 + 下载头文件,
+# 用户机器没编译器/网络抖动(ECONNRESET)就挂. 关掉重编, 直接用预编译的.
+npmRebuild: false
+
+# 原生 .node 二进制不能从 asar 包里 require, 解出来才能加载 (否则点哪放大静默失效)
+asarUnpack:
+  - "**/node_modules/uiohook-napi/**"
+
 # 主进程入口 (编译后的 JS)
 directories:
   output: release
