@@ -331,6 +331,15 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
     return null
   }, [allWords, currentTime])
 
+  // 当前正在说的那一句 (给中间视频底部的"声文"字幕条用 — 播到哪句显示哪句, 高亮当前词)
+  const currentSegWords = useMemo(() => {
+    if (!currentWordKey) return []
+    for (const segWords of wordsBySegment) {
+      if (segWords.some(t => wordKey(t) === currentWordKey)) return segWords
+    }
+    return []
+  }, [wordsBySegment, currentWordKey])
+
   // 拖选 → 删除选中范围内的词
   const deleteSelected = () => {
     const sel = window.getSelection()
@@ -439,184 +448,189 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
   const fmtElapsed = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 
   return (
-    <div className="flex flex-col gap-3">
-      {/* 顶部统计 */}
-      <div className="flex items-center justify-between text-xs text-[var(--text-3)]">
-        <div>
-          原 {data.duration.toFixed(1)}s →{' '}
-          <span className="text-[var(--text)] font-medium">{cleanedDuration.toFixed(1)}s</span>
-          {' '}({deletedKeys.size} 词被删)
-        </div>
-        <div>{currentTime.toFixed(1)}s / {data.duration.toFixed(1)}s</div>
-      </div>
-
-      {/* 视频播放器 */}
-      <div className="relative rounded-lg overflow-hidden bg-black">
-        <video
-          ref={videoRef}
-          src={data.video_url_full}
-          className="w-full max-h-[300px] object-contain"
-          onLoadedMetadata={onLoadedMetadata}
-          onTimeUpdate={onTimeUpdate}
-          onSeeked={onSeeked}
-          onPlay={() => setPlaying(true)}
-          onPause={() => setPlaying(false)}
-          onEnded={() => setPlaying(false)}
-          onClick={togglePlay}
-          playsInline
-        />
-        {!playing && ready && (
-          <button
-            onClick={togglePlay}
-            className="absolute inset-0 flex items-center justify-center cursor-pointer group"
-          >
-            <span className="w-12 h-12 rounded-full bg-white/85 group-hover:bg-white text-black flex items-center justify-center shadow-xl transition-colors">
-              <Play size={20} fill="currentColor" className="ml-0.5"/>
-            </span>
-          </button>
-        )}
-        {!ready && (
-          <div className="absolute inset-0 flex items-center justify-center text-white/70 text-xs">
-            <Loader2 size={20} className="animate-spin"/>
-          </div>
-        )}
-        {/* 当前在删除段时的红色蒙层 + 标识 (跟 muted 状态联动) */}
-        {isInDeletedRange && playing && (
-          <div className="absolute inset-0 bg-red-500/35 flex items-center justify-center pointer-events-none">
-            <span className="text-white text-xs font-medium bg-black/60 px-3 py-1 rounded-full">
-              已删除段 (跳过中)
-            </span>
-          </div>
-        )}
-      </div>
-
-      {/* 自定义时间轴: 绿色保留段 + 红色删除段 + 蓝色播放进度 */}
-      <div
-        className="relative h-8 bg-[var(--bg-hover)] rounded-lg overflow-hidden cursor-pointer select-none"
-        onClick={(e) => {
-          const v = videoRef.current
-          if (!v || !ready) return
-          const rect = e.currentTarget.getBoundingClientRect()
-          const x = e.clientX - rect.left
-          const t = (x / rect.width) * data.duration
-          v.currentTime = t
-        }}
-        title="点击跳转"
-      >
-        {/* 整条时间轴底色 (浅绿表示保留) */}
-        <div className="absolute inset-0 bg-emerald-500/15"/>
-        {/* 删除段 (红色阴影) */}
-        {deleteRanges.map(([s, e], i) => (
-          <div
-            key={i}
-            className="absolute top-0 bottom-0 bg-red-500/55"
-            style={{
-              left: `${(s / data.duration) * 100}%`,
-              width: `${((e - s) / data.duration) * 100}%`,
-            }}
-          />
-        ))}
-        {/* 播放进度指示器 (cursor) */}
-        <div
-          className="absolute top-0 bottom-0 w-0.5 bg-[var(--text)] pointer-events-none"
-          style={{ left: `${(currentTime / data.duration) * 100}%` }}
-        />
-      </div>
-
-      {/* 工具栏 */}
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={() => deleteSelected()}
-          disabled={!hasSelection}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border border-[var(--border)] bg-[var(--bg-card)] text-[var(--text)] hover:bg-red-950/30 hover:text-red-400 hover:border-red-500/40 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
-        >
-          <Scissors size={12}/> 删除选中
-        </button>
-        <button
-          type="button"
-          onClick={restoreAll}
-          disabled={deletedKeys.size === 0}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border border-[var(--border)] text-[var(--text-2)] hover:text-[var(--text)] hover:bg-[var(--bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-        >
-          <Undo2 size={12}/> 全部恢复
-        </button>
-        <div className="text-xs text-[var(--text-3)] ml-auto">
-          {deletedKeys.size} 词被删
-        </div>
-      </div>
-
-      {/* 转录字幕: 按句子分组(每句一行), 句末"删整句"按钮 hover 显示 */}
-      <div ref={textContainerRef} tabIndex={0} className="text-sm leading-loose max-h-56 overflow-y-auto bg-[var(--bg-hover)] rounded-[12px] p-3 outline-none focus:ring-1 focus:ring-[var(--text-3)]">
-        {wordsBySegment.length === 0 ? (
-          <div className="text-[var(--text-3)]">没有转录到内容</div>
-        ) : (
-          wordsBySegment.map((segWords, sIdx) => {
-            const allDel = segWords.every(t => deletedKeys.has(wordKey(t)))
-            return (
-              <div key={sIdx} className="group flex items-baseline gap-1 mb-0.5">
-                <div className="flex-1">
-                  {segWords.map((t) => {
-                    const key = wordKey(t)
-                    return (
-                      <WordSpan
-                        key={key}
-                        wKey={key}
-                        word={t.word}
-                        start={t.start}
-                        end={t.end}
-                        isDel={deletedKeys.has(key)}
-                        isCurrent={key === currentWordKey}
-                        onToggle={toggleWord}
-                        onSeek={seekToWordTime}
-                      />
-                    )
-                  })}
+    <div className="flex flex-col lg:flex-row gap-3 lg:items-start">
+      {/* 左: 视频文案 (转录逐句, 单击词删 / 拖选删 / 双击跳转) */}
+      <div className="lg:w-80 flex-shrink-0 flex flex-col min-w-0">
+        <div className="text-xs font-medium text-[var(--text-2)] mb-1.5">视频文案 (点词删 · 拖选删 · 双击跳转)</div>
+        <div ref={textContainerRef} tabIndex={0} className="text-sm leading-loose max-h-[42vh] lg:max-h-[460px] overflow-y-auto bg-[var(--bg-hover)] rounded-[12px] p-3 outline-none focus:ring-1 focus:ring-[var(--text-3)]">
+          {wordsBySegment.length === 0 ? (
+            <div className="text-[var(--text-3)]">没有转录到内容</div>
+          ) : (
+            wordsBySegment.map((segWords, sIdx) => {
+              const allDel = segWords.every(t => deletedKeys.has(wordKey(t)))
+              return (
+                <div key={sIdx} className="group flex items-baseline gap-1 mb-0.5">
+                  <div className="flex-1">
+                    {segWords.map((t) => {
+                      const key = wordKey(t)
+                      return (
+                        <WordSpan
+                          key={key}
+                          wKey={key}
+                          word={t.word}
+                          start={t.start}
+                          end={t.end}
+                          isDel={deletedKeys.has(key)}
+                          isCurrent={key === currentWordKey}
+                          onToggle={toggleWord}
+                          onSeek={seekToWordTime}
+                        />
+                      )
+                    })}
+                  </div>
+                  <button
+                    onClick={() => toggleSegment(segWords)}
+                    className={`px-1.5 py-1 rounded transition-opacity flex-shrink-0 inline-flex items-center justify-center ${
+                      allDel
+                        ? 'opacity-100 text-[var(--text-3)] hover:text-[var(--text-2)] hover:bg-[var(--bg-card)]'
+                        : 'opacity-0 group-hover:opacity-100 text-red-400 hover:bg-red-950/30'
+                    }`}
+                    title={allDel ? '恢复整句' : '删除整句'}
+                  >
+                    {allDel ? <Undo2 size={12}/> : <Scissors size={12}/>}
+                  </button>
                 </div>
-                <button
-                  onClick={() => toggleSegment(segWords)}
-                  className={`px-1.5 py-1 rounded transition-opacity flex-shrink-0 inline-flex items-center justify-center ${
-                    allDel
-                      ? 'opacity-100 text-[var(--text-3)] hover:text-[var(--text-2)] hover:bg-[var(--bg-card)]'
-                      : 'opacity-0 group-hover:opacity-100 text-red-400 hover:bg-red-950/30'
-                  }`}
-                  title={allDel ? '恢复整句' : '删除整句'}
-                >
-                  {allDel ? <Undo2 size={12}/> : <Scissors size={12}/>}
-                </button>
-              </div>
-            )
-          })
-        )}
+              )
+            })
+          )}
+        </div>
       </div>
 
-      {error && <div className="text-xs text-red-400">{error}</div>}
+      {/* 中: 视频 + 声文字幕条(当前在说的那句) + 时间轴 */}
+      <div className="flex-1 min-w-0 flex flex-col gap-2">
+        <div className="relative rounded-lg overflow-hidden bg-black">
+          <video
+            ref={videoRef}
+            src={data.video_url_full}
+            className="w-full max-h-[46vh] object-contain"
+            onLoadedMetadata={onLoadedMetadata}
+            onTimeUpdate={onTimeUpdate}
+            onSeeked={onSeeked}
+            onPlay={() => setPlaying(true)}
+            onPause={() => setPlaying(false)}
+            onEnded={() => setPlaying(false)}
+            onClick={togglePlay}
+            playsInline
+          />
+          {!playing && ready && (
+            <button
+              onClick={togglePlay}
+              className="absolute inset-0 flex items-center justify-center cursor-pointer group"
+            >
+              <span className="w-12 h-12 rounded-full bg-white/85 group-hover:bg-white text-black flex items-center justify-center shadow-xl transition-colors">
+                <Play size={20} fill="currentColor" className="ml-0.5"/>
+              </span>
+            </button>
+          )}
+          {!ready && (
+            <div className="absolute inset-0 flex items-center justify-center text-white/70 text-xs">
+              <Loader2 size={20} className="animate-spin"/>
+            </div>
+          )}
+          {/* 当前在删除段时的红色蒙层 + 标识 (跟 muted 状态联动) */}
+          {isInDeletedRange && playing && (
+            <div className="absolute inset-0 bg-red-500/35 flex items-center justify-center pointer-events-none">
+              <span className="text-white text-xs font-medium bg-black/60 px-3 py-1 rounded-full">
+                已删除段 (跳过中)
+              </span>
+            </div>
+          )}
+          {/* 声文字幕条: 当前正在说的那句, 叠在视频底部, 高亮当前词 (删掉的词划掉变淡) */}
+          {currentSegWords.length > 0 && (
+            <div className="absolute inset-x-0 bottom-0 px-4 pb-2 pt-6 bg-gradient-to-t from-black/85 to-transparent pointer-events-none text-center">
+              <span className="text-white text-sm font-medium leading-snug" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.8)' }}>
+                {currentSegWords.map((t) => {
+                  const k = wordKey(t)
+                  return <span key={k} className={k === currentWordKey ? 'text-yellow-300' : deletedKeys.has(k) ? 'opacity-40 line-through' : ''}>{t.word}</span>
+                })}
+              </span>
+            </div>
+          )}
+        </div>
 
-      <div className="text-xs text-[var(--text-3)]">
-        拖选文字 → 点 <span className="text-[var(--text-2)]">删除选中</span> · 单击词切换删除 · 双击词跳到对应时间
+        {/* 自定义时间轴: 绿色保留段 + 红色删除段 + 播放进度 */}
+        <div
+          className="relative h-8 bg-[var(--bg-hover)] rounded-lg overflow-hidden cursor-pointer select-none"
+          onClick={(e) => {
+            const v = videoRef.current
+            if (!v || !ready) return
+            const rect = e.currentTarget.getBoundingClientRect()
+            const x = e.clientX - rect.left
+            const t = (x / rect.width) * data.duration
+            v.currentTime = t
+          }}
+          title="点击跳转"
+        >
+          <div className="absolute inset-0 bg-emerald-500/15"/>
+          {deleteRanges.map(([s, e], i) => (
+            <div
+              key={i}
+              className="absolute top-0 bottom-0 bg-red-500/55"
+              style={{
+                left: `${(s / data.duration) * 100}%`,
+                width: `${((e - s) / data.duration) * 100}%`,
+              }}
+            />
+          ))}
+          <div
+            className="absolute top-0 bottom-0 w-0.5 bg-[var(--text)] pointer-events-none"
+            style={{ left: `${(currentTime / data.duration) * 100}%` }}
+          />
+        </div>
+        <div className="text-[11px] text-[var(--text-3)] text-center">{currentTime.toFixed(1)}s / {data.duration.toFixed(1)}s · 点时间轴跳转</div>
       </div>
 
-      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 pt-1">
-        {/* 导出中卡 30 秒+ 给个提示, 让用户知道不是死循环 */}
+      {/* 右: 工具 + 统计 + 导出 */}
+      <div className="lg:w-56 flex-shrink-0 flex flex-col gap-3">
+        <div className="text-xs text-[var(--text-3)]">
+          原 {data.duration.toFixed(1)}s → <span className="text-[var(--text)] font-medium">{cleanedDuration.toFixed(1)}s</span>
+          <span className="text-[var(--text-3)]"> · {deletedKeys.size} 词被删</span>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <button
+            type="button"
+            onClick={() => deleteSelected()}
+            disabled={!hasSelection}
+            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs border border-[var(--border)] bg-[var(--bg-card)] text-[var(--text)] hover:bg-red-950/30 hover:text-red-400 hover:border-red-500/40 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
+          >
+            <Scissors size={12}/> 删除选中
+          </button>
+          <button
+            type="button"
+            onClick={restoreAll}
+            disabled={deletedKeys.size === 0}
+            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs border border-[var(--border)] text-[var(--text-2)] hover:text-[var(--text)] hover:bg-[var(--bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+          >
+            <Undo2 size={12}/> 全部恢复
+          </button>
+        </div>
+
+        <div className="text-[11px] text-[var(--text-3)] leading-relaxed">
+          左边文案里:单击词 = 切删除/恢复 · 拖选一段 → 点「删除选中」· 双击词跳到视频对应位置 · 整句删用句末剪刀。
+        </div>
+
+        {error && <div className="text-xs text-red-400">{error}</div>}
         {finalizing && finalizeElapsed >= 30 && (
           <span className="text-[11px] text-[var(--text-3)] leading-snug">
-            后端在切片+上传到 OSS, 大文件可能要 1-3 分钟. 卡太久可点"取消"重试.
+            后端在切片+上传到 OSS, 大文件可能要 1-3 分钟. 卡太久可点取消重试.
           </span>
         )}
-        <div className="flex justify-end gap-2 sm:ml-auto">
-          <button
-            onClick={finalizing ? cancelFinalize : onCancel}
-            className="px-3 py-1.5 rounded-lg text-sm text-[var(--text-2)] hover:bg-[var(--bg-hover)] cursor-pointer flex items-center gap-1.5"
-          >
-            <X size={14}/> {finalizing ? '取消导出' : '取消'}
-          </button>
+
+        <div className="mt-auto flex flex-col gap-2 pt-1">
           <button
             onClick={finalize}
             disabled={finalizing || !ready}
-            className="px-3 py-1.5 rounded-lg text-sm bg-[var(--text)] text-[var(--bg)] hover:opacity-80 cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+            className="w-full px-3 py-2 rounded-lg text-sm bg-[var(--text)] text-[var(--bg)] hover:opacity-80 cursor-pointer disabled:opacity-50 flex items-center justify-center gap-1.5"
           >
             {finalizing ? <Loader2 size={14} className="animate-spin"/> : <Check size={14}/>}
             {finalizing ? `导出中 ${fmtElapsed(finalizeElapsed)}` : '完成导出'}
+          </button>
+          <button
+            onClick={finalizing ? cancelFinalize : onCancel}
+            className="w-full px-3 py-2 rounded-lg text-sm text-[var(--text-2)] hover:bg-[var(--bg-hover)] cursor-pointer flex items-center justify-center gap-1.5"
+          >
+            <X size={14}/> {finalizing ? '取消导出' : '取消'}
           </button>
         </div>
       </div>
