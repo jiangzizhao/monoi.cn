@@ -198,7 +198,7 @@ export function NarrationVideoForm({ onSubmit, onClose }: Props) {
   const isEditing = phase === 'editing' && cleanResult
 
   const modal = (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={() => { if (!isBusy) onClose() }}>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={() => { if (phase === 'idle') onClose() }}>
       <div
         onClick={(e) => e.stopPropagation()}
         className={`relative bg-[var(--bg-card)] border border-[var(--border)] rounded-[22px] shadow-ios-lg w-full max-h-[88vh] flex flex-col sheet-enter ${isEditing ? 'max-w-5xl' : 'max-w-2xl'}`}
