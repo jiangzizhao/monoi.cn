@@ -1,6 +1,12 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Play, Loader2, Check, X, Scissors, Undo2 } from 'lucide-react'
+import { Play, Loader2, Check, X, Scissors, Undo2, Wand2, Repeat, AudioLines } from 'lucide-react'
 import { getToken } from '../../lib/auth'
+
+// 中文口播纯口头禅 (没语义, 可无脑删). whisper 会把"嗯"识别成同音"恩"等, 一并收录.
+const FILLER_WORDS = new Set([
+  '嗯', '啊', '呃', '哦', '诶', '欸', '哎', '唉', '咦', '哟', '呵', '唔', '呢', '嘿', '哈', '哇',
+  '恩', '嗯嗯', '啊啊', '呃呃', '嗯哼', '嗯啊', '啊嗯', '唔嗯', '诶嗯', '那个', '这个那个',
+])
 
 // 提取成独立 memo 组件: 长视频 (8 分钟+) 1500-3000 词时, currentTime 每秒
 // 变化 4-10 次, 不 memo 会让所有词 span 重渲染. memo 后只有 isDel/isCurrent
@@ -62,6 +68,7 @@ interface CleanResponse {
   duration: number
   transcription: string
   segments: Segment[]
+  waveform?: number[]          // 后端预算的声纹峰值 (0..1); 没有则前端按词时间合成
   suggested_removals?: {
     silences?: { start: number; end: number }[]
     word_gaps?: { start: number; end: number }[]
@@ -152,6 +159,12 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
   // 导出秒表 + abort: 让用户卡住时能看到耗时 + 主动取消
   const [finalizeElapsed, setFinalizeElapsed] = useState(0)
   const finalizeAbortRef = useRef<AbortController | null>(null)
+  // 去气口强度 + 声纹拖选
+  const [gapMode, setGapMode] = useState<'off' | 'std' | 'strong'>('std')
+  const [dragSel, setDragSel] = useState<{ a: number; b: number } | null>(null)
+  const waveCanvasRef = useRef<HTMLCanvasElement>(null)
+  const waveWrapRef = useRef<HTMLDivElement>(null)
+  const dragRef = useRef<{ a: number; moved: boolean } | null>(null)
 
   // 摊平 segments → word tokens (用于 keepRanges 计算 / 拖选 / 全局逻辑)
   const allWords: WordToken[] = useMemo(() => {
@@ -187,50 +200,47 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
 
   const wordKey = (t: WordToken) => `${t.segIdx}_${t.wordIdx}`
 
-  // 初始化预删除 (静音 + 词间隔 + 重复 + 填充词)
+  // 初始化预删除: 默认帮用户去掉口头禅(嗯啊) + 重复句. 气口(空白停顿)由"去气口"统一处理, 不在这里预删词.
   useEffect(() => {
     if (!data.suggested_removals) return
     const sr = data.suggested_removals
-    const removeRanges = [
-      ...(sr.silences || []),
-      ...(sr.word_gaps || []),
-      ...(sr.repeats || []),
-      ...(sr.fillers || []),
-    ]
+    const ranges = [...(sr.repeats || []), ...(sr.fillers || [])]
     const initial = new Set<string>()
     for (const t of allWords) {
+      const clean = t.word.replace(/[，。、；！？!?,.;:：~～\-—_…\s]/g, '')
       const mid = (t.start + t.end) / 2
-      for (const r of removeRanges) {
-        if (mid >= r.start && mid <= r.end) {
-          initial.add(wordKey(t))
-          break
-        }
+      if (FILLER_WORDS.has(clean) || ranges.some(r => mid >= r.start && mid <= r.end)) {
+        initial.add(wordKey(t))
       }
     }
     setDeletedKeys(initial)
   }, [data, allWords])
 
-  // 计算保留段
+  // 计算保留段. 两类空隙分开处理:
+  //  · 删词造成的空隙 → 全删 (只留极小防爆音 pad)
+  //  · 自然停顿(气口) → 超过阈值才删, 留一点换气. gapMode 控制阈值; 关 = 不动气口.
   const keepRanges = useMemo(() => {
+    const cfg = gapMode === 'off' ? null : (gapMode === 'strong' ? { max: 0.18, breath: 0.06 } : { max: 0.35, breath: 0.10 })
+    const LEAD = cfg ? 0.12 : 0
+    const DELPAD = 0.03
     const ranges: [number, number][] = []
-    let start: number | null = null
-    let lastEnd: number | null = null
+    let s: number | null = null
+    let e = 0
+    let sawDel = false
     for (const t of allWords) {
-      const isDel = deletedKeys.has(wordKey(t))
-      if (!isDel) {
-        if (start === null) start = t.start
-        lastEnd = t.end
-      } else if (start !== null && lastEnd !== null) {
-        ranges.push([start, lastEnd])
-        start = null
-        lastEnd = null
-      }
+      if (deletedKeys.has(wordKey(t))) { sawDel = true; continue }
+      if (s === null) { s = Math.max(0, t.start - LEAD); e = t.end; sawDel = false; continue }
+      const gap = t.start - e
+      let cut = false, lp = 0, rp = 0
+      if (sawDel && gap > 0.02) { cut = true; lp = Math.min(DELPAD, gap / 2); rp = Math.min(DELPAD, gap / 2) }
+      else if (cfg && gap > cfg.max) { cut = true; lp = Math.min(cfg.breath, gap / 2); rp = Math.min(cfg.breath, gap / 2) }
+      if (cut) { ranges.push([s, e + lp]); s = t.start - rp; e = t.end }
+      else { e = t.end }
+      sawDel = false
     }
-    if (start !== null && lastEnd !== null) {
-      ranges.push([start, lastEnd])
-    }
+    if (s !== null) ranges.push([s, cfg ? Math.min(data.duration, e + LEAD) : e])
     return ranges
-  }, [allWords, deletedKeys])
+  }, [allWords, deletedKeys, gapMode, data.duration])
 
   const cleanedDuration = useMemo(() => {
     return keepRanges.reduce((sum, [s, e]) => sum + (e - s), 0)
@@ -256,17 +266,134 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
     v.muted = isInDeletedRange
   }, [isInDeletedRange])
 
-  // 自定义时间轴用的删除段 (跟 keepRanges 取反)
-  const deleteRanges = useMemo<[number, number][]>(() => {
-    const out: [number, number][] = []
-    let prevEnd = 0
-    for (const [s, e] of keepRanges) {
-      if (s > prevEnd + 0.05) out.push([prevEnd, s])
-      prevEnd = e
+  // ============ 声纹波形 + 拖选 ============
+  // 峰值: 优先后端预算的; 没有就按"哪段有词"合成 (能看出说话/空白即可)
+  const peaks = useMemo<number[]>(() => {
+    if (Array.isArray(data.waveform) && data.waveform.length > 8) return data.waveform
+    const N = 360
+    const dur = data.duration || 1
+    const hash = (i: number) => { const x = Math.sin(i * 12.9898) * 43758.5453; return x - Math.floor(x) }
+    const arr = new Array<number>(N)
+    for (let i = 0; i < N; i++) {
+      const t = (i / N) * dur
+      const inWord = allWords.some(w => t >= w.start && t <= w.end)
+      arr[i] = inWord ? 0.35 + hash(i) * 0.5 : 0.02 + hash(i) * 0.02
     }
-    if (prevEnd < data.duration - 0.05) out.push([prevEnd, data.duration])
-    return out
-  }, [keepRanges, data.duration])
+    return arr
+  }, [data.waveform, data.duration, allWords])
+
+  const xToTime = useCallback((clientX: number) => {
+    const el = waveWrapRef.current
+    if (!el) return 0
+    const r = el.getBoundingClientRect()
+    return Math.max(0, Math.min(data.duration, ((clientX - r.left) / r.width) * data.duration))
+  }, [data.duration])
+
+  const deleteTimeRange = useCallback((t0: number, t1: number) => {
+    setDeletedKeys(prev => {
+      const next = new Set(prev)
+      for (const t of allWords) {
+        const mid = (t.start + t.end) / 2
+        if (mid >= t0 && mid <= t1) next.add(wordKey(t))
+      }
+      return next
+    })
+  }, [allWords])
+
+  // 一键去口头禅 (嗯/啊/呃...) — 词文本命中 或 落在后端给的 fillers 区间
+  const applyFillers = useCallback(() => {
+    setDeletedKeys(prev => {
+      const next = new Set(prev)
+      const ranges = data.suggested_removals?.fillers || []
+      for (const t of allWords) {
+        const clean = t.word.replace(/[，。、；！？!?,.;:：~～\-—_…\s]/g, '')
+        const mid = (t.start + t.end) / 2
+        if (FILLER_WORDS.has(clean) || ranges.some(r => mid >= r.start && mid <= r.end)) next.add(wordKey(t))
+      }
+      return next
+    })
+  }, [allWords, data.suggested_removals])
+
+  // 一键去重复句 (同一句说了 2-3 遍 → 删掉前面几遍, 只留最后一遍)
+  const applyRepeats = useCallback(() => {
+    setDeletedKeys(prev => {
+      const next = new Set(prev)
+      const ranges = data.suggested_removals?.repeats || []
+      for (const t of allWords) {
+        const mid = (t.start + t.end) / 2
+        if (ranges.some(r => mid >= r.start && mid <= r.end)) next.add(wordKey(t))
+      }
+      return next
+    })
+  }, [allWords, data.suggested_removals])
+
+  // 画波形 (绿=保留 / 红=删除). currentTime 不进依赖 — 播放头单独用 div, 避免每秒重绘
+  useEffect(() => {
+    const canvas = waveCanvasRef.current
+    const wrap = waveWrapRef.current
+    if (!canvas || !wrap) return
+    const draw = () => {
+      const dpr = window.devicePixelRatio || 1
+      const cssW = wrap.clientWidth, cssH = 64
+      canvas.width = Math.max(1, Math.floor(cssW * dpr))
+      canvas.height = Math.floor(cssH * dpr)
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      ctx.clearRect(0, 0, cssW, cssH)
+      const mid = cssH / 2
+      const n = peaks.length
+      const bw = cssW / n
+      const dur = data.duration || 1
+      for (let i = 0; i < n; i++) {
+        const t = (i / n) * dur
+        const inKeep = keepRanges.some(([s, e]) => t >= s && t <= e)
+        const h = Math.max(1, peaks[i] * (cssH * 0.46))
+        ctx.fillStyle = inKeep ? 'rgba(16,185,129,0.9)' : 'rgba(239,68,68,0.30)'
+        ctx.fillRect(i * bw, mid - h, Math.max(1, bw * 0.75), h * 2)
+      }
+      if (dragSel) {
+        const x1 = (Math.min(dragSel.a, dragSel.b) / dur) * cssW
+        const x2 = (Math.max(dragSel.a, dragSel.b) / dur) * cssW
+        ctx.fillStyle = 'rgba(255,255,255,0.16)'
+        ctx.fillRect(x1, 0, x2 - x1, cssH)
+        ctx.strokeStyle = 'rgba(255,255,255,0.55)'
+        ctx.lineWidth = 1
+        ctx.strokeRect(x1 + 0.5, 0.5, Math.max(0, x2 - x1 - 1), cssH - 1)
+      }
+    }
+    draw()
+    const ro = new ResizeObserver(draw)
+    ro.observe(wrap)
+    return () => ro.disconnect()
+  }, [peaks, keepRanges, dragSel, data.duration])
+
+  // 波形上按住拖选 → 删一段; 单击 → 跳转
+  useEffect(() => {
+    const move = (e: MouseEvent) => {
+      if (!dragRef.current) return
+      dragRef.current.moved = true
+      setDragSel({ a: dragRef.current.a, b: xToTime(e.clientX) })
+    }
+    const up = (e: MouseEvent) => {
+      const d = dragRef.current
+      if (!d) return
+      dragRef.current = null
+      if (!d.moved) {
+        const v = videoRef.current
+        if (v && ready) v.currentTime = d.a
+        setDragSel(null)
+        return
+      }
+      const t = xToTime(e.clientX)
+      const t0 = Math.min(d.a, t), t1 = Math.max(d.a, t)
+      if (t1 - t0 >= 0.08) deleteTimeRange(t0, t1)
+      setDragSel(null)
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+    return () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up) }
+  }, [xToTime, deleteTimeRange, ready])
 
   // 视频事件
   const onLoadedMetadata = () => setReady(true)
@@ -548,36 +675,25 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
           )}
         </div>
 
-        {/* 自定义时间轴: 绿色保留段 + 红色删除段 + 播放进度 */}
+        {/* 声纹波形: 绿=保留 红=删除(气口/删词). 点击跳转 · 按住拖选删一段 */}
         <div
-          className="relative h-8 bg-[var(--bg-hover)] rounded-lg overflow-hidden cursor-pointer select-none"
-          onClick={(e) => {
-            const v = videoRef.current
-            if (!v || !ready) return
-            const rect = e.currentTarget.getBoundingClientRect()
-            const x = e.clientX - rect.left
-            const t = (x / rect.width) * data.duration
-            v.currentTime = t
+          ref={waveWrapRef}
+          className="relative rounded-lg overflow-hidden bg-[var(--bg-hover)] cursor-pointer select-none"
+          style={{ height: 64 }}
+          onMouseDown={(e) => {
+            const t = xToTime(e.clientX)
+            dragRef.current = { a: t, moved: false }
+            setDragSel({ a: t, b: t })
           }}
-          title="点击跳转"
+          title="点击跳转 · 按住拖选一段删除"
         >
-          <div className="absolute inset-0 bg-emerald-500/15"/>
-          {deleteRanges.map(([s, e], i) => (
-            <div
-              key={i}
-              className="absolute top-0 bottom-0 bg-red-500/55"
-              style={{
-                left: `${(s / data.duration) * 100}%`,
-                width: `${((e - s) / data.duration) * 100}%`,
-              }}
-            />
-          ))}
+          <canvas ref={waveCanvasRef} className="absolute inset-0 w-full h-full" />
           <div
             className="absolute top-0 bottom-0 w-0.5 bg-[var(--text)] pointer-events-none"
-            style={{ left: `${(currentTime / data.duration) * 100}%` }}
+            style={{ left: `${(currentTime / (data.duration || 1)) * 100}%` }}
           />
         </div>
-        <div className="text-[11px] text-[var(--text-3)] text-center">{currentTime.toFixed(1)}s / {data.duration.toFixed(1)}s · 点时间轴跳转</div>
+        <div className="text-[11px] text-[var(--text-3)] text-center">{currentTime.toFixed(1)}s / {data.duration.toFixed(1)}s · 波形上点击跳转 · 拖选一段删除</div>
       </div>
 
       {/* 右: 工具 + 统计 + 导出 */}
@@ -585,6 +701,40 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
         <div className="text-xs text-[var(--text-3)]">
           原 {data.duration.toFixed(1)}s → <span className="text-[var(--text)] font-medium">{cleanedDuration.toFixed(1)}s</span>
           <span className="text-[var(--text-3)]"> · {deletedKeys.size} 词被删</span>
+        </div>
+
+        {/* 去气口强度: 自动删句间空白停顿 */}
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center gap-1.5 text-xs text-[var(--text-2)]"><AudioLines size={13}/> 去气口 (删空白停顿)</div>
+          <div className="flex rounded-lg overflow-hidden border border-[var(--border)] text-xs">
+            {([['off', '关'], ['std', '标准'], ['strong', '强']] as const).map(([v, label]) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => setGapMode(v)}
+                className={`flex-1 px-2 py-1.5 cursor-pointer transition-colors ${gapMode === v ? 'bg-[var(--text)] text-[var(--bg)] font-medium' : 'text-[var(--text-2)] hover:bg-[var(--bg-hover)]'}`}
+              >{label}</button>
+            ))}
+          </div>
+          <div className="text-[10px] text-[var(--text-3)] leading-snug">空白停顿(气口)直接删掉, 波形上红色就是被删的。强=连短停顿也删。</div>
+        </div>
+
+        {/* 一键清理 */}
+        <div className="flex flex-col gap-2">
+          <button
+            type="button"
+            onClick={applyFillers}
+            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs border border-[var(--border)] bg-[var(--bg-card)] text-[var(--text)] hover:bg-[var(--bg-hover)] cursor-pointer transition-colors"
+          >
+            <Wand2 size={12}/> 去口头禅 (嗯/啊/呃)
+          </button>
+          <button
+            type="button"
+            onClick={applyRepeats}
+            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs border border-[var(--border)] bg-[var(--bg-card)] text-[var(--text)] hover:bg-[var(--bg-hover)] cursor-pointer transition-colors"
+          >
+            <Repeat size={12}/> 去重复句 (留一遍)
+          </button>
         </div>
 
         <div className="flex flex-col gap-2">
@@ -607,7 +757,7 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
         </div>
 
         <div className="text-[11px] text-[var(--text-3)] leading-relaxed">
-          左边文案里:单击词 = 切删除/恢复 · 拖选一段 → 点「删除选中」· 双击词跳到视频对应位置 · 整句删用句末剪刀。
+          左边文案:单击词 = 删/恢复 · 拖选一段 → 「删除选中」· 双击词跳到对应位置 · 句末剪刀删整句。中间波形上也能直接拖选删一段。
         </div>
 
         {error && <div className="text-xs text-red-400">{error}</div>}

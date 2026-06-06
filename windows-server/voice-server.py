@@ -351,6 +351,29 @@ def _ffmpeg_silence_detect(audio_path, noise_db=-30, min_silence=0.6):
     return list(zip(starts, ends))
 
 
+def _waveform_peaks(audio_path, n=900):
+    """读音频算 n 个峰值 (0..1), 给前端画声纹波形 (像 AU 那样看到声音/空白)."""
+    try:
+        import numpy as np
+        data, _sr = sf.read(audio_path, dtype="float32", always_2d=False)
+        if getattr(data, "ndim", 1) > 1:
+            data = data.mean(axis=1)
+        total = int(len(data))
+        if total == 0:
+            return []
+        n = min(n, total)
+        idx = np.linspace(0, total, n + 1).astype(int)
+        amax = float(np.max(np.abs(data))) or 1.0
+        peaks = []
+        for i in range(n):
+            a, b = int(idx[i]), int(idx[i + 1])
+            peaks.append(round(float(np.max(np.abs(data[a:b]))) / amax, 3) if b > a else 0.0)
+        return peaks
+    except Exception as _e:
+        print(f"[waveform] 跳过: {_e}", flush=True)
+        return []
+
+
 def _detect_repeats(segments, similarity_threshold=0.6, max_gap=8.0):
     """检测口误重复: 相邻段文本相似度高 → 标记前一个为删除.
     阈值放宽 (70% → 60%, 5s → 8s) + 短文本也算 (3+ 字, 之前要 4+)"""
@@ -637,11 +660,12 @@ async def clean_narration_video(file: UploadFile = File(...)):
 
     full_text = "".join(s["text"] for s in segments).strip()
 
-    # 6. 静音 + 词间隔 + 重复 + 填充词 (建议删除)
+    # 6. 静音 + 词间隔 + 重复 + 填充词 (建议删除) + 声纹波形
     silences = _ffmpeg_silence_detect(audio_path, noise_db=-30, min_silence=0.3)
     word_gaps = _detect_word_gaps(segments, min_gap=0.3)
     repeats = _detect_repeats(segments)
     fillers = _detect_fillers(segments)
+    waveform = _waveform_peaks(audio_path)
 
     # 清理音频中转件 (前端只用 video, 不需要这个 wav)
     try: os.unlink(audio_path)
@@ -654,6 +678,7 @@ async def clean_narration_video(file: UploadFile = File(...)):
         "duration": orig_dur,
         "transcription": full_text,
         "segments": segments,
+        "waveform": waveform,
         "suggested_removals": {
             "silences": [{"start": s, "end": e} for s, e in silences],
             "word_gaps": [{"start": s, "end": e} for s, e in word_gaps],
@@ -827,11 +852,12 @@ def clean_narration_video_oss(req: CleanVideoOssRequest):
             segments.append({"start": s.start, "end": s.end, "text": _to_simplified(s.text), "words": words})
     full_text = "".join(s["text"] for s in segments).strip()
 
-    # 5. 检测气口/重复/填充词
+    # 5. 检测气口/重复/填充词 + 声纹波形
     silences = _ffmpeg_silence_detect(audio_path, noise_db=-30, min_silence=0.3)
     word_gaps = _detect_word_gaps(segments, min_gap=0.3)
     repeats = _detect_repeats(segments)
     fillers = _detect_fillers(segments)
+    waveform = _waveform_peaks(audio_path)
 
     try: os.unlink(audio_path)
     except: pass
@@ -863,6 +889,7 @@ def clean_narration_video_oss(req: CleanVideoOssRequest):
         "duration": orig_dur,
         "transcription": full_text,
         "segments": segments,
+        "waveform": waveform,
         "suggested_removals": {
             "silences": [{"start": s, "end": e} for s, e in silences],
             "word_gaps": [{"start": s, "end": e} for s, e in word_gaps],
