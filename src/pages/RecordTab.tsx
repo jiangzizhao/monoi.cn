@@ -53,7 +53,7 @@ const RATIO_SIZE: Record<OutputRatio, { w: number; h: number; label: string }> =
 const RECORD_PRESETS = [
   { id: 'screen_camera',     label: '屏幕 + 人物 PIP',  desc: '录 PPT/Word/代码 等 + 人物 PIP. 选屏幕时一定选 PPT 类窗口, 不要选浏览器' },
   { id: 'whiteboard_camera', label: '白板 + 人物 PIP',  desc: '纯白背景 + 摄像头叠加. 解说没现成 PPT 时用 (推荐)' },
-  { id: 'screen_only',       label: '仅屏幕',          desc: '只录屏幕, 无人物. 选窗口时不能选浏览器' },
+  { id: 'screen_only',       label: '仅屏幕',          desc: '录屏幕 + 你的旁白(麦克风), 不开摄像头' },
   { id: 'camera_only',       label: '仅摄像头',        desc: '只录自己, 没屏幕 (vlog)' },
 ]
 
@@ -510,6 +510,32 @@ export default function RecordTab() {
     }
   }
 
+  /** 仅屏幕用: 只拿麦克风(旁白), 不开摄像头. 放进 cameraStream 当音轨, 录制时合进去; 没视频轨 → 不画 PIP. */
+  const requestMicOnly = async () => {
+    try {
+      let pickedMicId = selectedMicId
+      if (!pickedMicId && availableMics.length > 1 && availableMics.some(m => m.label)) {
+        const realMic = availableMics.find(m => m.label && !/virtual|obs|loopback|stereo mix|default/i.test(m.label))
+        if (realMic) pickedMicId = realMic.deviceId
+      }
+      const mic = await navigator.mediaDevices.getUserMedia({
+        video: false,
+        audio: pickedMicId
+          ? { deviceId: { exact: pickedMicId }, echoCancellation: true, noiseSuppression: true }
+          : { echoCancellation: true, noiseSuppression: true },
+      })
+      const actualMicId = mic.getAudioTracks()[0]?.getSettings().deviceId
+      if (actualMicId && actualMicId !== selectedMicId) setSelectedMicId(actualMicId)
+      const combined = new MediaStream()
+      mic.getAudioTracks().forEach(t => combined.addTrack(t))
+      setCameraStream(combined)   // 只有音轨, 不会画 PIP
+    } catch (e: any) {
+      // 麦克风可选 — 没有就录无声屏幕, 提示一下 (不开摄像头)
+      if (e?.name === 'NotAllowedError') setError('麦克风权限被拒. 想给屏幕配旁白: 地址栏锁图标 → 麦克风 → 允许, 再重选「仅屏幕」(不需要摄像头)')
+      else setError('没拿到麦克风, 屏幕会录成无声; 不影响画面')
+    }
+  }
+
   /** 错误提示 — 通用文案, 不暴露内部技术 / 设备名 */
   const handleCameraError = (e: any, cams: MediaDeviceInfo[]) => {
     const name = e?.name || ''
@@ -579,6 +605,7 @@ export default function RecordTab() {
     } else if (preset === 'screen_only') {
       setBgMode('screen')
       await requestScreen()
+      await requestMicOnly()   // 只配旁白麦克风, 不开摄像头
     } else if (preset === 'camera_only') {
       setBgMode('camera_only')
       await requestCamera()
