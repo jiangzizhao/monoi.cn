@@ -699,6 +699,10 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
           )}
         </div>
 
+        {/* 手动剪切说明 (常驻, 让用户知道波形就是剪刀) */}
+        <div className="flex items-center gap-1.5 text-xs text-[var(--text-2)]">
+          <Scissors size={13}/> 手动剪切:在下面波形上 <b className="text-[var(--text)] font-semibold">按住拖选</b> 要删的片段 → 点红色「剪掉」
+        </div>
         {/* 声纹波形: 绿=保留 红=删除(气口/删词). 点击跳转 · 按住拖一段选中 → 点剪掉 (像剪映) */}
         <div
           ref={waveWrapRef}
@@ -716,6 +720,14 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
             className="absolute top-0 bottom-0 w-0.5 bg-[var(--text)] pointer-events-none"
             style={{ left: `${(currentTime / (data.duration || 1)) * 100}%` }}
           />
+          {/* 没选区时居中提示: 教用户拖选 (pointer-events-none 不挡拖动) */}
+          {!hasWaveSel && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <span className="flex items-center gap-1.5 text-[11px] text-white bg-black/45 px-2.5 py-1 rounded-full">
+                <Scissors size={11}/> 按住拖选要剪掉的片段
+              </span>
+            </div>
+          )}
           {/* 选中一段后浮出的"剪掉"按钮 (剪映式: 选 → 剪) */}
           {hasWaveSel && dragSel && (
             <button
