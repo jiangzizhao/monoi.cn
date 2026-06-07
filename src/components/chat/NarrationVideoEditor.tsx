@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Play, Loader2, Check, X, Scissors, Undo2, Wand2, Repeat, AudioLines } from 'lucide-react'
+import { Play, Loader2, Check, X, Scissors, Undo2 } from 'lucide-react'
 import { getToken } from '../../lib/auth'
 
 // 中文口播纯口头禅 (没语义, 可无脑删). whisper 会把"嗯"识别成同音"恩"等, 一并收录.
@@ -159,9 +159,13 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
   // 导出秒表 + abort: 让用户卡住时能看到耗时 + 主动取消
   const [finalizeElapsed, setFinalizeElapsed] = useState(0)
   const finalizeAbortRef = useRef<AbortController | null>(null)
-  // 去气口强度 + 声纹拖选
-  const [gapMode, setGapMode] = useState<'off' | 'std' | 'strong'>('std')
+  // 去无效词 (剪映式): 语气词 / 重复 / 停顿 三类可勾选 + 最短停顿时长 + 声纹拖选
+  const [rmFillers, setRmFillers] = useState(true)
+  const [rmRepeats, setRmRepeats] = useState(true)
+  const [rmPauses, setRmPauses] = useState(true)
+  const [minPause, setMinPause] = useState(0.8)
   const [dragSel, setDragSel] = useState<{ a: number; b: number } | null>(null)
+  const [waveZoom, setWaveZoom] = useState(1)   // 音轨横向放大倍数 (1~8), 放大后可左右拖看细节
   const waveCanvasRef = useRef<HTMLCanvasElement>(null)
   const waveWrapRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<{ a: number; moved: boolean } | null>(null)
@@ -200,27 +204,63 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
 
   const wordKey = (t: WordToken) => `${t.segIdx}_${t.wordIdx}`
 
-  // 初始化预删除: 默认帮用户去掉口头禅(嗯啊) + 重复句. 气口(空白停顿)由"去气口"统一处理, 不在这里预删词.
-  useEffect(() => {
-    if (!data.suggested_removals) return
-    const sr = data.suggested_removals
-    const ranges = [...(sr.repeats || []), ...(sr.fillers || [])]
-    const initial = new Set<string>()
+  // 识别三类无效内容 (剪映式): 语气词词集 / 重复词集 / 停顿数
+  const fillerKeys = useMemo(() => {
+    const s = new Set<string>()
+    const ranges = data.suggested_removals?.fillers || []
     for (const t of allWords) {
       const clean = t.word.replace(/[，。、；！？!?,.;:：~～\-—_…\s]/g, '')
       const mid = (t.start + t.end) / 2
-      if (FILLER_WORDS.has(clean) || ranges.some(r => mid >= r.start && mid <= r.end)) {
-        initial.add(wordKey(t))
-      }
+      if (FILLER_WORDS.has(clean) || ranges.some(r => mid >= r.start && mid <= r.end)) s.add(wordKey(t))
     }
-    setDeletedKeys(initial)
-  }, [data, allWords])
+    return s
+  }, [allWords, data.suggested_removals])
+
+  const repeatKeys = useMemo(() => {
+    const s = new Set<string>()
+    const ranges = data.suggested_removals?.repeats || []
+    for (const t of allWords) {
+      const mid = (t.start + t.end) / 2
+      if (ranges.some(r => mid >= r.start && mid <= r.end)) s.add(wordKey(t))
+    }
+    return s
+  }, [allWords, data.suggested_removals])
+
+  const fillerCount = fillerKeys.size
+  const repeatCount = data.suggested_removals?.repeats?.length || 0
+  const pauseCount = useMemo(() => {
+    let c = 0
+    for (let i = 1; i < allWords.length; i++) {
+      if (allWords[i].start - allWords[i - 1].end >= minPause) c++
+    }
+    return c
+  }, [allWords, minPause])
+  const totalInvalid = fillerCount + repeatCount + pauseCount
+
+  // 勾选"语气词" → 把语气词并入删除; 取消 → 移除 (重复同理). 手动改的词不受影响 (deletedKeys 不进依赖).
+  useEffect(() => {
+    setDeletedKeys(prev => {
+      const next = new Set(prev)
+      if (rmFillers) fillerKeys.forEach(k => next.add(k))
+      else fillerKeys.forEach(k => next.delete(k))
+      return next
+    })
+  }, [rmFillers, fillerKeys])
+
+  useEffect(() => {
+    setDeletedKeys(prev => {
+      const next = new Set(prev)
+      if (rmRepeats) repeatKeys.forEach(k => next.add(k))
+      else repeatKeys.forEach(k => next.delete(k))
+      return next
+    })
+  }, [rmRepeats, repeatKeys])
 
   // 计算保留段. 两类空隙分开处理:
   //  · 删词造成的空隙 → 全删 (只留极小防爆音 pad)
-  //  · 自然停顿(气口) → 超过阈值才删, 留一点换气. gapMode 控制阈值; 关 = 不动气口.
+  //  · 自然停顿(气口) → 超过"最短停顿时长"才删, 留一点换气. rmPauses 关 = 不动气口.
   const keepRanges = useMemo(() => {
-    const cfg = gapMode === 'off' ? null : (gapMode === 'strong' ? { max: 0.18, breath: 0.06 } : { max: 0.35, breath: 0.10 })
+    const cfg = rmPauses ? { max: minPause, breath: Math.min(0.15, minPause / 3) } : null
     const LEAD = cfg ? 0.12 : 0
     const DELPAD = 0.03
     const ranges: [number, number][] = []
@@ -240,7 +280,7 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
     }
     if (s !== null) ranges.push([s, cfg ? Math.min(data.duration, e + LEAD) : e])
     return ranges
-  }, [allWords, deletedKeys, gapMode, data.duration])
+  }, [allWords, deletedKeys, rmPauses, minPause, data.duration])
 
   const cleanedDuration = useMemo(() => {
     return keepRanges.reduce((sum, [s, e]) => sum + (e - s), 0)
@@ -300,33 +340,6 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
     })
   }, [allWords])
 
-  // 一键去口头禅 (嗯/啊/呃...) — 词文本命中 或 落在后端给的 fillers 区间
-  const applyFillers = useCallback(() => {
-    setDeletedKeys(prev => {
-      const next = new Set(prev)
-      const ranges = data.suggested_removals?.fillers || []
-      for (const t of allWords) {
-        const clean = t.word.replace(/[，。、；！？!?,.;:：~～\-—_…\s]/g, '')
-        const mid = (t.start + t.end) / 2
-        if (FILLER_WORDS.has(clean) || ranges.some(r => mid >= r.start && mid <= r.end)) next.add(wordKey(t))
-      }
-      return next
-    })
-  }, [allWords, data.suggested_removals])
-
-  // 一键去重复句 (同一句说了 2-3 遍 → 删掉前面几遍, 只留最后一遍)
-  const applyRepeats = useCallback(() => {
-    setDeletedKeys(prev => {
-      const next = new Set(prev)
-      const ranges = data.suggested_removals?.repeats || []
-      for (const t of allWords) {
-        const mid = (t.start + t.end) / 2
-        if (ranges.some(r => mid >= r.start && mid <= r.end)) next.add(wordKey(t))
-      }
-      return next
-    })
-  }, [allWords, data.suggested_removals])
-
   // 画波形 (绿=保留 / 红=删除). currentTime 不进依赖 — 播放头单独用 div, 避免每秒重绘
   useEffect(() => {
     const canvas = waveCanvasRef.current
@@ -366,7 +379,7 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
     const ro = new ResizeObserver(draw)
     ro.observe(wrap)
     return () => ro.disconnect()
-  }, [peaks, keepRanges, dragSel, data.duration])
+  }, [peaks, keepRanges, dragSel, data.duration, waveZoom])
 
   // 波形上按住拖选 → 留下选区(像剪映, 等点"剪掉"才删); 单击 → 跳转 + 清掉选区
   useEffect(() => {
@@ -661,7 +674,7 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
           <video
             ref={videoRef}
             src={data.video_url_full}
-            className="w-full max-h-[46vh] object-contain"
+            className="w-full max-h-[40vh] object-contain"
             onLoadedMetadata={onLoadedMetadata}
             onTimeUpdate={onTimeUpdate}
             onSeeked={onSeeked}
@@ -699,102 +712,99 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
           )}
         </div>
 
-        {/* 手动剪切说明 (常驻, 让用户知道波形就是剪刀) */}
-        <div className="flex items-center gap-1.5 text-xs text-[var(--text-2)]">
-          <Scissors size={13}/> 手动剪切:在下面波形上 <b className="text-[var(--text)] font-semibold">按住拖选</b> 要删的片段 → 点红色「剪掉」
-        </div>
-        {/* 声纹波形: 绿=保留 红=删除(气口/删词). 点击跳转 · 按住拖一段选中 → 点剪掉 (像剪映) */}
-        <div
-          ref={waveWrapRef}
-          className="relative rounded-lg overflow-hidden bg-[var(--bg-hover)] cursor-pointer select-none"
-          style={{ height: 64 }}
-          onMouseDown={(e) => {
-            const t = xToTime(e.clientX)
-            dragRef.current = { a: t, moved: false }
-            setDragSel({ a: t, b: t })
-          }}
-          title="点击跳转 · 按住拖一段选中, 再点红色「剪掉」"
-        >
-          <canvas ref={waveCanvasRef} className="absolute inset-0 w-full h-full" />
-          <div
-            className="absolute top-0 bottom-0 w-0.5 bg-[var(--text)] pointer-events-none"
-            style={{ left: `${(currentTime / (data.duration || 1)) * 100}%` }}
-          />
-          {/* 没选区时居中提示: 教用户拖选 (pointer-events-none 不挡拖动) */}
-          {!hasWaveSel && (
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <span className="flex items-center gap-1.5 text-[11px] text-white bg-black/45 px-2.5 py-1 rounded-full">
-                <Scissors size={11}/> 按住拖选要剪掉的片段
-              </span>
-            </div>
-          )}
-          {/* 选中一段后浮出的"剪掉"按钮 (剪映式: 选 → 剪) */}
-          {hasWaveSel && dragSel && (
-            <button
-              type="button"
-              onMouseDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation()
-                deleteTimeRange(Math.min(dragSel.a, dragSel.b), Math.max(dragSel.a, dragSel.b))
-                setDragSel(null)
-              }}
-              className="absolute top-1 z-10 -translate-x-1/2 px-2.5 py-1 rounded-full bg-red-500 text-white text-[11px] font-medium shadow-lg hover:bg-red-600 cursor-pointer flex items-center gap-1 whitespace-nowrap"
-              style={{ left: `${Math.min(90, Math.max(10, (((dragSel.a + dragSel.b) / 2) / (data.duration || 1)) * 100))}%` }}
-            >
-              <Scissors size={11}/> 剪掉 {waveSelLen.toFixed(1)}s
-            </button>
-          )}
-        </div>
-        <div className="text-[11px] text-[var(--text-3)] text-center">{currentTime.toFixed(1)}s / {data.duration.toFixed(1)}s · 波形上点击跳转 · 按住拖一段 → 点「剪掉」</div>
-      </div>
-
-      {/* 右: 工具 + 统计 + 导出 */}
-      <div className="lg:w-56 flex-shrink-0 flex flex-col gap-3">
-        <div className="text-xs text-[var(--text-3)]">
-          原 {data.duration.toFixed(1)}s → <span className="text-[var(--text)] font-medium">{cleanedDuration.toFixed(1)}s</span>
-          <span className="text-[var(--text-3)]"> · {deletedKeys.size} 词被删</span>
-        </div>
-
-        {/* 去气口强度: 自动删句间空白停顿 */}
-        <div className="flex flex-col gap-1.5">
-          <div className="flex items-center gap-1.5 text-xs text-[var(--text-2)]"><AudioLines size={13}/> 去气口 (删空白停顿)</div>
-          <div className="flex rounded-lg overflow-hidden border border-[var(--border)] text-xs">
-            {([['off', '关'], ['std', '标准'], ['strong', '强']] as const).map(([v, label]) => (
-              <button
-                key={v}
-                type="button"
-                onClick={() => setGapMode(v)}
-                className={`flex-1 px-2 py-1.5 cursor-pointer transition-colors ${gapMode === v ? 'bg-[var(--text)] text-[var(--bg)] font-medium' : 'text-[var(--text-2)] hover:bg-[var(--bg-hover)]'}`}
-              >{label}</button>
-            ))}
+        {/* 手动剪切说明 + 音轨放大 */}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5 text-xs text-[var(--text-2)] min-w-0">
+            <Scissors size={13} className="flex-shrink-0"/>
+            <span className="truncate">波形上 <b className="text-[var(--text)] font-semibold">按住拖选</b> 要删的片段 → 点红「剪掉」</span>
           </div>
-          <div className="text-[10px] text-[var(--text-3)] leading-snug">空白停顿(气口)直接删掉, 波形上红色就是被删的。强=连短停顿也删。</div>
+          <div className="flex items-center gap-1 flex-shrink-0">
+            <span className="text-[10px] text-[var(--text-3)] mr-0.5">音轨放大</span>
+            <button type="button" disabled={waveZoom <= 1} onClick={() => setWaveZoom(z => Math.max(1, z - 1))}
+              className="w-6 h-6 rounded-md border border-[var(--border)] flex items-center justify-center text-[var(--text-2)] hover:bg-[var(--bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer">−</button>
+            <span className="w-7 text-center text-[10px] tabular-nums text-[var(--text-2)]">{waveZoom}×</span>
+            <button type="button" disabled={waveZoom >= 8} onClick={() => setWaveZoom(z => Math.min(8, z + 1))}
+              className="w-6 h-6 rounded-md border border-[var(--border)] flex items-center justify-center text-[var(--text-2)] hover:bg-[var(--bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer">+</button>
+          </div>
+        </div>
+        {/* 声纹波形: 绿=保留 红=删除. 更高(120) + 可横向放大 (放大后滚动看细节). 外层滚动, 内层按倍数撑宽 */}
+        <div className="overflow-x-auto overflow-y-hidden rounded-lg bg-[var(--bg-hover)]" style={{ height: 120 }}>
+          <div
+            ref={waveWrapRef}
+            className="relative h-full cursor-pointer select-none"
+            style={{ width: `${waveZoom * 100}%`, minWidth: '100%' }}
+            onMouseDown={(e) => {
+              const t = xToTime(e.clientX)
+              dragRef.current = { a: t, moved: false }
+              setDragSel({ a: t, b: t })
+            }}
+            title="点击跳转 · 按住拖一段选中, 再点红色「剪掉」"
+          >
+            <canvas ref={waveCanvasRef} className="absolute inset-0 w-full h-full" />
+            <div
+              className="absolute top-0 bottom-0 w-0.5 bg-[var(--text)] pointer-events-none"
+              style={{ left: `${(currentTime / (data.duration || 1)) * 100}%` }}
+            />
+            {!hasWaveSel && (
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <span className="flex items-center gap-1.5 text-[11px] text-white bg-black/45 px-2.5 py-1 rounded-full">
+                  <Scissors size={11}/> 按住拖选要剪掉的片段
+                </span>
+              </div>
+            )}
+            {hasWaveSel && dragSel && (
+              <button
+                type="button"
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  deleteTimeRange(Math.min(dragSel.a, dragSel.b), Math.max(dragSel.a, dragSel.b))
+                  setDragSel(null)
+                }}
+                className="absolute top-1 z-10 -translate-x-1/2 px-2.5 py-1 rounded-full bg-red-500 text-white text-[11px] font-medium shadow-lg hover:bg-red-600 cursor-pointer flex items-center gap-1 whitespace-nowrap"
+                style={{ left: `${Math.min(90, Math.max(10, (((dragSel.a + dragSel.b) / 2) / (data.duration || 1)) * 100))}%` }}
+              >
+                <Scissors size={11}/> 剪掉 {waveSelLen.toFixed(1)}s
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="text-[11px] text-[var(--text-3)] text-center">{currentTime.toFixed(1)}s / {data.duration.toFixed(1)}s · 点击跳转 · 拖一段 →「剪掉」{waveZoom > 1 ? ' · 已放大, 左右拖动看细节' : ''}</div>
+        {/* 工具 (全在视频下方): 识别面板(横向) + 操作行 */}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-[var(--border)] px-3 py-2.5">
+          <span className="text-xs font-medium text-[var(--text-2)]">识别到 {totalInvalid} 处可删</span>
+          <label className="flex items-center gap-1.5 text-xs text-[var(--text)] cursor-pointer">
+            <input type="checkbox" checked={rmFillers} onChange={e => setRmFillers(e.target.checked)} style={{ accentColor: 'var(--text)' }} className="w-3.5 h-3.5 cursor-pointer"/>
+            <span><b className="font-medium">{fillerCount}</b> 语气词</span>
+          </label>
+          <label className="flex items-center gap-1.5 text-xs text-[var(--text)] cursor-pointer">
+            <input type="checkbox" checked={rmRepeats} onChange={e => setRmRepeats(e.target.checked)} style={{ accentColor: 'var(--text)' }} className="w-3.5 h-3.5 cursor-pointer"/>
+            <span><b className="font-medium">{repeatCount}</b> 重复</span>
+          </label>
+          <label className="flex items-center gap-1.5 text-xs text-[var(--text)] cursor-pointer">
+            <input type="checkbox" checked={rmPauses} onChange={e => setRmPauses(e.target.checked)} style={{ accentColor: 'var(--text)' }} className="w-3.5 h-3.5 cursor-pointer"/>
+            <span><b className="font-medium">{pauseCount}</b> 停顿</span>
+          </label>
+          <div className="flex items-center gap-1.5 text-xs ml-auto">
+            <span className="text-[var(--text-3)]">最短停顿</span>
+            <button type="button" disabled={!rmPauses} onClick={() => setMinPause(v => Math.max(0.2, Math.round((v - 0.1) * 10) / 10))}
+              className="w-6 h-6 rounded-md border border-[var(--border)] flex items-center justify-center text-[var(--text-2)] hover:bg-[var(--bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer">−</button>
+            <span className="w-9 text-center tabular-nums text-[var(--text)]">{minPause.toFixed(1)}s</span>
+            <button type="button" disabled={!rmPauses} onClick={() => setMinPause(v => Math.min(3, Math.round((v + 0.1) * 10) / 10))}
+              className="w-6 h-6 rounded-md border border-[var(--border)] flex items-center justify-center text-[var(--text-2)] hover:bg-[var(--bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer">+</button>
+          </div>
         </div>
 
-        {/* 一键清理 */}
-        <div className="flex flex-col gap-2">
-          <button
-            type="button"
-            onClick={applyFillers}
-            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs border border-[var(--border)] bg-[var(--bg-card)] text-[var(--text)] hover:bg-[var(--bg-hover)] cursor-pointer transition-colors"
-          >
-            <Wand2 size={12}/> 去口头禅 (嗯/啊/呃)
-          </button>
-          <button
-            type="button"
-            onClick={applyRepeats}
-            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs border border-[var(--border)] bg-[var(--bg-card)] text-[var(--text)] hover:bg-[var(--bg-hover)] cursor-pointer transition-colors"
-          >
-            <Repeat size={12}/> 去重复句 (留一遍)
-          </button>
-        </div>
-
-        <div className="flex flex-col gap-2">
+        {/* 操作行: 统计 + 手动剪 + 取消/导出 */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs text-[var(--text-3)] mr-auto">
+            原 {data.duration.toFixed(1)}s → <span className="text-[var(--text)] font-medium">{cleanedDuration.toFixed(1)}s</span> · {deletedKeys.size} 词删
+          </span>
           <button
             type="button"
             onClick={cutSelected}
             disabled={!hasSelection && !hasWaveSel}
-            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs border border-[var(--border)] bg-[var(--bg-card)] text-[var(--text)] hover:bg-red-950/30 hover:text-red-400 hover:border-red-500/40 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
+            className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs border border-[var(--border)] bg-[var(--bg-card)] text-[var(--text)] hover:bg-red-950/30 hover:text-red-400 hover:border-red-500/40 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
           >
             <Scissors size={12}/> {hasWaveSel ? `剪掉选中 ${waveSelLen.toFixed(1)}s` : '剪掉选中'}
           </button>
@@ -802,39 +812,31 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
             type="button"
             onClick={restoreAll}
             disabled={deletedKeys.size === 0}
-            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs border border-[var(--border)] text-[var(--text-2)] hover:text-[var(--text)] hover:bg-[var(--bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+            className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs border border-[var(--border)] text-[var(--text-2)] hover:text-[var(--text)] hover:bg-[var(--bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
           >
             <Undo2 size={12}/> 全部恢复
           </button>
-        </div>
-
-        <div className="text-[11px] text-[var(--text-3)] leading-relaxed">
-          中间波形:按住拖一段 → 点红色「剪掉」手动剪(像剪映)。左边文案:单击词 = 删/恢复 · 双击词跳到对应位置 · 句末剪刀删整句。播放时会自动跳过剪掉的部分。
-        </div>
-
-        {error && <div className="text-xs text-red-400">{error}</div>}
-        {finalizing && finalizeElapsed >= 30 && (
-          <span className="text-[11px] text-[var(--text-3)] leading-snug">
-            后端在切片+上传到 OSS, 大文件可能要 1-3 分钟. 卡太久可点取消重试.
-          </span>
-        )}
-
-        <div className="mt-auto flex flex-col gap-2 pt-1">
+          <button
+            onClick={finalizing ? cancelFinalize : onCancel}
+            className="px-3 py-2 rounded-lg text-sm text-[var(--text-2)] hover:bg-[var(--bg-hover)] cursor-pointer flex items-center justify-center gap-1.5"
+          >
+            <X size={14}/> {finalizing ? '取消导出' : '取消'}
+          </button>
           <button
             onClick={finalize}
             disabled={finalizing || !ready}
-            className="w-full px-3 py-2 rounded-lg text-sm bg-[var(--text)] text-[var(--bg)] hover:opacity-80 cursor-pointer disabled:opacity-50 flex items-center justify-center gap-1.5"
+            className="px-4 py-2 rounded-lg text-sm bg-[var(--text)] text-[var(--bg)] hover:opacity-80 cursor-pointer disabled:opacity-50 flex items-center justify-center gap-1.5"
           >
             {finalizing ? <Loader2 size={14} className="animate-spin"/> : <Check size={14}/>}
             {finalizing ? `导出中 ${fmtElapsed(finalizeElapsed)}` : '完成导出'}
           </button>
-          <button
-            onClick={finalizing ? cancelFinalize : onCancel}
-            className="w-full px-3 py-2 rounded-lg text-sm text-[var(--text-2)] hover:bg-[var(--bg-hover)] cursor-pointer flex items-center justify-center gap-1.5"
-          >
-            <X size={14}/> {finalizing ? '取消导出' : '取消'}
-          </button>
         </div>
+        {error && <div className="text-xs text-red-400">{error}</div>}
+        {finalizing && finalizeElapsed >= 30 && (
+          <span className="text-[11px] text-[var(--text-3)] leading-snug">
+            后端在剪辑+上传, 长视频可能要 1-3 分钟, 卡太久可点取消重试。
+          </span>
+        )}
       </div>
     </div>
   )
