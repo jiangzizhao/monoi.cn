@@ -131,21 +131,32 @@ export default function RecordTab() {
   // 文字工具: 点一下在画面上弹输入框 (替代 electron 禁用的 window.prompt)
   const [annTextBox, setAnnTextBox] = useState<{ clientX: number; clientY: number; x: number; y: number } | null>(null)
   // 缩放状态用 ref (在 raf 循环里逐帧改, 不触发 re-render)
-  const zoomRef = useRef({ scale: 1, fx: 0.5, fy: 0.5, targetScale: 1, tFx: 0.5, tFy: 0.5, lastClickT: 0 })
+  const zoomRef = useRef({ scale: 1, fx: 0.5, fy: 0.5, targetScale: 1, tFx: 0.5, tFy: 0.5, lastT: 0, lastX: 0.5, lastY: 0.5 })
   const clickZoomRef = useRef(clickZoom)
   useEffect(() => { clickZoomRef.current = clickZoom }, [clickZoom])
 
-  // 订阅桌面端鼠标点击 → 触发缩放 (只在录屏/预览 + 屏幕模式 + 开关打开时生效)
+  // 订阅桌面端鼠标点击 → 双击才放大 (只在录屏/预览 + 屏幕模式 + 开关打开时生效)
   useEffect(() => {
     if (!isDesktop) return
     const desktop = (window as any).monoiDesktop
     const unsub = desktop.onScreenClick((d: { xPct: number; yPct: number }) => {
       if (!clickZoomRef.current) return
       const z = zoomRef.current
-      z.targetScale = 1.9
-      z.tFx = Math.min(0.92, Math.max(0.08, d.xPct))
-      z.tFy = Math.min(0.92, Math.max(0.08, d.yPct))
-      z.lastClickT = performance.now()
+      const now = performance.now()
+      // 双击放大: 两次点击间隔 < 400ms 且位置接近 → 当成双击, 切换放大/缩回; 单击不放大.
+      const isDouble = now - z.lastT < 400 && Math.abs(d.xPct - z.lastX) < 0.05 && Math.abs(d.yPct - z.lastY) < 0.05
+      if (isDouble) {
+        if (z.targetScale > 1) {
+          z.targetScale = 1                                  // 已放大 → 缩回
+        } else {
+          z.targetScale = 1.9                                // 放大到双击的位置
+          z.tFx = Math.min(0.92, Math.max(0.08, d.xPct))
+          z.tFy = Math.min(0.92, Math.max(0.08, d.yPct))
+        }
+        z.lastT = 0                                          // 重置, 防三连击误触
+      } else {
+        z.lastT = now; z.lastX = d.xPct; z.lastY = d.yPct    // 记下这次, 等可能的第二击
+      }
     })
     return () => { try { unsub && unsub() } catch { /* noop */ } }
   }, [isDesktop])
@@ -233,9 +244,8 @@ export default function RecordTab() {
         // 屏幕: contain 模式 (源 16:9 输出 9:16 时上下黑边, 不裁切丢内容)
         ctx.fillStyle = '#000000'
         ctx.fillRect(0, 0, canvas.width, canvas.height)
-        // 点哪自动放大: 逐帧把当前 scale/中心 缓动到目标; 停止点击 1.6s 后自动缩回
+        // 双击放大: 不自动缩回, 缩放/中心逐帧缓动到目标 (再双击才缩回)
         const z = zoomRef.current
-        if (z.targetScale > 1 && performance.now() - z.lastClickT > 1600) z.targetScale = 1
         z.scale += (z.targetScale - z.scale) * 0.14
         z.fx += (z.tFx - z.fx) * 0.18
         z.fy += (z.tFy - z.fy) * 0.18
@@ -809,7 +819,7 @@ export default function RecordTab() {
               <div className="text-sm font-medium">选要录的窗口 / 屏幕</div>
               <button onClick={() => setShowSourcePicker(false)} className="text-[var(--text-3)] hover:text-[var(--text)] cursor-pointer text-lg leading-none">✕</button>
             </div>
-            <div className="px-5 py-2 text-[11px] text-[var(--text-3)] flex-shrink-0">选「窗口」录单个应用最干净 (不会套娃); 选「整个屏幕」会录到桌面上所有东西。建议把要讲的应用先最大化, 点哪放大最准。</div>
+            <div className="px-5 py-2 text-[11px] text-[var(--text-3)] flex-shrink-0">选「窗口」录单个应用最干净 (不会套娃); 选「整个屏幕」会录到桌面上所有东西。建议把要讲的应用先最大化, 双击放大最准。</div>
             <div className="flex-1 overflow-y-auto px-5 py-3">
               {sources.length === 0 ? (
                 <div className="text-sm text-[var(--text-3)] text-center py-10">没列到窗口。请先打开你要讲的应用 (PPT / 文档 等), 再回来点「录屏幕」。</div>
@@ -1111,8 +1121,8 @@ export default function RecordTab() {
                     <>
                       <div className="flex items-center justify-between">
                         <div>
-                          <div className="text-xs font-medium text-[var(--text-2)]">点哪自动放大</div>
-                          <div className="text-[10px] text-[var(--text-3)]">录屏时鼠标点哪, 画面就放大到哪 (停手 1.6 秒自动缩回)</div>
+                          <div className="text-xs font-medium text-[var(--text-2)]">双击放大</div>
+                          <div className="text-[10px] text-[var(--text-3)]">录屏时在想放大的地方双击 → 放大到那儿; 再双击 → 缩回。单击不放大。</div>
                         </div>
                         <div className="flex gap-2 text-xs">
                           <button onClick={() => setClickZoom(true)} className={`px-3 py-1 rounded-lg border cursor-pointer transition-colors ${clickZoom ? 'border-[var(--text)] bg-[var(--text)] text-[var(--bg)]' : 'border-[var(--border)] text-[var(--text-2)]'}`}>开</button>
