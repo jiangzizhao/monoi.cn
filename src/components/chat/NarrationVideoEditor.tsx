@@ -166,6 +166,7 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
   const [minPause, setMinPause] = useState(0.8)
   const [dragSel, setDragSel] = useState<{ a: number; b: number } | null>(null)
   const [waveZoom, setWaveZoom] = useState(1)   // 音轨横向放大倍数 (1~8), 放大后可左右拖看细节
+  const [splitStart, setSplitStart] = useState<number | null>(null)   // 分割剪切的起点 (剪映式两点剪)
   const waveCanvasRef = useRef<HTMLCanvasElement>(null)
   const waveWrapRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<{ a: number; moved: boolean } | null>(null)
@@ -548,7 +549,15 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
     return () => document.removeEventListener('selectionchange', onSelChange)
   }, [])
 
-  const restoreAll = () => setDeletedKeys(new Set())
+  const restoreAll = () => { setDeletedKeys(new Set()); setSplitStart(null) }
+
+  // 分割剪切 (剪映式): 第一下在播放头定起点, 移动播放头再点一下 → 剪掉中间这段
+  const onSplit = () => {
+    if (splitStart === null) { setSplitStart(currentTime); return }
+    const a = Math.min(splitStart, currentTime), b = Math.max(splitStart, currentTime)
+    if (b - a >= 0.05) deleteTimeRange(a, b)
+    setSplitStart(null)
+  }
 
   const finalize = async () => {
     if (keepRanges.length === 0) {
@@ -712,11 +721,21 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
           )}
         </div>
 
-        {/* 手动剪切说明 + 音轨放大 */}
+        {/* 剪切工具 (分割) + 音轨放大 */}
         <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-1.5 text-xs text-[var(--text-2)] min-w-0">
-            <Scissors size={13} className="flex-shrink-0"/>
-            <span className="truncate">波形上 <b className="text-[var(--text)] font-semibold">按住拖选</b> 要删的片段 → 点红「剪掉」</span>
+          <div className="flex items-center gap-2 min-w-0">
+            <button
+              type="button"
+              onClick={onSplit}
+              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs border cursor-pointer transition-colors flex-shrink-0 ${splitStart !== null ? 'border-red-500/60 bg-red-500/15 text-red-400 font-medium' : 'border-[var(--border)] text-[var(--text)] hover:bg-[var(--bg-hover)]'}`}
+              title="把播放头停到要剪的位置, 点一下定起点; 移到另一端再点一下, 剪掉中间这段 (像剪映分割)"
+            >
+              <Scissors size={13}/> {splitStart !== null ? '剪到播放头' : '分割剪切'}
+            </button>
+            {splitStart !== null && (
+              <button type="button" onClick={() => setSplitStart(null)} className="text-[10px] text-[var(--text-3)] hover:text-[var(--text-2)] underline cursor-pointer flex-shrink-0">取消</button>
+            )}
+            <span className="text-[10px] text-[var(--text-3)] truncate hidden sm:inline">{splitStart !== null ? '移动播放头到另一端再点「剪到播放头」' : '或直接在波形上拖选一段'}</span>
           </div>
           <div className="flex items-center gap-1 flex-shrink-0">
             <span className="text-[10px] text-[var(--text-3)] mr-0.5">音轨放大</span>
@@ -745,7 +764,14 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
               className="absolute top-0 bottom-0 w-0.5 bg-[var(--text)] pointer-events-none"
               style={{ left: `${(currentTime / (data.duration || 1)) * 100}%` }}
             />
-            {!hasWaveSel && (
+            {/* 分割起点标记 + 待剪区间(起点↔播放头)阴影 */}
+            {splitStart !== null && (
+              <>
+                <div className="absolute top-0 bottom-0 bg-red-500/20 pointer-events-none" style={{ left: `${Math.min(splitStart, currentTime) / (data.duration || 1) * 100}%`, width: `${Math.abs(currentTime - splitStart) / (data.duration || 1) * 100}%` }}/>
+                <div className="absolute top-0 bottom-0 w-0.5 bg-red-500 pointer-events-none" style={{ left: `${(splitStart / (data.duration || 1)) * 100}%` }}/>
+              </>
+            )}
+            {!hasWaveSel && splitStart === null && (
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                 <span className="flex items-center gap-1.5 text-[11px] text-white bg-black/45 px-2.5 py-1 rounded-full">
                   <Scissors size={11}/> 按住拖选要剪掉的片段
