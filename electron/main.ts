@@ -69,7 +69,12 @@ function createWindow() {
   // (旧缓存里 API 地址是已废弃的 nat100 → 登录 Failed to fetch). clearCache 只清缓存的 JS/HTML,
   // 不动 localStorage, 登录态不丢. dev 时可 MONOI_URL=http://localhost:5173 测本地.
   sess.clearCache().catch(() => { /* 清不掉也继续 */ }).finally(() => {
-    mainWin?.loadURL(MONOI_URL)
+    // 每次启动给生产站加个变化的 _t 参数, 强制拉最新 index.html → 最新 JS bundle.
+    // (光 clearCache 有时不够, 这样彻底解决"网页部署了新版但桌面端还显示旧版"). dev/localhost 不动, 不破坏 HMR.
+    const url = MONOI_URL.includes('localhost')
+      ? MONOI_URL
+      : MONOI_URL + (MONOI_URL.includes('?') ? '&' : '?') + '_t=' + Date.now()
+    mainWin?.loadURL(url)
   })
 
   // 录屏不再自动抓整屏 (会把 monoi 自己也录进去=套娃). 改成网页弹自定义"选窗口"面板:
