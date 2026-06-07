@@ -864,6 +864,27 @@ def clean_narration_video_oss(req: CleanVideoOssRequest):
 
     # 6. 把转码后的视频回传 OSS (前端播放 + finalize 阶段会用)
     source_oss_key = f"sources/{job_id}.mp4"
+
+    # 6b. 抽一排缩略图给前端轨道铺画面 (像剪映). 失败不影响主流程.
+    sprite_url, sprite_cols = "", 0
+    try:
+        sprite_cols = min(40, max(12, int(orig_dur)))
+        sprite_local = os.path.join(NARRATION_OUTPUT_DIR, f"{job_id}_sprite.jpg")
+        sp = subprocess.run(
+            ["ffmpeg", "-y", "-i", video_path,
+             "-vf", f"fps={sprite_cols}/{max(orig_dur, 0.1):.3f},scale=-1:96,tile={sprite_cols}x1",
+             "-frames:v", "1", "-q:v", "5", sprite_local],
+            capture_output=True, timeout=180,
+        )
+        if sp.returncode == 0 and os.path.exists(sprite_local):
+            sprite_key = f"sprites/{job_id}.jpg"
+            oss_upload(sprite_key, sprite_local, content_type="image/jpeg")
+            sprite_url = oss_sign_get(sprite_key, expires=6 * 3600)
+        try: os.unlink(sprite_local)
+        except: pass
+    except Exception as _se:
+        print(f"[sprite] 跳过: {_se}", flush=True)
+
     try:
         oss_upload(source_oss_key, video_path, content_type="video/mp4")
     except Exception as e:
@@ -890,6 +911,8 @@ def clean_narration_video_oss(req: CleanVideoOssRequest):
         "transcription": full_text,
         "segments": segments,
         "waveform": waveform,
+        "sprite_url": sprite_url,      # 轨道铺画面用的缩略图条 (一排, 等分整段)
+        "sprite_cols": sprite_cols,
         "suggested_removals": {
             "silences": [{"start": s, "end": e} for s, e in silences],
             "word_gaps": [{"start": s, "end": e} for s, e in word_gaps],

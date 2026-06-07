@@ -69,6 +69,8 @@ interface CleanResponse {
   transcription: string
   segments: Segment[]
   waveform?: number[]          // 后端预算的声纹峰值 (0..1); 没有则前端按词时间合成
+  sprite_url?: string          // 一排缩略图(等分整段), 给轨道铺画面用
+  sprite_cols?: number
   suggested_removals?: {
     silences?: { start: number; end: number }[]
     word_gaps?: { start: number; end: number }[]
@@ -348,9 +350,10 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
     if (!canvas || !wrap) return
     const draw = () => {
       const dpr = window.devicePixelRatio || 1
-      const cssW = wrap.clientWidth, cssH = 64
+      const cssW = canvas.clientWidth || wrap.clientWidth
+      const cssH = canvas.clientHeight || 64
       canvas.width = Math.max(1, Math.floor(cssW * dpr))
-      canvas.height = Math.floor(cssH * dpr)
+      canvas.height = Math.max(1, Math.floor(cssH * dpr))
       const ctx = canvas.getContext('2d')
       if (!ctx) return
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
@@ -362,25 +365,16 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
       for (let i = 0; i < n; i++) {
         const t = (i / n) * dur
         const inKeep = keepRanges.some(([s, e]) => t >= s && t <= e)
-        const h = Math.max(1, peaks[i] * (cssH * 0.46))
+        const h = Math.max(1, peaks[i] * (cssH * 0.42))
         ctx.fillStyle = inKeep ? 'rgba(16,185,129,0.9)' : 'rgba(239,68,68,0.30)'
         ctx.fillRect(i * bw, mid - h, Math.max(1, bw * 0.75), h * 2)
-      }
-      if (dragSel) {
-        const x1 = (Math.min(dragSel.a, dragSel.b) / dur) * cssW
-        const x2 = (Math.max(dragSel.a, dragSel.b) / dur) * cssW
-        ctx.fillStyle = 'rgba(255,255,255,0.16)'
-        ctx.fillRect(x1, 0, x2 - x1, cssH)
-        ctx.strokeStyle = 'rgba(255,255,255,0.55)'
-        ctx.lineWidth = 1
-        ctx.strokeRect(x1 + 0.5, 0.5, Math.max(0, x2 - x1 - 1), cssH - 1)
       }
     }
     draw()
     const ro = new ResizeObserver(draw)
     ro.observe(wrap)
     return () => ro.disconnect()
-  }, [peaks, keepRanges, dragSel, data.duration, waveZoom])
+  }, [peaks, keepRanges, data.duration, waveZoom])
 
   // 波形上按住拖选 → 留下选区(像剪映, 等点"剪掉"才删); 单击 → 跳转 + 清掉选区
   useEffect(() => {
@@ -746,8 +740,8 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
               className="w-6 h-6 rounded-md border border-[var(--border)] flex items-center justify-center text-[var(--text-2)] hover:bg-[var(--bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer">+</button>
           </div>
         </div>
-        {/* 声纹波形: 绿=保留 红=删除. 更高(120) + 可横向放大 (放大后滚动看细节). 外层滚动, 内层按倍数撑宽 */}
-        <div className="overflow-x-auto overflow-y-hidden rounded-lg bg-[var(--bg-hover)]" style={{ height: 120 }}>
+        {/* 轨道: 上半铺视频画面帧(像剪映) + 下半声纹波形. 更高 + 可横向放大. 外层滚动, 内层按倍数撑宽 */}
+        <div className="overflow-x-auto overflow-y-hidden rounded-lg bg-[var(--bg-hover)]" style={{ height: data.sprite_url ? 140 : 110 }}>
           <div
             ref={waveWrapRef}
             className="relative h-full cursor-pointer select-none"
@@ -759,7 +753,16 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
             }}
             title="点击跳转 · 按住拖一段选中, 再点红色「剪掉」"
           >
-            <canvas ref={waveCanvasRef} className="absolute inset-0 w-full h-full" />
+            {/* 视频画面帧 (有缩略图条才铺, 占轨道上半部) */}
+            {data.sprite_url && (
+              <div className="absolute top-0 left-0 right-0 pointer-events-none border-b border-black/25" style={{ height: 56, backgroundImage: `url("${data.sprite_url}")`, backgroundSize: '100% 100%', backgroundRepeat: 'no-repeat' }}/>
+            )}
+            {/* 声纹波形 (轨道下半部; 没缩略图就铺满整条) */}
+            <canvas ref={waveCanvasRef} className="absolute left-0 right-0" style={{ top: data.sprite_url ? 56 : 0, bottom: 0 }} />
+            {/* 拖选高亮 (整轨高, 跨画面帧+波形) */}
+            {dragSel && Math.abs(dragSel.b - dragSel.a) > 0.001 && (
+              <div className="absolute top-0 bottom-0 bg-white/20 border-x border-white/70 pointer-events-none" style={{ left: `${Math.min(dragSel.a, dragSel.b) / (data.duration || 1) * 100}%`, width: `${Math.abs(dragSel.b - dragSel.a) / (data.duration || 1) * 100}%` }}/>
+            )}
             <div
               className="absolute top-0 bottom-0 w-0.5 bg-[var(--text)] pointer-events-none"
               style={{ left: `${(currentTime / (data.duration || 1)) * 100}%` }}
