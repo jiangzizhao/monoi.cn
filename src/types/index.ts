@@ -94,6 +94,7 @@ export interface VideoResult {
   text_preview?: string
   kept_segments?: KeptSegmentLite[]   // 剪辑后视频的 segments (口播视频专用, 用于自动匹配素材)
   narration_oss_key?: string          // 剪辑后口播视频的 OSS key (合成时后端用)
+  narration_clean?: any               // 口播剪辑的原始清洗数据 (CleanResponse), 给结果卡"重新剪辑"复用
   jianying_payload?: JianyingDraftPayload  // 有此字段 → VideoPlayer 显示"导出剪映草稿"按钮
 }
 

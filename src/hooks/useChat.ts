@@ -768,6 +768,7 @@ export function useChat() {
               text_preview: p.transcription?.slice(0, 80),
               kept_segments: p.kept_segments,    // 给后续 footage 匹配用
               narration_oss_key: p.narration_oss_key,  // 合成时后端用
+              narration_clean: p.clean_data,     // "重新剪辑"复用原始清洗数据
             },
           },
           {

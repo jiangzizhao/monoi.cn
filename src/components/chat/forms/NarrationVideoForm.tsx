@@ -184,6 +184,7 @@ export function NarrationVideoForm({ onSubmit, onClose }: Props) {
       transcription,
       kept_segments: keptSegments,
       narration_oss_key: narrationOssKey,
+      clean_data: cleanResult,    // 原始清洗数据(源 OSS key + 转录 + 波形), 给结果卡"重新剪辑"复用
     }))
   }
 

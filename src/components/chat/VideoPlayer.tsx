@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { Play, Pause, Download, Loader2, FileBox, FolderOpen, CheckCircle2, Captions } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import { Play, Pause, Download, Loader2, FileBox, FolderOpen, CheckCircle2, Captions, Scissors, X } from 'lucide-react'
 import type { VideoResult } from '../../types'
 import { getToken } from '../../lib/auth'
 import { SubtitleEditor } from './SubtitleEditor'
+import { NarrationVideoEditor } from './NarrationVideoEditor'
 import {
   isFileSystemAPISupported,
   pickAndSaveDraftDir,
@@ -36,6 +38,12 @@ export function VideoPlayer({ data }: { data: VideoResult }) {
   // 加字幕: 编辑器开关 + 烧好的带字幕视频 URL (有则替换显示)
   const [showSub, setShowSub] = useState(false)
   const [subtitledUrl, setSubtitledUrl] = useState<string | null>(null)
+  // 重新剪辑: 编辑器开关 + 重剪后的新视频 URL / OSS key / 时长 (有则替换显示)
+  const [showReedit, setShowReedit] = useState(false)
+  const [reeditUrl, setReeditUrl] = useState<string | null>(null)
+  const [reeditOssKey, setReeditOssKey] = useState<string | null>(null)
+  const [reeditDurMs, setReeditDurMs] = useState<number | null>(null)
+  const directBase = import.meta.env.VITE_DIRECT_API_URL || 'https://monoi.nat100.top'
 
   // 启动时检查 IndexedDB 里有没有保存过剪映目录 handle
   useEffect(() => {
@@ -43,8 +51,9 @@ export function VideoPlayer({ data }: { data: VideoResult }) {
     getSavedDraftDir().then(h => setDraftDirSet(!!h)).catch(() => setDraftDirSet(false))
   }, [fsSupported, data.jianying_payload])
 
-  const url = resolveUrl(subtitledUrl || data.video_url)
-  const durationSec = data.duration_ms ? data.duration_ms / 1000 : undefined
+  const url = resolveUrl(subtitledUrl || reeditUrl || data.video_url)
+  const durMs = reeditDurMs ?? data.duration_ms
+  const durationSec = durMs ? durMs / 1000 : undefined
 
   const toggle = () => {
     const v = videoRef.current
@@ -205,6 +214,15 @@ export function VideoPlayer({ data }: { data: VideoResult }) {
             <span>{durationSec ? `${durationSec.toFixed(1)}s` : ''}</span>
           </div>
         </div>
+        {data.narration_clean && (
+          <button
+            onClick={() => setShowReedit(true)}
+            className="h-9 px-2.5 rounded-lg flex items-center gap-1 text-xs text-[var(--text-2)] hover:text-[var(--text)] hover:bg-[var(--bg-hover)] cursor-pointer flex-shrink-0"
+            title="回到剪辑器重新调整这段口播"
+          >
+            <Scissors size={14}/>重新剪辑
+          </button>
+        )}
         <button
           onClick={() => setShowSub(true)}
           className="h-9 px-2.5 rounded-lg flex items-center gap-1 text-xs text-[var(--text-2)] hover:text-[var(--text)] hover:bg-[var(--bg-hover)] cursor-pointer flex-shrink-0"
@@ -308,11 +326,40 @@ export function VideoPlayer({ data }: { data: VideoResult }) {
 
       {showSub && (
         <SubtitleEditor
-          transcribeInput={data.narration_oss_key ? { video_oss_key: data.narration_oss_key } : { video_url: data.video_url }}
+          transcribeInput={(reeditOssKey || data.narration_oss_key) ? { video_oss_key: (reeditOssKey || data.narration_oss_key)! } : { video_url: url }}
           previewUrl={url}
           onClose={() => setShowSub(false)}
           onDone={(newUrl) => { setSubtitledUrl(newUrl); setShowSub(false); setPlaying(false); setProgress(0) }}
         />
+      )}
+
+      {showReedit && data.narration_clean && createPortal(
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="relative bg-[var(--bg-card)] border border-[var(--border)] rounded-[22px] shadow-ios-lg w-full max-w-5xl max-h-[92vh] flex flex-col overflow-hidden sheet-enter">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)] flex-shrink-0">
+              <div className="text-base font-semibold text-[var(--text)]">口播 · 重新剪辑</div>
+              <button onClick={() => setShowReedit(false)} className="w-8 h-8 rounded-full flex items-center justify-center text-[var(--text-2)] hover:bg-[var(--bg-hover)] cursor-pointer transition-colors">
+                <X size={16}/>
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-5 py-4">
+              <NarrationVideoEditor
+                data={data.narration_clean}
+                apiBase={directBase}
+                onCancel={() => setShowReedit(false)}
+                onDone={(newUrl, dur, _txt, _segs, newOssKey) => {
+                  setReeditUrl(newUrl)
+                  setReeditOssKey(newOssKey || null)
+                  setReeditDurMs(Math.round(dur * 1000))
+                  setSubtitledUrl(null)   // 重剪后旧字幕作废
+                  setShowReedit(false)
+                  setPlaying(false); setProgress(0)
+                }}
+              />
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
     </div>
   )
