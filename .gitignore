@@ -29,3 +29,6 @@ dist-ssr
 # Electron 打包产物 (Phase 4 桌面端)
 dist-electron/
 release/
+
+# 桌面端发布密钥 (绝不提交; 只放在打包机本地)
+publish-key.txt
