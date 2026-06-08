@@ -211,7 +211,9 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
   // 加载用户克隆列表（克隆模式时）
   const loadMyClones = async () => {
     try {
-      const res = await fetch('/api/proxy?path=' + encodeURIComponent('/api/voice/my-clones'))
+      const res = await fetch((import.meta.env.VITE_DIRECT_API_URL || 'https://monoi.nat100.top') + '/api/voice/my-clones', {
+        headers: { Authorization: `Bearer ${getToken() || ''}` },
+      })
       const data = await res.json()
       const items = Array.isArray(data.items) ? data.items : []
       setMyClones(items.map((it: any) => ({
@@ -401,6 +403,7 @@ export function VoiceForm({ mode, onSubmit, onClose }: Props) {
       fd.append('gender', cloneGender)
       const res = await fetch('/api/proxy?path=' + encodeURIComponent('/api/voice/upload-clone'), {
         method: 'POST',
+        headers: { Authorization: `Bearer ${getToken() || ''}` },
         body: fd,
       })
       const data = await res.json()

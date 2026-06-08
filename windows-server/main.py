@@ -271,6 +271,24 @@ def init_db():
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    # voice_presets 加 owner_user_id (克隆归属) — 之前克隆音色没记归属, 任何人都能列/删别人的.
+    # 回填历史克隆: 按 clone_name 唯一匹配 voice_clones.user_id; 有歧义(重名)就留空(那条谁也看不到, 用户重克隆即可).
+    try:
+        conn.execute("ALTER TABLE voice_presets ADD COLUMN owner_user_id INTEGER")
+    except sqlite3.OperationalError:
+        pass  # 列已存在
+    try:
+        _todo = conn.execute("SELECT id, name FROM voice_presets WHERE category='clone' AND owner_user_id IS NULL").fetchall()
+        for _pid, _name in _todo:
+            _owners = conn.execute(
+                "SELECT DISTINCT user_id FROM voice_clones WHERE clone_name = ? AND user_id IS NOT NULL",
+                (_name,),
+            ).fetchall()
+            if len(_owners) == 1:
+                conn.execute("UPDATE voice_presets SET owner_user_id = ? WHERE id = ?", (_owners[0][0], _pid))
+        conn.commit()
+    except Exception as _e:
+        print(f"[migrate] voice_presets owner 回填跳过: {_e}", flush=True)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS digital_human_avatars (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1254,19 +1272,16 @@ def get_my_clones(request: Request):
     """用户克隆音色列表 (与系统预设独立).
     max_count 按 tier 返回 (Free 0 / Pro 1 / Max 3 / 旗舰 5).
     -1 = 不限 (理论上没有这种 tier, 防御性写法)."""
-    try:
-        user_id = _user_id_from_request(request)
-    except Exception:
-        user_id = None
+    user_id = _user_id_from_request(request)   # 必须登录; 没 token → 401. 只看自己的克隆
     conn = get_db()
     conn.row_factory = sqlite3.Row
     try:
         rows = conn.execute("""
             SELECT id, key, name, engine, category, gender, locale, accent, emotion, speed, sample_text, created_at
             FROM voice_presets
-            WHERE category = 'clone'
+            WHERE category = 'clone' AND owner_user_id = ?
             ORDER BY id DESC
-        """).fetchall()
+        """, (user_id,)).fetchall()
         return {
             "items": [row_to_dict(row) for row in rows],
             "max_count": _get_max_clones(user_id),
@@ -1353,14 +1368,12 @@ def create_voice_asset(req: VoiceAssetCreateRequest, request: Request):
         conn.close()
 
 @app.get("/api/voice/assets")
-def list_voice_assets(user_id: Optional[int] = None):
+def list_voice_assets(request: Request):
+    user_id = _user_id_from_request(request)   # 必须登录, 只看自己的 (原来信任 query user_id → 越权)
     conn = get_db()
     conn.row_factory = sqlite3.Row
     try:
-        if user_id is None:
-            rows = conn.execute("SELECT * FROM voice_assets ORDER BY id DESC LIMIT 50").fetchall()
-        else:
-            rows = conn.execute("SELECT * FROM voice_assets WHERE user_id = ? ORDER BY id DESC LIMIT 50", (user_id,)).fetchall()
+        rows = conn.execute("SELECT * FROM voice_assets WHERE user_id = ? ORDER BY id DESC LIMIT 50", (user_id,)).fetchall()
         return {"items": [row_to_dict(row) for row in rows]}
     finally:
         conn.close()
@@ -1409,7 +1422,6 @@ async def upload_clone(
     clone_name: str = Form("我的声音"),
     transcript: str = Form(""),
     gender: str = Form("female"),
-    user_id: Optional[int] = Form(None),
 ):
     """用户上传录音作为 CosyVoice2 克隆的 prompt 音频. 数量上限按 tier (Free 0 / Pro 1 / Max 3 / 旗舰 5)."""
     import shutil
@@ -1420,12 +1432,9 @@ async def upload_clone(
         clone_name = "我的声音"
     os.makedirs(VOICE_PROMPTS_DIR, exist_ok=True)
 
-    # 优先从 token 解析 user_id (新方式), Form 字段兼容旧调用
-    if user_id is None:
-        try:
-            user_id = _user_id_from_request(request)
-        except Exception:
-            user_id = None
+    # 必须登录 — user_id 一律用 token 里的. 原来 Form 可传 user_id + 没 token 也放行,
+    # 导致克隆 owner 全是空(谁也认领不了)+ 可伪装成别人. 现在强制登录.
+    user_id = _user_id_from_request(request)
 
     # 检查克隆数量上限 (按 tier)
     _max = _get_max_clones(user_id)
@@ -1494,8 +1503,8 @@ async def upload_clone(
             (user_id, clone_name, "cosyvoice", "mandarin", "ready", transcript[:200] if transcript else ""),
         )
         conn.execute(
-            "INSERT INTO voice_presets (key, name, engine, category, gender, locale, accent, emotion, speed, sample_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (clone_key, clone_name, "cosyvoice", "clone", gender, "zh-CN", "mandarin", "natural", "1.0x", "我的克隆声音。"),
+            "INSERT INTO voice_presets (key, name, engine, category, gender, locale, accent, emotion, speed, sample_text, owner_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (clone_key, clone_name, "cosyvoice", "clone", gender, "zh-CN", "mandarin", "natural", "1.0x", "我的克隆声音。", user_id),
         )
         conn.commit()
     finally:
@@ -1512,11 +1521,24 @@ def delete_clone(clone_key: str, request: Request):
     ⚠️ ownership 检查待补: voice_presets 表没 user_id 字段, 理论上知道别人 clone_key
        的话能删别人的. 但 clone_key 是 clone_<8位随机 hex>, 不可猜 + UI 只列自己的,
        实际风险接近 0. TODO: voice_presets 加 owner_user_id 一劳永逸."""
-    _user_id_from_request(request)
+    _uid = _user_id_from_request(request)
     import re as _re
     safe_key = _re.sub(r"[^a-zA-Z0-9_]", "", clone_key)
     if not safe_key.startswith("clone_"):
         raise HTTPException(400, "只能删除克隆音色")
+    # 先确认归属 — 只能删自己的 (防止知道别人 clone_key 就删别人的; owner 为空的历史克隆也不放行)
+    conn = get_db()
+    try:
+        row = conn.execute("SELECT owner_user_id FROM voice_presets WHERE key = ?", (safe_key,)).fetchone()
+        if not row:
+            raise HTTPException(404, "克隆不存在")
+        if row[0] is None or int(row[0]) != _uid:
+            raise HTTPException(403, "只能删除自己的克隆音色")
+        conn.execute("DELETE FROM voice_presets WHERE key = ?", (safe_key,))
+        conn.commit()
+    finally:
+        conn.close()
+    # 归属确认 + 删库后再删本地文件
     wav_path = os.path.join(VOICE_PROMPTS_DIR, f"{safe_key}.wav")
     txt_path = os.path.join(VOICE_PROMPTS_DIR, f"{safe_key}.txt")
     preview_path = os.path.join(VOICE_PREVIEW_DIR, f"{safe_key}.wav")
@@ -1524,24 +1546,16 @@ def delete_clone(clone_key: str, request: Request):
         if os.path.exists(p):
             try: os.unlink(p)
             except: pass
-    conn = get_db()
-    try:
-        conn.execute("DELETE FROM voice_presets WHERE key = ?", (safe_key,))
-        conn.commit()
-    finally:
-        conn.close()
     return {"success": True}
 
 
 @app.get("/api/voice/clones")
-def list_voice_clones(user_id: Optional[int] = None):
+def list_voice_clones(request: Request):
+    user_id = _user_id_from_request(request)   # 必须登录, 只看自己的 (原来信任 query user_id → 越权)
     conn = get_db()
     conn.row_factory = sqlite3.Row
     try:
-        if user_id is None:
-            rows = conn.execute("SELECT * FROM voice_clones ORDER BY id DESC LIMIT 50").fetchall()
-        else:
-            rows = conn.execute("SELECT * FROM voice_clones WHERE user_id = ? ORDER BY id DESC LIMIT 50", (user_id,)).fetchall()
+        rows = conn.execute("SELECT * FROM voice_clones WHERE user_id = ? ORDER BY id DESC LIMIT 50", (user_id,)).fetchall()
         return {"items": [row_to_dict(row) for row in rows]}
     finally:
         conn.close()
@@ -3632,7 +3646,6 @@ async def upload_avatar(
     request: Request,
     file: UploadFile = File(...),
     name: str = Form("我的形象"),
-    user_id: Optional[int] = Form(None),
 ):
     """上传形象视频, 保存为可复用的 avatar. 上限按 tier 走 (Free 1 / Pro 5 / Max 10 / 旗舰 不限)."""
     import shutil
@@ -3641,12 +3654,8 @@ async def upload_avatar(
 
     name = name.strip() or "我的形象"
 
-    # 优先从 token 解析 user_id (新方式), Form 字段兼容旧调用
-    if user_id is None:
-        try:
-            user_id = _user_id_from_request(request)
-        except Exception:
-            user_id = None
+    # 必须登录 — user_id 一律用 token 里的 (防伪装成别人 / 防没主人的形象)
+    user_id = _user_id_from_request(request)
 
     # 检查上限
     conn0 = get_db()
