@@ -1412,10 +1412,23 @@ def charge(req: ChargeRequest, request: Request):
     return {'success': True, 'balance': bal}
 
 
+def _require_admin(user_id: int):
+    """V1 手工开通/加积分仅限管理员 — 普通用户必须走 /api/pay/create 真付款.
+    (修安全漏洞: 之前普通用户也能 POST payment_method=manual 给自己白嫖套餐/积分.)"""
+    conn = get_db()
+    try:
+        r = conn.execute("SELECT is_admin FROM users WHERE id = ?", (user_id,)).fetchone()
+    finally:
+        conn.close()
+    if not (r and r['is_admin']):
+        raise HTTPException(403, "该接口仅管理员手工开通; 普通用户请走付款下单")
+
+
 @router.post("/subscribe")
 def subscribe(req: SubscribeRequest, request: Request):
-    """开通/续费套餐. V1 手工模式 (admin 后台触发); V2 接支付前会先创建 pending 订单 + 跳支付."""
+    """开通/续费套餐. V1 手工模式 (仅 admin 后台触发); V2 接支付前会先创建 pending 订单 + 跳支付."""
     user_id = get_current_user_id(request)
+    _require_admin(user_id)   # 仅管理员手工开通; 普通用户走 /api/pay/create 付款
     if req.tier not in PLANS:
         raise HTTPException(400, f"未知套餐: {req.tier}")
     if req.payment_method != 'manual':
@@ -1443,6 +1456,7 @@ def subscribe(req: SubscribeRequest, request: Request):
 @router.post("/buy-credits")
 def buy_credits(req: BuyCreditsRequest, request: Request):
     user_id = get_current_user_id(request)
+    _require_admin(user_id)   # 仅管理员手工加积分; 普通用户走 /api/pay/create 付款
     if req.pack_code not in CREDIT_PACKS:
         raise HTTPException(400, f"未知积分包: {req.pack_code}")
     if req.payment_method != 'manual':
