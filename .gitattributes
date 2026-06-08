@@ -1,0 +1,3 @@
+# .bat/.cmd 用 Windows 换行符, git 别转换 (否则 cmd 解析跳转标签会闪退)
+*.bat -text
+*.cmd -text
