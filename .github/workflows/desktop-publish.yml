@@ -1,0 +1,82 @@
+# 云端打包桌面版 (Windows) + 自动发布到所有用户
+#
+# 在 GitHub 的 windows 机器上跑 electron-builder 打 .exe, 然后调 monoi 后端的
+# 发布接口 (publish-sign 签 OSS 直传 URL → 直传 → publish-finalize 更新版本记录).
+# 这样发桌面新版完全不用碰本地电脑.
+#
+# 需要 1 个 GitHub Secret (Settings → Secrets and variables → Actions → New repository secret):
+#   DESKTOP_PUBLISH_KEY   = 服务器 .env 里的 DESKTOP_PUBLISH_KEY (发布密钥)
+#
+# 怎么发版:
+#   - 手动: Actions 页面选 "Build & publish desktop" → Run workflow
+#   - 或推一个 tag: git tag desktop-v0.1.3 && git push origin desktop-v0.1.3
+
+name: Build & publish desktop
+
+on:
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: "更新说明 (给用户看, 可留空)"
+        required: false
+        default: ""
+  push:
+    tags:
+      - "desktop-v*"
+
+concurrency:
+  group: desktop-publish
+  cancel-in-progress: true
+
+jobs:
+  build-publish:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout 桌面端分支 (phase4-electron)
+        uses: actions/checkout@v4
+        with:
+          ref: phase4-electron
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: 装依赖
+        run: npm ci
+
+      - name: 打包 Windows 安装包
+        run: npm run pack:win
+
+      - name: 发布到 OSS (签名直传 + 确认)
+        shell: pwsh
+        env:
+          PUBKEY: ${{ secrets.DESKTOP_PUBLISH_KEY }}
+          NOTES: ${{ github.event.inputs.notes }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $pk = $env:PUBKEY
+          if ([string]::IsNullOrWhiteSpace($pk)) { throw "缺少 DESKTOP_PUBLISH_KEY secret, 去 GitHub 仓库 Settings→Secrets 加上" }
+          $exe = Get-ChildItem -Path release -Filter "monoi-Setup-*.exe" | Select-Object -First 1
+          if (-not $exe) { throw "release 里没有 monoi-Setup-*.exe (打包失败?)" }
+          $exeName = $exe.Name
+          Write-Host "准备发布: $exeName"
+
+          function Publish-One($localPath, $name) {
+            $url = (& curl.exe -sS -X POST "https://monoi.cn/api/desktop/publish-sign" -F "publish_key=$pk" -F "filename=$name") -join ""
+            if (-not $url.StartsWith("http")) { throw "签名失败 ($name): $url" }
+            & curl.exe -sS -f -T "$localPath" -H "Content-Type: application/octet-stream" "$url"
+            if ($LASTEXITCODE -ne 0) { throw "上传失败 ($name)" }
+            Write-Host "  $name 上传完成"
+          }
+
+          Publish-One $exe.FullName $exeName
+          Publish-One (Join-Path "release" "latest.yml") "latest.yml"
+          $bm = "$($exe.FullName).blockmap"
+          if (Test-Path $bm) { Publish-One $bm "$exeName.blockmap" }
+
+          $notes = if ([string]::IsNullOrWhiteSpace($env:NOTES)) { "GitHub Actions 自动发布" } else { $env:NOTES }
+          $res = (& curl.exe -sS -X POST "https://monoi.cn/api/desktop/publish-finalize" -F "publish_key=$pk" -F "exe_name=$exeName" -F "notes=$notes") -join ""
+          Write-Host "finalize: $res"
+          if (-not $res.Contains('"success":true')) { throw "发布确认失败: $res" }
+          Write-Host "✅ 桌面版 $exeName 已发布给所有用户"
