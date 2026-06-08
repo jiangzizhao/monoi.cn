@@ -380,7 +380,8 @@ export function DigitalHumanForm({ onSubmit, onClose }: Props) {
   }
 
   const isBusy = phase === 'submitting' || phase === 'processing'
-  const finalVideoUrl = resultUrl ? directBase() + resultUrl : ''
+  // resultUrl 可能已是完整签名 URL (OSS) 或后端相对路径 — 已是 http 就别再拼 directBase, 否则双前缀 URL 失效播不了
+  const finalVideoUrl = !resultUrl ? '' : (resultUrl.startsWith('http') ? resultUrl : directBase() + resultUrl)
   const noAudio = audioOptions.length === 0
   const canUploadMore = avatars.length < maxAvatars
 
