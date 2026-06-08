@@ -114,7 +114,9 @@ export function DigitalHumanForm({ onSubmit, onClose }: Props) {
     let alive = true
     ;(async () => {
       try {
-        const r = await fetch('/api/proxy?path=' + encodeURIComponent('/api/digital-human/avatars'))
+        const r = await fetch(directBase() + '/api/digital-human/avatars', {
+          headers: { Authorization: `Bearer ${getToken() || ''}` },
+        })
         const data = await r.json()
         if (!alive) return
         setAvatars(data.items || [])

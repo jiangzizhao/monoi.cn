@@ -3598,30 +3598,21 @@ def _probe_video_meta(path: str) -> dict:
 
 
 @app.get("/api/digital-human/avatars")
-def list_avatars(request: Request, user_id: Optional[int] = None):
-    """列出已保存的数字人形象. max_count 按 tier 返回 (Free 1 / Pro 5 / Max 10 / 旗舰 不限).
+def list_avatars(request: Request):
+    """列出【当前登录用户自己的】数字人形象 (必须登录). max_count 按 tier 返回.
 
-    user_id 优先从 Authorization JWT 解析, query 参数兼容旧调用方式.
+    安全: 必须从 Authorization JWT 解析 user_id, 只返回自己的形象.
+    (以前没 token 会列出全部形象 → 用户能看到别人/管理员的形象, 隐私漏洞, 已修.)
     """
-    # 优先从 token 解析 user_id (新方式)
-    if user_id is None:
-        try:
-            user_id = _user_id_from_request(request)
-        except Exception:
-            user_id = None  # 没 token 也允许 (兼容旧 admin / 测试)
+    user_id = _user_id_from_request(request)   # 没登录 → 401; 绝不再 list all
 
     conn = get_db()
     conn.row_factory = sqlite3.Row
     try:
-        if user_id is None:
-            rows = conn.execute(
-                "SELECT * FROM digital_human_avatars ORDER BY id DESC LIMIT 50"
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT * FROM digital_human_avatars WHERE user_id = ? ORDER BY id DESC LIMIT 50",
-                (user_id,),
-            ).fetchall()
+        rows = conn.execute(
+            "SELECT * FROM digital_human_avatars WHERE user_id = ? ORDER BY id DESC LIMIT 50",
+            (user_id,),
+        ).fetchall()
         items = []
         for row in rows:
             d = row_to_dict(row)
