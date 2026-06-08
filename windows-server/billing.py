@@ -874,26 +874,22 @@ def consume_credits(user_id: int, feature: str, amount: int, ref_id: Optional[st
             )
             conn.commit()
             return
-        row = conn.execute(
-            "SELECT monthly_credits, purchased_credits FROM credit_balance WHERE user_id = ?",
-            (user_id,)
-        ).fetchone()
-        monthly = row['monthly_credits'] if row else 0
-        purchased = row['purchased_credits'] if row else 0
-        total = (monthly or 0) + (purchased or 0)
-        if total < amount:
-            # 不暴露具体数字 (需要多少 / 剩余多少), 只提示去升级 (后端 credit_log 仍记账给 admin)
-            raise HTTPException(402, "积分不足, 升级套餐获取更多积分")
-        from_monthly = min(monthly or 0, amount)
-        from_purchased = amount - from_monthly
         now = time.time()
-        conn.execute("""
+        # 原子条件扣减: 单条 UPDATE + WHERE 余额够 防 TOCTOU 双花.
+        # 先扣 monthly 后扣 purchased (用 SQL MIN 内联算分摊), 不再 "先查后扣".
+        # rowcount==0 = 没扣到 (余额不足 或 无 row) → 402, 不交付产出.
+        cur = conn.execute("""
             UPDATE credit_balance
-            SET monthly_credits = monthly_credits - ?,
-                purchased_credits = purchased_credits - ?,
+            SET monthly_credits = monthly_credits - MIN(monthly_credits, ?),
+                purchased_credits = purchased_credits - (? - MIN(monthly_credits, ?)),
                 updated_at = ?
             WHERE user_id = ?
-        """, (from_monthly, from_purchased, now, user_id))
+              AND (monthly_credits + purchased_credits) >= ?
+        """, (amount, amount, amount, now, user_id, amount))
+        if cur.rowcount == 0:
+            # 余额不足: 上面 UPDATE 没命中任何行, 没有任何扣减发生.
+            # 不暴露具体数字 (需要多少 / 剩余多少), 只提示去升级 (后端 credit_log 仍记账给 admin)
+            raise HTTPException(402, "积分不足, 升级套餐获取更多积分")
         conn.execute("""
             INSERT INTO credit_log (user_id, feature, delta, source, ref_id, created_at)
             VALUES (?, ?, ?, 'consume', ?, ?)
@@ -1200,6 +1196,25 @@ def write_first_order_commission(order_id: str, referrer_id: int, buyer_id: int,
     now = time.time()
 
     conn = get_db()
+    # —— 防刷: 佣金去重 (2026-06-08 安全补丁) ——
+    # (1) 同一 order_id 只记一次: 防 webhook/重试 重放导致重复入账双花.
+    dup = conn.execute(
+        "SELECT 1 FROM commission_log WHERE order_id = ?", (order_id,)
+    ).fetchone()
+    if dup:
+        conn.close()
+        print(f"[commission] skip — order_id={order_id} 已记过佣金, 跳过 (防重放)", flush=True)
+        return
+    # (2) 同一被邀请人"首单"只记一次: 该买家此前若已有别的 paid 订单, 就不是首单, 不再给首单佣金.
+    #     注意调用方 (subscribe / buy-credits) 已先把当前订单写进 billing_orders, 故 id != order_id 排除自身.
+    prior_paid = conn.execute(
+        "SELECT COUNT(*) FROM billing_orders WHERE user_id = ? AND status = 'paid' AND id != ?",
+        (buyer_id, order_id)
+    ).fetchone()[0]
+    if prior_paid > 0:
+        conn.close()
+        print(f"[commission] skip — buyer={buyer_id} 已有 {prior_paid} 笔历史付费订单, 非首单, 不记佣金", flush=True)
+        return
     # 不再区分 normal vs certified/partner 走积分还是现金 —
     # 所有级别都给现金, 只是 % 不同 (普通 10% / 认证 30% / 合伙人 50%).
     # 跟 2026-05-23 拍板的新规则对齐.
@@ -1654,21 +1669,29 @@ def submit_withdraw(req: WithdrawRequest, request: Request):
     if req.amount_yuan < min_amount:
         raise HTTPException(400, f'最低提现金额 ¥{min_amount}')
 
+    if req.amount_yuan <= 0:
+        raise HTTPException(400, '提现金额必须大于 0')
+
     conn = get_db()
-    bal = conn.execute("SELECT cash_balance FROM referrer_balance WHERE user_id = ?", (user_id,)).fetchone()
-    if not bal or bal['cash_balance'] < req.amount_yuan:
+    now = time.time()
+    # —— 防并发双花: 原子条件扣减 (2026-06-08 安全补丁) ——
+    # 不再 "先查余额后扣": 两个并发请求会同时通过 SELECT 检查, 各自扣一次 → 双花.
+    # 改成单条 UPDATE + WHERE cash_balance >= amount, 靠 rowcount 判断是否扣到.
+    cur = conn.execute("""
+        UPDATE referrer_balance
+        SET cash_balance = cash_balance - ?, updated_at = ?
+        WHERE user_id = ? AND cash_balance >= ?
+    """, (req.amount_yuan, now, user_id, req.amount_yuan))
+    if cur.rowcount == 0:
+        # 没扣到 (余额不足 或 无 row): 没有任何扣减发生, 直接拒绝, 不创建提现申请.
         conn.close()
         raise HTTPException(400, '余额不足')
-    now = time.time()
+    # 扣减成功后才落提现申请 (审核不通过会回滚余额)
     cursor = conn.execute("""
         INSERT INTO withdrawal_request (user_id, amount_yuan, payment_method, account_info, created_at)
         VALUES (?, ?, ?, ?, ?)
     """, (user_id, req.amount_yuan, req.payment_method, req.account_info, now))
     wid = cursor.lastrowid
-    # 余额暂扣 (审核后不通过会回滚)
-    conn.execute("""
-        UPDATE referrer_balance SET cash_balance = cash_balance - ?, updated_at = ? WHERE user_id = ?
-    """, (req.amount_yuan, now, user_id))
     conn.commit()
     conn.close()
     return {'success': True, 'withdrawal_id': wid, 'message': '提现申请已提交, 审核通过后转账到账'}

@@ -63,12 +63,60 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "X-Real-IP", "X-Forwarded-For"],
 )
 
-# JWT 签名 key, 必须从 env 读 (硬编码会被 git 暴露). 兼容老的默认值, 但启动会警告
-SECRET_KEY = os.getenv('JWT_SECRET_KEY') or "monoi-secret-key-2025"
-if SECRET_KEY == "monoi-secret-key-2025":
-    print("[security] ⚠️  JWT_SECRET_KEY 未配置, 用默认硬编码 key (生产环境必须配 32+ 位随机字符串)", flush=True)
+# JWT 签名 key, 必须从 env 读 (硬编码会被 git 暴露). fail-closed: 缺失或仍是默认硬编码值就拒绝启动
+SECRET_KEY = os.getenv('JWT_SECRET_KEY')
+if not SECRET_KEY or SECRET_KEY == "monoi-secret-key-2025":
+    print("[security] ❌ JWT_SECRET_KEY 未配置或仍为默认硬编码 key, 拒绝启动 (请在 .env 配 32+ 位随机字符串)", flush=True)
+    raise RuntimeError("JWT_SECRET_KEY 未配置或为默认硬编码 key, 进程拒绝启动")
 else:
     print(f"[security] JWT_SECRET_KEY 从 env 读取 ({len(SECRET_KEY)} 字符)", flush=True)
+
+
+def _require_safe_url(url: str) -> str:
+    """SSRF 防护: 校验用户传入的 URL 不指向内网/环回/链路本地/保留地址.
+    解析 host -> DNS 解析出所有 IP -> 逐个用 ipaddress 判断, 命中私网等则拒绝.
+    仅放行 http/https. 通过则原样返回 url; 否则 raise HTTPException(400)."""
+    import ipaddress
+    import socket
+    from urllib.parse import urlparse
+
+    if not url or not isinstance(url, str):
+        raise HTTPException(400, "不允许的地址")
+    try:
+        parsed = urlparse(url.strip())
+    except Exception:
+        raise HTTPException(400, "不允许的地址")
+    if parsed.scheme.lower() not in ("http", "https"):
+        raise HTTPException(400, "不允许的地址")
+    host = parsed.hostname
+    if not host:
+        raise HTTPException(400, "不允许的地址")
+    # DNS 解析出所有候选 IP (含 IPv4/IPv6); 解析失败也拒绝 (无法确认安全)
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except Exception:
+        raise HTTPException(400, "不允许的地址")
+    for info in infos:
+        addr = info[4][0]
+        # 去掉 IPv6 scope id (如 fe80::1%eth0)
+        if "%" in addr:
+            addr = addr.split("%", 1)[0]
+        try:
+            ip = ipaddress.ip_address(addr)
+        except ValueError:
+            raise HTTPException(400, "不允许的地址")
+        if (ip.is_private or ip.is_loopback or ip.is_link_local
+                or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
+            raise HTTPException(400, "不允许的地址")
+        # IPv4-mapped IPv6 (::ffff:127.0.0.1 等) 再剥一层校验
+        mapped = getattr(ip, "ipv4_mapped", None)
+        if mapped is not None and (mapped.is_private or mapped.is_loopback
+                or mapped.is_link_local or mapped.is_reserved
+                or mapped.is_multicast or mapped.is_unspecified):
+            raise HTTPException(400, "不允许的地址")
+    return url
+
+
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_DAYS = 30
 VOICE_STORAGE_DIR = "voice-assets"
@@ -840,8 +888,11 @@ def update_profile(req: UpdateProfileRequest, request: Request):
         updates.append("username = ?")
         params.append(req.username)
     if req.avatar_oss_key is not None:
+        # 用户直接传入的 key — 强制落在 avatars/ 前缀内 (前端头像上传永远用 prefix='avatars'),
+        # 否则可把别人的对象/任意 key 登记成自己头像, 让 /api/me 再签出 GET URL。不符合 403。
+        avatar_key = _validate_user_oss_key(req.avatar_oss_key, 'avatars')
         updates.append("avatar_oss_key = ?")
-        params.append(req.avatar_oss_key)
+        params.append(avatar_key)
     if not updates:
         raise HTTPException(400, "没有需要更新的字段")
     params.append(user_id)
@@ -1131,6 +1182,7 @@ def fetch_content(req: FetchRequest, request: Request):
     _user_id_from_request(request)
     import re
     url = extract_url(req.url)
+    _require_safe_url(url)   # SSRF: 拒绝内网/环回/元数据地址, 然后才 playwright/urlopen 抓取
 
     is_douyin = bool(re.search(r'douyin\.com|v\.douyin\.com', url, re.I))
     is_video = bool(re.search(
@@ -1224,6 +1276,7 @@ def fetch_debug(req: FetchRequest, request: Request):
     is_douyin = bool(re.search(r"douyin\.com|v\.douyin\.com", url, re.I))
     if not is_douyin:
         raise HTTPException(400, "仅支持抖音链接调试")
+    _require_safe_url(url)   # SSRF: 拒绝内网地址, 然后才 playwright 抓取
 
     with tempfile.TemporaryDirectory() as tmpdir:
         result = download_video_playwright(url, tmpdir, debug=True)
@@ -1988,6 +2041,28 @@ def synthesize_voice(req: VoiceSynthesizeRequest, request: Request):
     # 整个 TTS 是免费送的, 这是大薅羊毛漏洞. 现在必须登录.
     _uid = _user_id_from_request(request)
 
+    # 越权校验 — 克隆音色 (clone_*) 必须归属当前用户. 之前只信任客户端传的
+    # preset_key, 知道别人 clone_key 就能盗用别人克隆的声音合成. 内置/公共预设
+    # (owner_user_id 为 NULL) 放行; 别人的克隆 → 403.
+    if req.preset_key and req.preset_key.startswith("clone_"):
+        _own_conn = get_db()
+        try:
+            _own_row = _own_conn.execute(
+                "SELECT owner_user_id FROM voice_presets WHERE key = ?", (req.preset_key,)
+            ).fetchone()
+            _own_admin = _own_conn.execute(
+                "SELECT is_admin FROM users WHERE id = ?", (_uid,)
+            ).fetchone()
+        finally:
+            _own_conn.close()
+        if not _own_row:
+            raise HTTPException(404, "克隆音色不存在")
+        # admin (创始人) 可用任意克隆; 普通用户只能用自己的.
+        # owner 为 NULL 的历史孤儿克隆 (旧版无鉴权上传遗留) 仅 admin 可用, 普通用户拒绝 (fail-safe).
+        if not (_own_admin and _own_admin[0]):
+            if _own_row[0] is None or int(_own_row[0]) != _uid:
+                raise HTTPException(403, "只能使用自己的克隆音色")
+
     # 预扣 (合成前校验余额) — 按字数预估积分, 实际合成完成后会再调一次按真实时长扣
     # 预估公式: 跟 _run_tts_task 后扣对齐 — 预设 0.5/s, 克隆 1.5/s, 字数 / 6 ≈ 秒数
     # 字数 60 ≈ 10 秒 ≈ 5 积分 (预设), 15 积分 (克隆)
@@ -2158,8 +2233,12 @@ def synthesize_voice(req: VoiceSynthesizeRequest, request: Request):
 
 
 @app.get("/api/voice/task/{task_id}")
-def get_voice_task(task_id: str):
-    """查询合成任务状态. 本地任务 (indextts/cosyvoice) 优先, 没有则当阿里云任务查."""
+def get_voice_task(task_id: str, request: Request):
+    """查询合成任务状态. 本地任务 (indextts/cosyvoice) 优先, 没有则当阿里云任务查.
+
+    鉴权: task_id (local_{ts}_{uuid8}) 时间戳段可猜, 返回里含私有音频 URL,
+    必须登录; 本地任务再校验 user_id 归属, 防枚举他人合成结果."""
+    _uid = _user_id_from_request(request)   # 401 if no/invalid token
     # 1. 先查本地 tts_tasks 表 (indextts / cosyvoice)
     conn = get_db()
     conn.row_factory = sqlite3.Row
@@ -2172,6 +2251,9 @@ def get_voice_task(task_id: str):
 
     if row:
         d = dict(row)
+        # 归属校验: 任务有 user_id 时, 只能本人查 (老任务 user_id 为空 → 放过)
+        if d.get("user_id") is not None and int(d["user_id"]) != _uid:
+            raise HTTPException(403, "无权访问该任务")
         if d["status"] == "ready":
             return {
                 "status": "ready",
@@ -2440,6 +2522,10 @@ async def subtitle_transcribe_proxy(request: Request):
         body = await request.json()
     except Exception:
         body = {}
+    # SSRF: voice-server 会 urllib.request.urlretrieve(body['video_url']) 抓取该地址, 转发前先拦内网/环回/元数据地址 (video_oss_key 走 OSS 下载, 不校验)
+    _vurl = body.get("video_url")
+    if _vurl:
+        _require_safe_url(_vurl)
     try:
         resp = _req.post(f"{VOICE_SERVER_URL}/api/voice/subtitle/transcribe", json=body, timeout=600)
         if resp.status_code != 200:
@@ -2503,6 +2589,23 @@ class OssSignUploadRequest(BaseModel):
 
 # 白名单, 防恶意客户端传随便 prefix 把文件传到非预期路径
 _ALLOWED_UPLOAD_PREFIXES = {'uploads', 'cover_templates', 'bgm_library', 'avatars', 'landing_demos', 'whiteboard_bg', 'recordings', 'desktop_release'}
+
+
+def _validate_user_oss_key(key: str, allowed_prefix: str) -> str:
+    """校验【用户直接传入】的 oss_key 落在指定前缀内, 且是 oss_make_upload_key 产出的
+    扁平单段路径 (prefix/<segment>, 无 '/' 嵌套、无 '..' 穿越)。
+
+    OSS key 命名规律是 '{prefix}/{ts}_{uuid8}{ext}' — key 本身不含 uid, 无法靠 uid 前缀
+    做归属校验; 但限制到唯一合法前缀 + 扁平单段, 就能挡住"传任意 key 去读/签别的对象/别的
+    前缀(如 cover_templates/、desktop_release/、avatars/)"这类越权。不符合则 403。"""
+    k = (key or '').strip()
+    p = allowed_prefix.strip('/') + '/'
+    if not k or not k.startswith(p):
+        raise HTTPException(403, "oss_key 不在允许的前缀内")
+    rest = k[len(p):]
+    if not rest or '/' in rest or '..' in rest or '\\' in rest:
+        raise HTTPException(403, "oss_key 路径非法")
+    return k
 
 
 @app.post("/api/oss/sign-upload")
@@ -2703,6 +2806,13 @@ def compose_footage_proxy(req: dict, request: Request):
     except Exception as _ce:
         print(f"[compose-credit] 跳过扣费 (拿不到 user): {_ce}", flush=True)
 
+    # SSRF: voice-server 会对每个 asset.url 做 urlopen, 转发前逐个拦内网/环回/元数据地址
+    for _shot in (req.get('shots') or []):
+        for _asset in (_shot.get('assets') or []):
+            _au = _asset.get('url')
+            if _au:
+                _require_safe_url(_au)
+
     try:
         resp = _req.post(
             f"{VOICE_SERVER_URL}/compose-footage",
@@ -2796,6 +2906,7 @@ def add_bgm_proxy(req: AddBgmReq, request: Request):
     """给已有视频混入 BGM. 转发到 voice-server (ffmpeg amix).
     用户已登录才能调 (扣积分留接口). 返新 video_url + oss_key."""
     _user_id_from_request(request)   # 必须登录, 没 token 401
+    _require_safe_url(req.video_url)   # SSRF: voice-server 会 urlretrieve(req.video_url), 转发前先拦内网地址
     import requests as _req
     try:
         resp = _req.post(
@@ -3171,6 +3282,9 @@ def transcode_recording_to_mp4(req: TranscodeReq, request: Request):
     src_key = req.oss_key.strip()
     if not src_key:
         raise HTTPException(400, 'oss_key 不能为空')
+    # 用户直接传入的 key — 强制落在录屏前缀内 (前端永远用 prefix='recordings' 上传),
+    # 否则可拿任意 key 让服务器读/签别人的对象。不符合 403。
+    src_key = _validate_user_oss_key(src_key, 'recordings')
 
     # 拉 OSS 文件到本地临时文件
     try:
@@ -3954,6 +4068,23 @@ def submit_digital_human(
     if not os.path.exists(avatar_path):
         raise HTTPException(404, "形象不存在, 请重新选择")
 
+    # ownership 校验: 只能用自己的形象生成 (公共/内置 user_id 为 NULL 放行, admin 例外)
+    _ownconn = get_db()
+    try:
+        _ownrow = _ownconn.execute(
+            "SELECT user_id FROM digital_human_avatars WHERE avatar_key = ?", (safe_key,)
+        ).fetchone()
+        if _ownrow is not None and _ownrow[0] is not None:
+            _owner_id = int(_ownrow[0])
+            if _owner_id != uid:
+                _admin = _ownconn.execute(
+                    "SELECT is_admin FROM users WHERE id = ?", (uid,)
+                ).fetchone()
+                if not (_admin and _admin[0]):
+                    raise HTTPException(403, "无权使用别人的数字人形象")
+    finally:
+        _ownconn.close()
+
     # 存上传音频 → ffmpeg 16k 单声道 PCM wav (拿准时长 + 减小传给家里的体积)
     job_id = _uuid.uuid4().hex[:16]
     raw = os.path.join(_tf.gettempdir(), f"dh_{job_id}.raw")
@@ -4084,6 +4215,11 @@ def create_payment_order(req: CreatePayRequest, request: Request):
 
     description = f"monoi {item_name}"
     if req.channel == 'wechat':
+        # fail-closed: 微信支付环境变量未配齐时, wxpay 走内存 mock (15s 后自动判 paid),
+        # 会被人当成白送会员/积分的后门. 未真实接入微信商户时, 一律拒绝创建订单,
+        # 绝不进入 mock 下单 + 自动 paid 流程. (真实路径 _WXPAY_REAL=True 不受影响)
+        if not _WXPAY_REAL:
+            raise HTTPException(503, "微信支付暂未开通, 请稍后再试")
         try:
             wx_res = _wxpay.create_native_order(
                 out_trade_no=out_trade_no,
@@ -4162,7 +4298,7 @@ def query_payment_order(order_id: str, request: Request):
     conn.close()
 
     # 主动查微信 (主要兜 notify 没收到的情况)
-    if row_d['payment_channel'] == 'wechat':
+    if row_d['payment_channel'] == 'wechat' and _WXPAY_REAL:
         try:
             q = _wxpay.query_order(order_id)
         except Exception as e:
@@ -4198,15 +4334,16 @@ def _mark_order_paid_and_activate(order_id: str, transaction_id: Optional[str]):
     if not row:
         conn.close()
         return
-    if row['status'] == 'paid':
-        conn.close()
-        return  # 幂等
-    conn.execute(
-        "UPDATE billing_orders SET status = 'paid', paid_at = ?, wx_transaction_id = ? WHERE id = ?",
+    # 原子幂等: 条件 UPDATE 只让一路成功 (WHERE status != 'paid'). rowcount==0 说明已被并发的
+    # 另一路 (notify 回调 / 主动查单) 标记过 paid → 跳过激活+佣金, 防并发双开会员/双发佣金 (2026-06-08 安全补丁).
+    cur = conn.execute(
+        "UPDATE billing_orders SET status = 'paid', paid_at = ?, wx_transaction_id = ? WHERE id = ? AND status != 'paid'",
         (now, transaction_id, order_id),
     )
     conn.commit()
     conn.close()
+    if cur.rowcount == 0:
+        return  # 并发竞态: 已被另一路标记 paid, 本次不重复激活/发佣金
 
     order_type = row['order_type']
     user_id = row['user_id']

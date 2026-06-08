@@ -130,10 +130,20 @@ def restart_heygem():
 def video(path: str):
     """把结果视频回传给云端 (云端再上 OSS 发给用户)。path = HeyGem 返回的 result 路径。"""
     safe = (path or "").replace("\\", "/").lstrip("/")
+    # 安全: 只允许读 DATA_DIR 内的文件, 规范化后校验前缀, 阻断 ../ 目录穿越
+    base = os.path.realpath(DATA_DIR)
+    base_prefix = base + os.sep
+    escaped = False
     # 结果一般在 DATA_DIR 下; 先按相对路径找, 再按文件名兜底
     for cand in (os.path.join(DATA_DIR, safe), os.path.join(DATA_DIR, os.path.basename(safe))):
-        if os.path.isfile(cand):
-            return FileResponse(cand, media_type="video/mp4")
+        real = os.path.realpath(cand)
+        if real != base and not real.startswith(base_prefix):
+            escaped = True
+            continue
+        if os.path.isfile(real):
+            return FileResponse(real, media_type="video/mp4")
+    if escaped:
+        raise HTTPException(403, "非法路径")
     raise HTTPException(404, "结果视频未找到")
 
 
