@@ -212,7 +212,8 @@ def verify_password(password: str, stored: str) -> bool:
         salt = data[:16]
         key = data[16:]
         new_key = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, 100000)
-        return key == new_key
+        import hmac as _hmac
+        return _hmac.compare_digest(key, new_key)   # 常数时间比较, 防计时侧信道
     except Exception:
         return False
 
@@ -4115,11 +4116,13 @@ def submit_digital_human(
     est = max(1, round(_dur * 1)) if _dur > 0 else 10   # 数字人 1 积分/秒 (家里卡跑, 边际成本低; 让每天送的100够做一条)
 
     # 余额预检 (admin 免) —— 不够直接拒, 别白排队白跑 GPU
+    _dh_is_admin = False
     try:
         c = get_db()
         try:
             _adm = c.execute("SELECT is_admin FROM users WHERE id = ?", (uid,)).fetchone()
-            if not (_adm and _adm[0]):
+            _dh_is_admin = bool(_adm and _adm[0])
+            if not _dh_is_admin:
                 _bal = c.execute(
                     "SELECT COALESCE(monthly_credits,0)+COALESCE(purchased_credits,0) FROM credit_balance WHERE user_id = ?",
                     (uid,),
@@ -4135,14 +4138,25 @@ def submit_digital_human(
     except Exception as _pe:
         print(f"[dh] 余额预检跳过: {_pe}", flush=True)
 
-    # 入队
+    # 入队 — 防滥用: 非 admin 同一时间只允许 1 个排队/处理中的数字人任务.
+    # 既挡"狂点反复提交把队列打爆", 也堵"并发多提绕过上面的余额预检、白跑 GPU 出多条免费片".
+    _too_many = False
     with _dh_lock:
-        _dh_jobs[job_id] = {
-            "status": "queued", "user_id": uid, "audio_path": audio_path,
-            "avatar_path": avatar_path, "est_amount": est, "progress": 0,
-            "video_url": "", "error": "", "created_at": time.time(),
-        }
-        _dh_queue.append(job_id)
+        if not _dh_is_admin and any(
+            _j.get("user_id") == uid and _j.get("status") in ("queued", "processing")
+            for _j in _dh_jobs.values()
+        ):
+            _too_many = True
+        else:
+            _dh_jobs[job_id] = {
+                "status": "queued", "user_id": uid, "audio_path": audio_path,
+                "avatar_path": avatar_path, "est_amount": est, "progress": 0,
+                "video_url": "", "error": "", "created_at": time.time(),
+            }
+            _dh_queue.append(job_id)
+    if _too_many:
+        _duix_cleanup(audio_path)
+        raise HTTPException(429, "你已有一个数字人任务在排队或生成中, 请等它完成再提交")
     _dh_ensure_worker()
     return {"success": True, "job_id": job_id, "position": _dh_position(job_id)}
 
@@ -4598,6 +4612,7 @@ def api_pexels(request: Request,
                orientation: str = Query("landscape")):
     """Pexels 视频搜索 + JWT 鉴权 (原 Vercel api/pexels.ts)."""
     _user_id_from_request(request)
+    security.guard_rate_limit(request, 'media_search', max_calls=60, window_sec=60)
     api_key = os.environ.get("PEXELS_API_KEY", "")
     if not api_key:
         raise HTTPException(500, "PEXELS_API_KEY 未配置")
@@ -4628,6 +4643,7 @@ def api_pixabay(request: Request,
                 per_page: int = Query(5)):
     """Pixabay 视频搜索 + JWT 鉴权 (原 Vercel api/pixabay.ts)."""
     _user_id_from_request(request)
+    security.guard_rate_limit(request, 'media_search', max_calls=60, window_sec=60)
     api_key = os.environ.get("PIXABAY_API_KEY", "")
     if not api_key:
         raise HTTPException(500, "PIXABAY_API_KEY 未配置")
