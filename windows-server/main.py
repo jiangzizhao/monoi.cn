@@ -3090,6 +3090,88 @@ def desktop_update_proxy(filename: str):
         raise HTTPException(500, "下载 URL 生成失败")
 
 
+@app.post("/api/desktop/publish")
+async def desktop_publish(
+    request: Request,
+    publish_key: str = Form(...),
+    notes: str = Form(""),
+    exe: UploadFile = File(...),
+    latest_yml: UploadFile = File(...),
+    blockmap: UploadFile = File(None),
+):
+    """一键发布桌面新版: 上传 exe + latest.yml(+blockmap) 到 OSS desktop_release/ 并更新版本记录.
+    安全: 这个口子会把安装包推给【所有用户】(供应链风险), 所以只认 DESKTOP_PUBLISH_KEY
+    (强随机密钥, 只在发布者机器上), 常数时间比对; 文件名/类型/exe 头 全部严格校验; 限流."""
+    import hmac as _hmac, re as _re2, json as _json2, time as _time2, tempfile as _tf
+    security.guard_rate_limit(request, 'desktop_publish', max_calls=10, window_sec=300)
+    _expected = os.environ.get("DESKTOP_PUBLISH_KEY", "")
+    if (not _expected) or len(_expected) < 16 or len(publish_key or "") < 16 \
+            or not _hmac.compare_digest(publish_key, _expected):
+        raise HTTPException(403, "发布密钥无效")
+
+    def _safe_basename(uf, exts):
+        n = os.path.basename((uf.filename or "").replace("\\", "/"))
+        if (not n) or "/" in n or ".." in n or not n.lower().endswith(exts):
+            raise HTTPException(400, f"文件不合法: {uf.filename}")
+        return n
+
+    exe_name = _safe_basename(exe, (".exe",))
+    yml_name = _safe_basename(latest_yml, (".yml",))
+
+    # 版本号从 latest.yml 解析 (不信客户端单独传的版本)
+    yml_bytes = await latest_yml.read()
+    _yt = yml_bytes.decode("utf-8", "ignore")
+    _m = _re2.search(r'(?m)^version:\s*[\'"]?([0-9]+\.[0-9]+\.[0-9]+)', _yt)
+    if not _m:
+        raise HTTPException(400, "latest.yml 里没解析到 version (x.y.z)")
+    version = _m.group(1)
+    if exe_name != f"monoi-Setup-{version}.exe":
+        raise HTTPException(400, f"exe 文件名应为 monoi-Setup-{version}.exe, 实际是 {exe_name}")
+
+    exe_bytes = await exe.read()
+    if exe_bytes[:2] != b"MZ":
+        raise HTTPException(400, "exe 不是有效的 Windows 安装包 (缺 MZ 头)")
+
+    def _put(key, data, ct):
+        tmp = os.path.join(_tf.gettempdir(), f"dpub_{os.path.basename(key)}")
+        with open(tmp, "wb") as f:
+            f.write(data)
+        try:
+            from oss_helper import oss_upload
+            oss_upload(key, tmp, content_type=ct)
+        finally:
+            try:
+                os.remove(tmp)
+            except Exception:
+                pass
+
+    _put(f"desktop_release/{exe_name}", exe_bytes, "application/octet-stream")
+    _put(f"desktop_release/{yml_name}", yml_bytes, "text/yaml")
+    if blockmap is not None and (blockmap.filename or ""):
+        bm_name = _safe_basename(blockmap, (".blockmap",))
+        _put(f"desktop_release/{bm_name}", await blockmap.read(), "application/octet-stream")
+
+    # 公网 exe_url (download 接口只用其 path 重签 OSS, host 仅展示用)
+    _bucket = os.environ.get("OSS_BUCKET", "").strip()
+    _pub = (os.environ.get("OSS_PUBLIC_ENDPOINT", "").strip()
+            or os.environ.get("OSS_ENDPOINT", "").replace("-internal", ""))
+    _host = _pub.replace("https://", "").replace("http://", "").strip("/")
+    exe_url = f"https://{_bucket}.{_host}/desktop_release/{exe_name}"
+
+    meta = {
+        "version": version,
+        "exe_url": exe_url,
+        "size_mb": round(len(exe_bytes) / 1048576, 1),
+        "released_at": _time2.strftime("%Y-%m-%d"),
+        "notes": (notes or "").strip(),
+    }
+    cfg_path = os.path.join(os.path.dirname(__file__), 'desktop_release.json')
+    with open(cfg_path, "w", encoding="utf-8") as f:
+        _json2.dump(meta, f, ensure_ascii=False, indent=2)
+    print(f"[desktop/publish] 发布 {version} ({meta['size_mb']}MB) 成功", flush=True)
+    return {"success": True, **meta}
+
+
 # ============== 我的录屏 ==============
 
 
