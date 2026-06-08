@@ -63,7 +63,7 @@ jobs:
           Write-Host "准备发布: $exeName"
 
           function Publish-One($localPath, $name) {
-            $url = (& curl.exe -sS -X POST "https://monoi.cn/api/desktop/publish-sign" -F "publish_key=$pk" -F "filename=$name") -join ""
+            $url = (& curl.exe -sS -X POST "https://api.monoi.cn/api/desktop/publish-sign" -F "publish_key=$pk" -F "filename=$name") -join ""
             if (-not $url.StartsWith("http")) { throw "签名失败 ($name): $url" }
             & curl.exe -sS -f -T "$localPath" -H "Content-Type: application/octet-stream" "$url"
             if ($LASTEXITCODE -ne 0) { throw "上传失败 ($name)" }
@@ -76,7 +76,7 @@ jobs:
           if (Test-Path $bm) { Publish-One $bm "$exeName.blockmap" }
 
           $notes = if ([string]::IsNullOrWhiteSpace($env:NOTES)) { "GitHub Actions 自动发布" } else { $env:NOTES }
-          $res = (& curl.exe -sS -X POST "https://monoi.cn/api/desktop/publish-finalize" -F "publish_key=$pk" -F "exe_name=$exeName" -F "notes=$notes") -join ""
+          $res = (& curl.exe -sS -X POST "https://api.monoi.cn/api/desktop/publish-finalize" -F "publish_key=$pk" -F "exe_name=$exeName" -F "notes=$notes") -join ""
           Write-Host "finalize: $res"
           if (-not $res.Contains('"success":true')) { throw "发布确认失败: $res" }
           Write-Host "✅ 桌面版 $exeName 已发布给所有用户"
