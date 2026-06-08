@@ -151,6 +151,22 @@ function makeScriptCard(script: string): MessageBlock {
   }
 }
 
+// 文案完成后统一接"下一步"动作 chips — 用户最常找不到的就是"配音"入口, 这里显式给出.
+function scriptDoneBlocks(script: string): MessageBlock[] {
+  return [
+    makeScriptCard(script),
+    { type: 'text', content: '文案写好啦。接下来把它变成视频:' },
+    {
+      type: 'choices',
+      question: '下一步',
+      options: [
+        { id: '__autoopen__:__voice_preset__', label: '配音 (生成语音)', description: '选个音色, 把这段文案读出来' },
+        { id: '__autoopen__:__digital_human__', label: '做数字人视频', description: '让数字人形象口播这段文案' },
+      ],
+    },
+  ]
+}
+
 function buildRegenerateScriptPrompt(prompt: string) {
   return `${prompt}
 
@@ -528,7 +544,7 @@ export function useChat() {
       // 用户直接粘贴文案: 跳过 LLM, 直接生成 script_card 进入下游流程
       if (text.startsWith('__paste_script__')) {
         const script = text.slice('__paste_script__'.length).trim()
-        store.updateLastAssistantBlocks(convId, [makeScriptCard(script)])
+        store.updateLastAssistantBlocks(convId, scriptDoneBlocks(script))
         return
       }
 
@@ -748,7 +764,7 @@ export function useChat() {
         const newScript = await callScriptAI(promptForModel, () => {
           store.updateLastAssistantBlocks(convId, [{ type: 'loading', label: 'AI 正在改写...' }])
         }, ctrl.signal, 'dialect', 'ai_writing_regen')
-        store.updateLastAssistantBlocks(convId, [makeScriptCard(newScript)])
+        store.updateLastAssistantBlocks(convId, scriptDoneBlocks(newScript))
         // 扣费已搬到 Vercel function /api/chat (charge_feature: 'ai_writing_regen' 调 backend /api/billing/charge)
         // 不再前端 chargeCredit, 防止改前端绕过.
         return
@@ -962,7 +978,7 @@ export function useChat() {
           rawText += chunk
           store.updateLastAssistantBlocks(convId, [{ type: 'loading', label: 'AI 正在生成文案...' }])
         }, ctrl.signal, undefined, chargeFeature)
-        store.updateLastAssistantBlocks(convId, [makeScriptCard(script)])
+        store.updateLastAssistantBlocks(convId, scriptDoneBlocks(script))
         // 扣费已搬到 Vercel function (charge_feature 传给 /api/chat, 那边 sync 调 backend /api/billing/charge)
         // 防止改前端绕过. 老的 chargeCredit('ai_writing'/'ai_writing_regen') 不再调.
         return

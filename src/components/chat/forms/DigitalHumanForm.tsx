@@ -385,9 +385,8 @@ export function DigitalHumanForm({ onSubmit, onClose }: Props) {
   const canUploadMore = avatars.length < maxAvatars
 
   const modal = (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
       <div
-        onClick={(e) => e.stopPropagation()}
         className="relative bg-[var(--bg-card)] border border-[var(--border)] rounded-[22px] shadow-ios-lg w-full max-w-lg max-h-[88vh] flex flex-col sheet-enter"
       >
         {/* Header */}
