@@ -186,6 +186,10 @@ def init_db():
         "ALTER TABLE users ADD COLUMN avatar_oss_key TEXT",
         "ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0",
         "ALTER TABLE users ADD COLUMN latest_login_iat INTEGER DEFAULT 0",
+        # 分端登录: 网页 / 桌面 各一个 slot. 同端再登录顶掉同端旧 token, 不影响另一端.
+        # → 桌面 + 网页可同时在线; 网页换浏览器登录会踢掉上一个浏览器.
+        "ALTER TABLE users ADD COLUMN latest_login_iat_web INTEGER DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN latest_login_iat_desktop INTEGER DEFAULT 0",
     ]:
         try:
             conn.execute(col_def)
@@ -377,6 +381,7 @@ class SendSmsRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: str
     password: str
+    client: Optional[str] = 'web'   # 'web' | 'desktop' — 分端互踢用
 
 class VoiceAssetCreateRequest(BaseModel):
     user_id: Optional[int] = None
@@ -408,25 +413,29 @@ class VoiceSynthesizeRequest(BaseModel):
 def get_db():
     return sqlite3.connect("monoi.db")
 
-def create_token(user_id: int, username: str):
-    """创建 JWT + 写 users.latest_login_iat. 严格单设备: 同一用户 iat 必须等于 db 里最新的, 不然 token 被顶掉.
-
-    iat (issued at) 用 int 秒级时间戳. 写 db 前 +1 防止同一秒内顶 token 失败.
+def create_token(user_id: int, username: str, client: str = 'web'):
+    """创建 JWT + 写对应端的 latest_login_iat_<client>. 分端互踢:
+    网页(web) 和 桌面(desktop) 各一个 slot — 同端再登录把同端旧 token 顶掉, 不影响另一端.
+    → 桌面 + 网页可同时在线; 网页换个浏览器登录会把上一个浏览器踢掉.
+    iat 用秒级时间戳; token 里带 client 标记, 校验时跟同端的 latest_login_iat 比.
     """
+    client = 'desktop' if (client or '').strip().lower() == 'desktop' else 'web'
+    col = 'latest_login_iat_desktop' if client == 'desktop' else 'latest_login_iat_web'
     now_ts = int(time.time())
-    # 把之前的 token 顶掉: latest_login_iat = now_ts. 之前所有 token 的 iat < now_ts → 失效
+    # 顶掉同端之前的 token (另一端的 slot 不动)
     try:
         conn = get_db()
-        conn.execute("UPDATE users SET latest_login_iat = ? WHERE id = ?", (now_ts, user_id))
+        conn.execute(f"UPDATE users SET {col} = ?, latest_login_iat = ? WHERE id = ?", (now_ts, now_ts, user_id))
         conn.commit()
         conn.close()
     except Exception as e:
-        print(f"[create_token] 写 latest_login_iat 失败 (ignore): {e}", flush=True)
+        print(f"[create_token] 写 {col} 失败 (ignore): {e}", flush=True)
     expire = datetime.utcnow() + timedelta(days=ACCESS_TOKEN_EXPIRE_DAYS)
     return jwt.encode({
         "sub": str(user_id),
         "username": username,
         "iat": now_ts,
+        "client": client,
         "exp": expire,
     }, SECRET_KEY, algorithm=ALGORITHM)
 
@@ -668,7 +677,7 @@ def login(req: LoginRequest, request: Request):
             raise HTTPException(401, "密码错误")
         try: security.record_login_attempt(email_norm, client_ip, success=True)
         except Exception as e: print(f"[security] record_login_attempt 失败: {e}", flush=True)
-        token = create_token(row[0], row[1])
+        token = create_token(row[0], row[1], req.client)
         return {"success": True, "token": token, "username": row[1]}
     finally:
         conn.close()
@@ -677,6 +686,7 @@ def login(req: LoginRequest, request: Request):
 class LoginSmsRequest(BaseModel):
     phone: str
     sms_code: str
+    client: Optional[str] = 'web'   # 'web' | 'desktop'
 
 
 @app.post("/api/login-sms")
@@ -704,7 +714,7 @@ def login_sms(req: LoginSmsRequest, request: Request):
             raise HTTPException(404, "手机号未注册, 请先注册账号")
         try: security.record_login_attempt(req.phone, client_ip, success=True)
         except Exception as e: print(f"[security] record err: {e}", flush=True)
-        token = create_token(row[0], row[1])
+        token = create_token(row[0], row[1], req.client)
         return {"success": True, "token": token, "username": row[1]}
     finally:
         conn.close()
@@ -735,17 +745,20 @@ def _user_id_from_request(request) -> int:
     except Exception:
         raise HTTPException(401, '无效或过期的 token')
 
-    # 单设备校验: iat 必须不旧于 db.latest_login_iat
+    # 分端校验: token 里的 iat 必须不旧于"同端"的 latest_login_iat_<client>.
+    # 老 token 没 client → 当 web. 同端再登录(换浏览器)才顶, 另一端(桌面/网页)不受影响.
     token_iat = int(data.get('iat') or 0)
+    client = 'desktop' if (data.get('client') == 'desktop') else 'web'
+    col = 'latest_login_iat_desktop' if client == 'desktop' else 'latest_login_iat_web'
     try:
         conn = get_db()
-        cur = conn.execute("SELECT latest_login_iat FROM users WHERE id = ?", (uid,))
+        cur = conn.execute(f"SELECT {col} FROM users WHERE id = ?", (uid,))
         row = cur.fetchone()
         conn.close()
         latest = int(row[0]) if (row and row[0] is not None) else 0
     except Exception as _e:
         # 查 db 失败别一刀切踢人, 放过
-        print(f"[auth] 读 latest_login_iat 失败 uid={uid} err={_e}", flush=True)
+        print(f"[auth] 读 {col} 失败 uid={uid} err={_e}", flush=True)
         latest = 0
 
     # latest=0 说明老用户/老 schema, 还没有任何后登录把这个 iat 写过 → 不强制

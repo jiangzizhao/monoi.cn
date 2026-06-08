@@ -28,15 +28,21 @@ export async function sendSmsCode(
   return proxyRequest('/api/send-sms', { phone, purpose, captcha_verify_param: captchaVerifyParam || null })
 }
 
+// 桌面端 (window.monoiDesktop 存在) 标 'desktop', 否则 'web'.
+// 后端按端互踢: 桌面 + 网页可同时在线, 但网页只保留最新登录的那个浏览器.
+function clientType(): 'desktop' | 'web' {
+  return typeof (window as any).monoiDesktop !== 'undefined' ? 'desktop' : 'web'
+}
+
 export async function login(email: string, password: string) {
-  const data = await proxyRequest('/api/login', { email, password })
+  const data = await proxyRequest('/api/login', { email, password, client: clientType() })
   localStorage.setItem('monoi_token', data.token)
   localStorage.setItem('monoi_username', data.username)
   return data
 }
 
 export async function loginSms(phone: string, sms_code: string) {
-  const data = await proxyRequest('/api/login-sms', { phone, sms_code })
+  const data = await proxyRequest('/api/login-sms', { phone, sms_code, client: clientType() })
   localStorage.setItem('monoi_token', data.token)
   localStorage.setItem('monoi_username', data.username)
   return data
