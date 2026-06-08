@@ -43,7 +43,7 @@ jobs:
           cache: npm
 
       - name: 装依赖
-        run: npm ci
+        run: npm install --no-audit --no-fund
 
       - name: 打包 Windows 安装包
         run: npm run pack:win
