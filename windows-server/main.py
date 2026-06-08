@@ -3172,6 +3172,77 @@ async def desktop_publish(
     return {"success": True, **meta}
 
 
+def _desktop_publish_auth(publish_key: str):
+    """发布接口统一鉴权: 常数时间比对 DESKTOP_PUBLISH_KEY."""
+    import hmac as _hmac
+    _expected = os.environ.get("DESKTOP_PUBLISH_KEY", "")
+    if (not _expected) or len(_expected) < 16 or len(publish_key or "") < 16 \
+            or not _hmac.compare_digest(publish_key, _expected):
+        raise HTTPException(403, "发布密钥无效")
+
+
+def _desktop_safe_name(filename: str) -> str:
+    """桌面发布文件名校验: 只允许 .exe/.yml/.blockmap, 扁平 basename, 无穿越."""
+    n = os.path.basename((filename or "").replace("\\", "/"))
+    if (not n) or "/" in n or ".." in n or not n.lower().endswith((".exe", ".yml", ".blockmap")):
+        raise HTTPException(400, f"文件名不合法: {filename}")
+    return n
+
+
+@app.post("/api/desktop/publish-sign")
+async def desktop_publish_sign(request: Request, publish_key: str = Form(...), filename: str = Form(...)):
+    """大文件(exe)走这里: 签一个 OSS 直传 PUT URL, 客户端 curl -T 直接传 OSS, 不经过本服务器.
+    (91MB 经服务器代理上传在家用慢上行 + 杀软扫描下很容易断, 直传 OSS 才稳)."""
+    security.guard_rate_limit(request, 'desktop_publish', max_calls=30, window_sec=300)
+    _desktop_publish_auth(publish_key)
+    name = _desktop_safe_name(filename)
+    from oss_helper import oss_sign_put
+    from fastapi.responses import PlainTextResponse
+    url = oss_sign_put(f"desktop_release/{name}", content_type="application/octet-stream", expires=3600)
+    return PlainTextResponse(url)
+
+
+@app.post("/api/desktop/publish-finalize")
+async def desktop_publish_finalize(request: Request, publish_key: str = Form(...),
+                                   exe_name: str = Form(...), notes: str = Form("")):
+    """直传 OSS 完成后调这里: 校验 exe + latest.yml 已在 OSS, 更新 desktop_release.json 让新版生效."""
+    import re as _re3, json as _json3, time as _time3
+    security.guard_rate_limit(request, 'desktop_publish', max_calls=30, window_sec=300)
+    _desktop_publish_auth(publish_key)
+    name = _desktop_safe_name(exe_name)
+    _m = _re3.fullmatch(r"monoi-Setup-([0-9]+\.[0-9]+\.[0-9]+)\.exe", name)
+    if not _m:
+        raise HTTPException(400, f"exe 文件名应为 monoi-Setup-x.y.z.exe, 实际 {name}")
+    version = _m.group(1)
+    from oss_helper import _get_bucket
+    b = _get_bucket()
+    if not b.object_exists(f"desktop_release/{name}"):
+        raise HTTPException(400, "exe 还没传到 OSS, 请先完成上传")
+    if not b.object_exists("desktop_release/latest.yml"):
+        raise HTTPException(400, "latest.yml 还没传到 OSS, 请先完成上传")
+    try:
+        _size = b.head_object(f"desktop_release/{name}").content_length
+    except Exception:
+        _size = 0
+
+    _bucket = os.environ.get("OSS_BUCKET", "").strip()
+    _pub = (os.environ.get("OSS_PUBLIC_ENDPOINT", "").strip()
+            or os.environ.get("OSS_ENDPOINT", "").replace("-internal", ""))
+    _host = _pub.replace("https://", "").replace("http://", "").strip("/")
+    meta = {
+        "version": version,
+        "exe_url": f"https://{_bucket}.{_host}/desktop_release/{name}",
+        "size_mb": round((_size or 0) / 1048576, 1),
+        "released_at": _time3.strftime("%Y-%m-%d"),
+        "notes": (notes or "").strip(),
+    }
+    cfg_path = os.path.join(os.path.dirname(__file__), 'desktop_release.json')
+    with open(cfg_path, "w", encoding="utf-8") as f:
+        _json3.dump(meta, f, ensure_ascii=False, indent=2)
+    print(f"[desktop/publish-finalize] 发布 {version} ({meta['size_mb']}MB) 成功", flush=True)
+    return {"success": True, **meta}
+
+
 # ============== 我的录屏 ==============
 
 
