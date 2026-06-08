@@ -26,3 +26,5 @@ dist-electron
 
 # Claude Code 工作目录 (临时, 不 track)
 .claude/worktrees/
+monoi-env-from-windows.txt
+.env

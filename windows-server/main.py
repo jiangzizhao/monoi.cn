@@ -3107,12 +3107,15 @@ def save_my_recording(req: SaveRecordingReq, request: Request):
     user_id = _user_id_from_request(request)
     if not req.oss_key.strip():
         raise HTTPException(400, 'oss_key 不能为空')
+    # 用户传入的 key 强制落在录屏前缀内 — 否则可登记任意对象(别的前缀/别人的文件)再经
+    # /api/recordings 列表签出 GET URL 越权读取. 正常录屏上传永远用 prefix='recordings'. 不符合 403.
+    rec_key = _validate_user_oss_key(req.oss_key.strip(), 'recordings')
     conn = get_db()
     cur = conn.execute("""
         INSERT INTO user_recording (user_id, oss_key, filename, mime, duration_sec, size_bytes, title, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     """, (
-        user_id, req.oss_key.strip(), req.filename or '', req.mime or '',
+        user_id, rec_key, req.filename or '', req.mime or '',
         req.duration_sec or 0, req.size_bytes or 0, (req.title or '').strip(),
         time.time(),
     ))

@@ -264,10 +264,33 @@ export default function RecordTab() {
       // 3. 实时标注 (箭头/笔/字) 画在最上层 → 进录像
       if (annShapesRef.current.length) drawAnnotations(ctx, annShapesRef.current)
 
-      rafRef.current = requestAnimationFrame(draw)
     }
-    rafRef.current = requestAnimationFrame(draw)
-    return () => cancelAnimationFrame(rafRef.current)
+
+    // 用 Web Worker 定时器驱动合成循环, 而不是 requestAnimationFrame:
+    // 浏览器会在标签页/窗口切到后台时把 rAF 节流到 ~0fps, 导致用户切去别的界面
+    // 演示时, 录制画面卡在切走那一帧. Worker 定时器不受后台节流影响, 切走也持续合成.
+    let worker: Worker | null = null
+    let workerUrl = ''
+    let fallbackId = 0
+    try {
+      workerUrl = URL.createObjectURL(new Blob(
+        ["let id;onmessage=function(e){if(e.data==='start'){id=setInterval(function(){postMessage(0)},1000/30)}else{clearInterval(id)}}"],
+        { type: 'application/javascript' },
+      ))
+      worker = new Worker(workerUrl)
+      worker.onmessage = () => draw()
+      worker.postMessage('start')
+    } catch {
+      // Worker 不可用 (极少数环境) 时退回 setInterval, 至少保证前台正常
+      fallbackId = window.setInterval(draw, 1000 / 30)
+    }
+    draw() // 先画一帧, 避免首帧空白
+    return () => {
+      if (worker) { worker.postMessage('stop'); worker.terminate() }
+      if (workerUrl) URL.revokeObjectURL(workerUrl)
+      if (fallbackId) clearInterval(fallbackId)
+      cancelAnimationFrame(rafRef.current)
+    }
   }, [phase, pipShape, pipPos, pipSize, bgMode, outputRatio])
 
   useEffect(() => {
