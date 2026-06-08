@@ -129,7 +129,9 @@ function init(): Promise<void> {
           },
           onBizResultCallback: (bizResult: boolean) => {
             console.log('[captcha] onBizResultCallback bizResult=', bizResult)
-            finishPending(bizResult ? { ok: true } : { ok: false, error: '滑块未通过, 请重试' })
+            // 走到这里滑块其实已经通过了 (captchaResult=true). bizResult=false 是"业务"失败
+            // (短信太频繁/发送失败/该网络段次数过多等) — 别再误报"滑块未通过", 把真实原因透出来.
+            finishPending(bizResult ? { ok: true } : { ok: false, error: _captured?.error || '发送失败, 请稍后重试' })
           },
           // 用户关闭/取消弹窗时 SDK 触发 (要不没这回调 _pendingResolve 永远卡, 按钮"发送中"卡死)
           cancelCallback: () => {
