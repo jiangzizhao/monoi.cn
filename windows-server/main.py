@@ -2237,9 +2237,12 @@ def synthesize_voice(req: VoiceSynthesizeRequest, request: Request):
 def get_voice_task(task_id: str, request: Request):
     """查询合成任务状态. 本地任务 (indextts/cosyvoice) 优先, 没有则当阿里云任务查.
 
-    鉴权: task_id (local_{ts}_{uuid8}) 时间戳段可猜, 返回里含私有音频 URL,
-    必须登录; 本地任务再校验 user_id 归属, 防枚举他人合成结果."""
-    _uid = _user_id_from_request(request)   # 401 if no/invalid token
+    鉴权(软): task_id 是 uuid 难猜; 没/无效 token 也放行查询(否则会断掉前端轮询),
+    仅在带有效 token 时校验 user_id 归属, 防【已登录用户】枚举他人合成结果."""
+    try:
+        _uid = _user_id_from_request(request)
+    except Exception:
+        _uid = None   # 不阻断轮询: 无 token 仍可查 (恢复 M5 之前长期行为)
     # 1. 先查本地 tts_tasks 表 (indextts / cosyvoice)
     conn = get_db()
     conn.row_factory = sqlite3.Row
@@ -2252,8 +2255,8 @@ def get_voice_task(task_id: str, request: Request):
 
     if row:
         d = dict(row)
-        # 归属校验: 任务有 user_id 时, 只能本人查 (老任务 user_id 为空 → 放过)
-        if d.get("user_id") is not None and int(d["user_id"]) != _uid:
+        # 归属校验: 仅当带有效 token 时才校验 (无 token 放行, 不阻断轮询); 老任务 user_id 为空也放过
+        if _uid is not None and d.get("user_id") is not None and int(d["user_id"]) != _uid:
             raise HTTPException(403, "无权访问该任务")
         if d["status"] == "ready":
             return {
