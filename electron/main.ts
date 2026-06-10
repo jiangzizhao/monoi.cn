@@ -56,6 +56,8 @@ function createWindow() {
       nodeIntegration: false,                       // 不让网页直接用 Node
       sandbox: false,                               // preload 需要 Node API (Playwright 等)
       webSecurity: true,
+      backgroundThrottling: false,                  // 🔴 录屏关键: 窗口切到后台时不节流渲染/计时器,
+                                                    // 否则用户切去操作别的窗口演示时, 录的合成画面会卡住/停住.
     },
   })
 

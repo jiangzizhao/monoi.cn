@@ -1,7 +1,7 @@
 {
   "name": "monoi",
   "private": true,
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "monoi 视频创作 — 桌面端 (Electron 壳, 内容来自 monoi.cn)",
   "author": "monoi.cn",
   "main": "dist-electron/main.js",
