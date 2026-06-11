@@ -174,11 +174,10 @@ function SentenceRow({ item, index, selected, onToggle, onRefresh, onRotate, onA
           <button
             onClick={() => fileRef.current?.click()}
             disabled={uploading}
-            className="flex items-center gap-1 px-2 py-1.5 rounded-lg border border-[var(--border)] text-[var(--text-2)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer disabled:opacity-50"
+            className="p-1.5 rounded-lg text-[var(--text-3)] hover:text-[var(--text-2)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer disabled:opacity-50"
             title="上传你自己的视频, 替换这句的素材"
           >
             {uploading ? <Loader2 size={13} className="animate-spin"/> : <Upload size={13}/>}
-            <span className="text-xs whitespace-nowrap">用自己的</span>
           </button>
           <input
             ref={fileRef}
@@ -191,7 +190,7 @@ function SentenceRow({ item, index, selected, onToggle, onRefresh, onRotate, onA
               if (fileRef.current) fileRef.current.value = ''
             }}
           />
-          <button onClick={onRotate} className="p-1.5 rounded-lg text-[var(--text-3)] hover:text-[var(--text-2)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer" title="换一个素材">
+          <button onClick={onRotate} className="p-1.5 rounded-lg text-[var(--text-3)] hover:text-[var(--text-2)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer" title="换一批">
             <RefreshCw size={13}/>
           </button>
           <button onClick={() => setEditing(v => !v)} className="p-1.5 rounded-lg text-[var(--text-3)] hover:text-[var(--text-2)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer" title="编辑关键词">
@@ -218,14 +217,14 @@ function SentenceRow({ item, index, selected, onToggle, onRefresh, onRotate, onA
               {[...Array(6)].map((_, i) => <div key={i} className="aspect-video rounded-lg bg-[var(--bg-hover)] animate-pulse"/>)}
             </div>
           ) : item.assets && item.assets.length > 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {/* 一句只展示 1 个素材 (最匹配的); 想换点"换一个", 想用自己的点"用自己的" */}
-              {item.assets.slice(0, 1).map(a => (
+            <div className="grid grid-cols-3 gap-2">
+              {/* 一句展示 3 个素材 (一排); 默认选中第 1 个, 点别的可换; "换一批"出下一组; "上传"用自己的 */}
+              {item.assets.slice(0, 3).map(a => (
                 <AssetThumb key={`${a.source}-${a.id}`} asset={a} selected={isSelected(a)} onSelect={() => onToggle(a)}/>
               ))}
             </div>
           ) : (
-            <div className="text-xs text-[var(--text-3)] py-2">暂无结果，试试"换一个"或修改关键词, 或"用自己的"上传</div>
+            <div className="text-xs text-[var(--text-3)] py-2">暂无结果，试试"换一批"或修改关键词, 或上传自己的</div>
           )}
         </div>
       )}
@@ -259,12 +258,13 @@ export function FootageGrid({ data, videoUrl, segmentTimes, narrationOssKey, onU
     setSelected(prev => ({ ...prev, [index]: merged.length ? [merged[0]] : [] }))
   }
 
-  // 换一个: 把已搜到的这批往后转一格, 露出下一个 (即时, 不重搜); 不足 2 个才重搜
+  // 换一批: 一排显示 3 个, 这里把已搜到的批次往后转 3 格, 露出下一组 3 个 (即时, 不重搜);
+  // 不足 4 个 (转了也没新东西) 才重搜.
   const rotate = (index: number) => {
     const it = data[index]
     const a = it.assets || []
-    if (a.length < 2) { refresh(index, it.search_en?.[0] || ''); return }
-    const rotated = [...a.slice(1), a[0]]
+    if (a.length < 4) { refresh(index, it.search_en?.[0] || ''); return }
+    const rotated = [...a.slice(3), ...a.slice(0, 3)]
     onUpdate(data.map((x, i) => i === index ? { ...x, assets: rotated } : x))
     setSelected(prev => ({ ...prev, [index]: [rotated[0]] }))
   }
@@ -280,14 +280,12 @@ export function FootageGrid({ data, videoUrl, segmentTimes, narrationOssKey, onU
     })
   }, [data])
 
+  // 单选: 一句只留 1 个素材. 展示 3 个里点哪个就换成哪个; 点已选中的那个 = 取消 (这句不用素材).
   const toggle = (sentenceIdx: number, asset: VideoAsset) => {
     setSelected(prev => {
-      const list = prev[sentenceIdx] || []
-      const exists = list.some(s => s.id === asset.id && s.source === asset.source)
-      const next = exists
-        ? list.filter(s => !(s.id === asset.id && s.source === asset.source))
-        : [...list, asset]
-      return { ...prev, [sentenceIdx]: next }
+      const cur = prev[sentenceIdx] || []
+      const isSame = cur.length === 1 && cur[0].id === asset.id && cur[0].source === asset.source
+      return { ...prev, [sentenceIdx]: isSame ? [] : [asset] }
     })
   }
 
