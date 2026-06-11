@@ -758,7 +758,8 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
               <div className="absolute top-0 left-0 right-0 pointer-events-none border-b border-black/25" style={{ height: 56, backgroundImage: `url("${data.sprite_url}")`, backgroundSize: '100% 100%', backgroundRepeat: 'no-repeat' }}/>
             )}
             {/* 声纹波形 (轨道下半部; 没缩略图就铺满整条) */}
-            <canvas ref={waveCanvasRef} className="absolute left-0 right-0" style={{ top: data.sprite_url ? 56 : 0, bottom: 0 }} />
+            {/* w-full 关键: canvas 是替换元素, 只 left-0 right-0 不会被拉满 → 跟画面帧错位; 显式 100% 宽才跟着放大 */}
+            <canvas ref={waveCanvasRef} className="absolute left-0" style={{ width: '100%', top: data.sprite_url ? 56 : 0, bottom: 0 }} />
             {/* 拖选高亮 (整轨高, 跨画面帧+波形) */}
             {dragSel && Math.abs(dragSel.b - dragSel.a) > 0.001 && (
               <div className="absolute top-0 bottom-0 bg-white/20 border-x border-white/70 pointer-events-none" style={{ left: `${Math.min(dragSel.a, dragSel.b) / (data.duration || 1) * 100}%`, width: `${Math.abs(dragSel.b - dragSel.a) / (data.duration || 1) * 100}%` }}/>
