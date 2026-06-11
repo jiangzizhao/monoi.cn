@@ -217,9 +217,9 @@ function SentenceRow({ item, index, selected, onToggle, onRefresh, onRotate, onA
               {[...Array(6)].map((_, i) => <div key={i} className="aspect-video rounded-lg bg-[var(--bg-hover)] animate-pulse"/>)}
             </div>
           ) : item.assets && item.assets.length > 0 ? (
-            <div className="grid grid-cols-3 gap-2">
-              {/* 一句展示 3 个素材 (一排); 默认选中第 1 个, 点别的可换; "换一批"出下一组; "上传"用自己的 */}
-              {item.assets.slice(0, 3).map(a => (
+            <div className="grid grid-cols-2 gap-2">
+              {/* 一句展示 2 个素材 (一排); 默认选中第 1 个, 点别的可换; "换一批"出下一组; "上传"用自己的 */}
+              {item.assets.slice(0, 2).map(a => (
                 <AssetThumb key={`${a.source}-${a.id}`} asset={a} selected={isSelected(a)} onSelect={() => onToggle(a)}/>
               ))}
             </div>
@@ -258,13 +258,13 @@ export function FootageGrid({ data, videoUrl, segmentTimes, narrationOssKey, onU
     setSelected(prev => ({ ...prev, [index]: merged.length ? [merged[0]] : [] }))
   }
 
-  // 换一批: 一排显示 3 个, 这里把已搜到的批次往后转 3 格, 露出下一组 3 个 (即时, 不重搜);
-  // 不足 4 个 (转了也没新东西) 才重搜.
+  // 换一批: 一排显示 2 个, 这里把已搜到的批次往后转 2 格, 露出下一组 2 个 (即时, 不重搜);
+  // 不足 3 个 (转了也没新东西) 才重搜.
   const rotate = (index: number) => {
     const it = data[index]
     const a = it.assets || []
-    if (a.length < 4) { refresh(index, it.search_en?.[0] || ''); return }
-    const rotated = [...a.slice(3), ...a.slice(0, 3)]
+    if (a.length < 3) { refresh(index, it.search_en?.[0] || ''); return }
+    const rotated = [...a.slice(2), ...a.slice(0, 2)]
     onUpdate(data.map((x, i) => i === index ? { ...x, assets: rotated } : x))
     setSelected(prev => ({ ...prev, [index]: [rotated[0]] }))
   }
