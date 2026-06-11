@@ -16,13 +16,16 @@ import * as path from 'path'
 import { publish, detectEdgePath, type PublishReq } from './publish'
 import { initAutoUpdater, setUpdaterWindow } from './updater'
 
-// 全局鼠标钩子 (录屏「点哪自动放大」用) — 原生模块, 加载失败不致命, 只是该特性不可用.
+// 全局键盘钩子 (录屏「按 F8 放大到鼠标位置」用) — 原生模块, 加载失败不致命, 只是该特性不可用.
 let uIOhook: { on: (ev: string, cb: (e: unknown) => void) => void; start: () => void; stop: () => void } | null = null
+let UiohookKey: Record<string, number> | null = null
 try {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
-  uIOhook = require('uiohook-napi').uIOhook
+  const _uh = require('uiohook-napi')
+  uIOhook = _uh.uIOhook
+  UiohookKey = _uh.UiohookKey
 } catch (err) {
-  console.warn('[click-zoom] uiohook-napi 未安装/加载失败, 录屏点哪放大不可用:', err)
+  console.warn('[click-zoom] uiohook-napi 未安装/加载失败, 录屏 F8 放大不可用:', err)
 }
 
 // 单实例锁: 第二次启动会激活已有窗口, 而不是开第二个
@@ -151,16 +154,18 @@ let clickHookStarted = false
 function startClickZoomHook() {
   if (!uIOhook || clickHookStarted) return
   try {
-    uIOhook.on('mousedown', () => {
+    // 录屏放大: 按 F8 → 放大到鼠标当前位置 / 再按 F8 → 缩回. (改掉原来的"鼠标双击" — 录屏时人在别窗口操作太容易误触, 整段录废)
+    uIOhook.on('keydown', (e: unknown) => {
       if (!mainWin || mainWin.isDestroyed()) return
+      if (!UiohookKey || (e as { keycode?: number })?.keycode !== UiohookKey.F8) return
       try {
         const pt = screen.getCursorScreenPoint()
         const disp = screen.getDisplayNearestPoint(pt)
         const b = disp.bounds
         const xPct = b.width ? (pt.x - b.x) / b.width : 0.5
         const yPct = b.height ? (pt.y - b.y) / b.height : 0.5
-        mainWin.webContents.send('desktop:screen-click', { xPct, yPct })
-      } catch { /* 取坐标失败忽略这次点击 */ }
+        mainWin.webContents.send('desktop:screen-click', { xPct, yPct, fromKey: true })
+      } catch { /* 取坐标失败忽略 */ }
     })
     uIOhook.start()
     clickHookStarted = true
