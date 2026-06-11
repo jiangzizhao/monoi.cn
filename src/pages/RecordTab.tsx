@@ -114,7 +114,7 @@ export default function RecordTab() {
   // 桌面端「点哪自动放大」: electron 全局监听鼠标点击 → 发坐标过来 → 画布合成时缩放到该点.
   // 网页(无 window.monoiDesktop)下整个特性自动关闭, 零副作用.
   const isDesktop = typeof (window as any).monoiDesktop?.onScreenClick === 'function'
-  const [clickZoom, setClickZoom] = useState(true)   // 桌面端默认开
+  const [clickZoom, setClickZoom] = useState(false)  // 默认关: 录屏时人在别的窗口操作, 误双击会放大且不自动缩回, 整段录废. 想用再到 PIP 设置里手动开
   // 桌面端"选窗口"面板
   const [showSourcePicker, setShowSourcePicker] = useState(false)
   const [sources, setSources] = useState<{ id: string; name: string; isScreen: boolean; thumbnail: string }[]>([])
