@@ -661,6 +661,10 @@ export function useChat() {
           const { segments } = await subtitleTranscribe({ video_url: videoUrl })
           if (!segments || segments.length === 0) throw new Error('没识别到语音')
           const segs = mergeForFootage(segments)   // 合并成画面单元(≥9字/到句末), 避免 2 字一镜瞎匹配
+          // 合成要用: 段时间 + 数字人视频的 oss_key (从签名 URL 解析路径). 有了这俩, FootageGrid 才显示"预览效果→合成"
+          const segmentTimes = segs.map(s => ({ start: s.start, end: s.end }))
+          let dhOssKey = ''
+          try { dhOssKey = new URL(videoUrl).pathname.replace(/^\/+/, '') } catch {}
           const inputs = segs.map(s => ({ text: s.text, duration: Math.max(0.5, s.end - s.start) }))
           store.updateLastAssistantBlocks(convId, [{ type: 'loading', label: `AI 正在为 ${inputs.length} 个镜头提取画面词...` }])
           const keywords = await callFootageAIBySegments(inputs, ctrl.signal)
@@ -675,7 +679,7 @@ export function useChat() {
           }))
           store.updateLastAssistantBlocks(convId, [
             { type: 'text', content: `✓ 按视频语音拆出 ${items.length} 镜, 正在并发拉素材...` },
-            { type: 'footage_grid', data: items },
+            { type: 'footage_grid', data: items, video_url: videoUrl, segment_times: segmentTimes, narration_oss_key: dhOssKey },
           ])
           const updated = [...items]
           for (let i = 0; i < updated.length; i++) {
@@ -685,13 +689,13 @@ export function useChat() {
             updated[i] = { ...updated[i], assets: [...p, ...px], loadingAssets: false }
             store.updateLastAssistantBlocks(convId, [
               { type: 'text', content: `拉素材中... (${i + 1}/${items.length})` },
-              { type: 'footage_grid', data: [...updated] },
+              { type: 'footage_grid', data: [...updated], video_url: videoUrl, segment_times: segmentTimes, narration_oss_key: dhOssKey },
             ])
             await new Promise(r => setTimeout(r, 200))
           }
           store.updateLastAssistantBlocks(convId, [
-            { type: 'text', content: `✓ 匹配完成 ${items.length} 镜. 每镜挑你喜欢的, 可拖删/换关键词重搜, 选好后导出清单或下载到本地剪辑里用.` },
-            { type: 'footage_grid', data: [...updated] },
+            { type: 'text', content: `✓ 匹配完成 ${items.length} 镜. 默认每镜选好 1 个, 点"预览效果"可一键合成成片(b-roll 盖画面 + 数字人作小窗); 也能换素材/上传自己的/导出清单.` },
+            { type: 'footage_grid', data: [...updated], video_url: videoUrl, segment_times: segmentTimes, narration_oss_key: dhOssKey },
           ])
         } catch (e: any) {
           // 兜底: 语音识别没成 → 引导手动贴文案 (AI 拆句路径)
