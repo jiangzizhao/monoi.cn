@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { RefreshCw, Pencil, Download, Check, ExternalLink, Play, Upload, Loader2, Package, Lock } from 'lucide-react'
 import JSZip from 'jszip'
@@ -89,9 +89,10 @@ function AssetThumb({ asset, selected, onSelect }: { asset: VideoAsset; selected
   )
 }
 
-function SentenceRow({ item, index, selected, onToggle, onRefresh, onAddAsset }: {
+function SentenceRow({ item, index, selected, onToggle, onRefresh, onRotate, onAddAsset }: {
   item: FootageSentenceItem; index: number; selected: VideoAsset[]
   onToggle: (a: VideoAsset) => void; onRefresh: (kw: string) => void
+  onRotate: () => void
   onAddAsset: (asset: VideoAsset) => void
 }) {
   const isSelected = (a: VideoAsset) => selected.some(s => s.id === a.id && s.source === a.source)
@@ -173,10 +174,11 @@ function SentenceRow({ item, index, selected, onToggle, onRefresh, onAddAsset }:
           <button
             onClick={() => fileRef.current?.click()}
             disabled={uploading}
-            className="p-1.5 rounded-lg text-[var(--text-3)] hover:text-[var(--text-2)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer disabled:opacity-50"
-            title="上传你自己的视频"
+            className="flex items-center gap-1 px-2 py-1.5 rounded-lg border border-[var(--border)] text-[var(--text-2)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer disabled:opacity-50"
+            title="上传你自己的视频, 替换这句的素材"
           >
             {uploading ? <Loader2 size={13} className="animate-spin"/> : <Upload size={13}/>}
+            <span className="text-xs whitespace-nowrap">用自己的</span>
           </button>
           <input
             ref={fileRef}
@@ -189,7 +191,7 @@ function SentenceRow({ item, index, selected, onToggle, onRefresh, onAddAsset }:
               if (fileRef.current) fileRef.current.value = ''
             }}
           />
-          <button onClick={() => onRefresh(kw)} className="p-1.5 rounded-lg text-[var(--text-3)] hover:text-[var(--text-2)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer" title="换一批">
+          <button onClick={onRotate} className="p-1.5 rounded-lg text-[var(--text-3)] hover:text-[var(--text-2)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer" title="换一个素材">
             <RefreshCw size={13}/>
           </button>
           <button onClick={() => setEditing(v => !v)} className="p-1.5 rounded-lg text-[var(--text-3)] hover:text-[var(--text-2)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer" title="编辑关键词">
@@ -216,13 +218,14 @@ function SentenceRow({ item, index, selected, onToggle, onRefresh, onAddAsset }:
               {[...Array(6)].map((_, i) => <div key={i} className="aspect-video rounded-lg bg-[var(--bg-hover)] animate-pulse"/>)}
             </div>
           ) : item.assets && item.assets.length > 0 ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-              {item.assets.map(a => (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {/* 一句只展示 1 个素材 (最匹配的); 想换点"换一个", 想用自己的点"用自己的" */}
+              {item.assets.slice(0, 1).map(a => (
                 <AssetThumb key={`${a.source}-${a.id}`} asset={a} selected={isSelected(a)} onSelect={() => onToggle(a)}/>
               ))}
             </div>
           ) : (
-            <div className="text-xs text-[var(--text-3)] py-2">暂无结果，试试修改关键词</div>
+            <div className="text-xs text-[var(--text-3)] py-2">暂无结果，试试"换一个"或修改关键词, 或"用自己的"上传</div>
           )}
         </div>
       )}
@@ -250,8 +253,32 @@ export function FootageGrid({ data, videoUrl, segmentTimes, narrationOssKey, onU
     const updated = data.map((it, i) => i === index ? { ...it, loadingAssets: true } : it)
     onUpdate(updated)
     const [p, px] = await Promise.all([searchPexels(keyword, 6), searchPixabay(keyword, 3)])
-    onUpdate(data.map((it, i) => i === index ? { ...it, assets: [...p, ...px], loadingAssets: false } : it))
+    const merged = [...p, ...px]
+    onUpdate(data.map((it, i) => i === index ? { ...it, assets: merged, loadingAssets: false } : it))
+    // 改完关键词重搜后, 自动选中新的第 1 个 (一句一个)
+    setSelected(prev => ({ ...prev, [index]: merged.length ? [merged[0]] : [] }))
   }
+
+  // 换一个: 把已搜到的这批往后转一格, 露出下一个 (即时, 不重搜); 不足 2 个才重搜
+  const rotate = (index: number) => {
+    const it = data[index]
+    const a = it.assets || []
+    if (a.length < 2) { refresh(index, it.search_en?.[0] || ''); return }
+    const rotated = [...a.slice(1), a[0]]
+    onUpdate(data.map((x, i) => i === index ? { ...x, assets: rotated } : x))
+    setSelected(prev => ({ ...prev, [index]: [rotated[0]] }))
+  }
+
+  // 每句默认自动选中第 1 个素材 (用户没手动动过的句子) — "一句给一个", 不用逐句点
+  useEffect(() => {
+    setSelected(prev => {
+      const next = { ...prev }; let changed = false
+      data.forEach((it, i) => {
+        if (it.assets && it.assets.length > 0 && next[i] === undefined) { next[i] = [it.assets[0]]; changed = true }
+      })
+      return changed ? next : prev
+    })
+  }, [data])
 
   const toggle = (sentenceIdx: number, asset: VideoAsset) => {
     setSelected(prev => {
@@ -369,11 +396,12 @@ export function FootageGrid({ data, videoUrl, segmentTimes, narrationOssKey, onU
           selected={selected[i] || []}
           onToggle={a => toggle(i, a)}
           onRefresh={kw => refresh(i, kw)}
+          onRotate={() => rotate(i)}
           onAddAsset={a => {
-            // 加到这一句的 assets 顶部, 同时自动选上 (用户多半上传完就要用)
+            // 上传的放这句 assets 顶部并直接作为这句唯一选中 (一句一个)
             const newData = data.map((it, j) => j === i ? { ...it, assets: [a, ...(it.assets || [])] } : it)
             onUpdate(newData)
-            toggle(i, a)
+            setSelected(prev => ({ ...prev, [i]: [a] }))
           }}/>
       ))}
       {selTotal > 0 && (
