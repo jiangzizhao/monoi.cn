@@ -57,6 +57,23 @@ const RECORD_PRESETS = [
   { id: 'camera_only',       label: '仅摄像头',        desc: '只录自己, 没屏幕 (vlog)' },
 ]
 
+// 放大/缩回时"叮"一声 — 录屏时人在别的窗口操作, 靠声音知道放没放大 (Web Audio 短促正弦, 不依赖音频文件)
+function playZoomBeep() {
+  try {
+    const AC = (window as any).AudioContext || (window as any).webkitAudioContext
+    if (!AC) return
+    const ac = new AC()
+    const o = ac.createOscillator(); const g = ac.createGain()
+    o.connect(g); g.connect(ac.destination)
+    o.type = 'sine'; o.frequency.value = 880
+    g.gain.setValueAtTime(0.0001, ac.currentTime)
+    g.gain.exponentialRampToValueAtTime(0.12, ac.currentTime + 0.01)
+    g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + 0.13)
+    o.start(); o.stop(ac.currentTime + 0.14)
+    o.onended = () => { try { ac.close() } catch { /* noop */ } }
+  } catch { /* noop */ }
+}
+
 export default function RecordTab() {
   const navigate = useNavigate()
   const [phase, setPhase] = useState<Phase>('setup')
@@ -114,7 +131,7 @@ export default function RecordTab() {
   // 桌面端「点哪自动放大」: electron 全局监听鼠标点击 → 发坐标过来 → 画布合成时缩放到该点.
   // 网页(无 window.monoiDesktop)下整个特性自动关闭, 零副作用.
   const isDesktop = typeof (window as any).monoiDesktop?.onScreenClick === 'function'
-  const [clickZoom, setClickZoom] = useState(false)  // 默认关: 录屏时人在别的窗口操作, 误双击会放大且不自动缩回, 整段录废. 想用再到 PIP 设置里手动开
+  const [clickZoom, setClickZoom] = useState(true)   // 默认开: 触发已改成"按 F8"(主动按键, 不会误触), 安全
   // 桌面端"选窗口"面板
   const [showSourcePicker, setShowSourcePicker] = useState(false)
   const [sources, setSources] = useState<{ id: string; name: string; isScreen: boolean; thumbnail: string }[]>([])
@@ -135,28 +152,23 @@ export default function RecordTab() {
   const clickZoomRef = useRef(clickZoom)
   useEffect(() => { clickZoomRef.current = clickZoom }, [clickZoom])
 
-  // 订阅桌面端鼠标点击 → 双击才放大 (只在录屏/预览 + 屏幕模式 + 开关打开时生效)
+  // 订阅桌面端: 按 F8 放大到鼠标当前位置 / 再按 F8 缩回 (桌面壳只在 F8 时发 fromKey 事件).
+  // 老桌面版会发普通鼠标点击事件(无 fromKey) → 这里忽略, 防误触.
   useEffect(() => {
     if (!isDesktop) return
     const desktop = (window as any).monoiDesktop
-    const unsub = desktop.onScreenClick((d: { xPct: number; yPct: number }) => {
+    const unsub = desktop.onScreenClick((d: { xPct: number; yPct: number; fromKey?: boolean }) => {
       if (!clickZoomRef.current) return
+      if (!d.fromKey) return     // 只认 F8 (fromKey); 老版的鼠标点击事件忽略
       const z = zoomRef.current
-      const now = performance.now()
-      // 双击放大: 两次点击间隔 < 400ms 且位置接近 → 当成双击, 切换放大/缩回; 单击不放大.
-      const isDouble = now - z.lastT < 400 && Math.abs(d.xPct - z.lastX) < 0.05 && Math.abs(d.yPct - z.lastY) < 0.05
-      if (isDouble) {
-        if (z.targetScale > 1) {
-          z.targetScale = 1                                  // 已放大 → 缩回
-        } else {
-          z.targetScale = 1.9                                // 放大到双击的位置
-          z.tFx = Math.min(0.92, Math.max(0.08, d.xPct))
-          z.tFy = Math.min(0.92, Math.max(0.08, d.yPct))
-        }
-        z.lastT = 0                                          // 重置, 防三连击误触
+      if (z.targetScale > 1) {
+        z.targetScale = 1                                    // 已放大 → 缩回
       } else {
-        z.lastT = now; z.lastX = d.xPct; z.lastY = d.yPct    // 记下这次, 等可能的第二击
+        z.targetScale = 1.9                                  // 放大到鼠标当前位置
+        z.tFx = Math.min(0.92, Math.max(0.08, d.xPct))
+        z.tFy = Math.min(0.92, Math.max(0.08, d.yPct))
       }
+      playZoomBeep()                                         // 叮一声: 人在别的窗口操作也知道放没放大
     })
     return () => { try { unsub && unsub() } catch { /* noop */ } }
   }, [isDesktop])
@@ -869,7 +881,7 @@ export default function RecordTab() {
               <div className="text-sm font-medium">选要录的窗口 / 屏幕</div>
               <button onClick={() => setShowSourcePicker(false)} className="text-[var(--text-3)] hover:text-[var(--text)] cursor-pointer text-lg leading-none">✕</button>
             </div>
-            <div className="px-5 py-2 text-[11px] text-[var(--text-3)] flex-shrink-0">选「窗口」录单个应用最干净 (不会套娃); 选「整个屏幕」会录到桌面上所有东西。建议把要讲的应用先最大化, 双击放大最准。</div>
+            <div className="px-5 py-2 text-[11px] text-[var(--text-3)] flex-shrink-0">选「窗口」录单个应用最干净 (不会套娃); 选「整个屏幕」会录到桌面上所有东西。建议把要讲的应用先最大化, 按 F8 放大到鼠标处最准。</div>
             <div className="flex-1 overflow-y-auto px-5 py-3">
               {sources.length === 0 ? (
                 <div className="text-sm text-[var(--text-3)] text-center py-10">没列到窗口。请先打开你要讲的应用 (PPT / 文档 等), 再回来点「录屏幕」。</div>
@@ -1171,8 +1183,8 @@ export default function RecordTab() {
                     <>
                       <div className="flex items-center justify-between">
                         <div>
-                          <div className="text-xs font-medium text-[var(--text-2)]">双击放大</div>
-                          <div className="text-[10px] text-[var(--text-3)]">录屏时在想放大的地方双击 → 放大到那儿; 再双击 → 缩回。单击不放大。</div>
+                          <div className="text-xs font-medium text-[var(--text-2)]">按 F8 放大</div>
+                          <div className="text-[10px] text-[var(--text-3)]">录屏时把鼠标移到想放大处, 按 F8 → 放大到鼠标那儿(并"叮"一声); 再按 F8 → 缩回。(需桌面版 0.1.4+)</div>
                         </div>
                         <div className="flex gap-2 text-xs">
                           <button onClick={() => setClickZoom(true)} className={`px-3 py-1 rounded-lg border cursor-pointer transition-colors ${clickZoom ? 'border-[var(--text)] bg-[var(--text)] text-[var(--bg)]' : 'border-[var(--border)] text-[var(--text-2)]'}`}>开</button>
