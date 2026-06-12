@@ -274,7 +274,9 @@ export function DigitalHumanForm({ onSubmit, onClose }: Props) {
         return
       }
       try {
-        const r = await fetch('/api/proxy?path=' + encodeURIComponent('/api/digital-human/task/' + code))
+        const r = await fetch('/api/proxy?path=' + encodeURIComponent('/api/digital-human/task/' + code), {
+          headers: { Authorization: `Bearer ${getToken() || ''}` },
+        })
         const data: TaskResp = await r.json()
         if (data.status === 'completed' && data.video_url) {
           stopPolling()

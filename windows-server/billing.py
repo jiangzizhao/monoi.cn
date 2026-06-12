@@ -1412,6 +1412,17 @@ _ALLOWED_CHARGE_FEATURES = {
     'footage_download', 'cover_download', 'cutout_download',
 }
 
+# 固定单价功能的【服务端权威价目表】: 这些功能每次就扣固定积分, 不信前端报的 amount
+# (否则抓包把 amount 改小就能少扣). footage_download 是唯一按用户选的素材数量变动的, 单独兜底.
+_CHARGE_FIXED_COST = {
+    'ai_writing': 3,
+    'ai_writing_regen': 3,
+    'footage_match': 5,
+    'cover_download': 2,
+    'cutout_download': 2,
+}
+_FOOTAGE_UNIT_COST = 2     # footage_download: 2 积分/视频
+
 
 @router.post("/charge")
 def charge(req: ChargeRequest, request: Request):
@@ -1420,11 +1431,20 @@ def charge(req: ChargeRequest, request: Request):
     user_id = get_current_user_id(request)
     if req.feature not in _ALLOWED_CHARGE_FEATURES:
         raise HTTPException(400, f"不允许扣费的 feature: {req.feature}")
-    if req.amount <= 0 or req.amount > 200:
-        raise HTTPException(400, "amount 必须在 1-200 之间")
-    consume_credits(user_id, req.feature, req.amount, ref_id=req.ref_id)
+
+    # 服务端权威定价: 固定单价的功能直接用价目表, 忽略前端报的 amount (防抓包改小少扣).
+    if req.feature in _CHARGE_FIXED_COST:
+        amount = _CHARGE_FIXED_COST[req.feature]
+    else:
+        # footage_download: 按用户选的素材数量 ×2, 数量在前端. 服务端做范围 + 整除单价兜底,
+        # 挡住明显篡改 (负数/超大/非单价整数倍), 防越界刷.
+        amount = int(req.amount or 0)
+        if amount <= 0 or amount > 200 or amount % _FOOTAGE_UNIT_COST != 0:
+            raise HTTPException(400, f"amount 非法 (应为 {_FOOTAGE_UNIT_COST} 的倍数, 1-200)")
+
+    consume_credits(user_id, req.feature, amount, ref_id=req.ref_id)
     bal = get_balance(user_id)
-    return {'success': True, 'balance': bal}
+    return {'success': True, 'balance': bal, 'charged': amount}
 
 
 def _require_admin(user_id: int):

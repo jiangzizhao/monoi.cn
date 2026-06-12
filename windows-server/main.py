@@ -2526,10 +2526,12 @@ async def subtitle_transcribe_proxy(request: Request):
         body = await request.json()
     except Exception:
         body = {}
-    # SSRF: voice-server 会 urllib.request.urlretrieve(body['video_url']) 抓取该地址, 转发前先拦内网/环回/元数据地址 (video_oss_key 走 OSS 下载, 不校验)
+    # SSRF: voice-server 会 urllib.request.urlretrieve(body['video_url']) 抓取该地址, 转发前先拦内网/环回/元数据地址
     _vurl = body.get("video_url")
     if _vurl:
         _require_safe_url(_vurl)
+    # video_oss_key 会被 voice-server oss_download() 下载 — 防越权读他人形象/录屏/管理素材
+    _guard_pipeline_oss_key(body.get("video_oss_key"), 'video_oss_key')
     try:
         resp = _req.post(f"{VOICE_SERVER_URL}/api/voice/subtitle/transcribe", json=body, timeout=600)
         if resp.status_code != 200:
@@ -2612,6 +2614,31 @@ def _validate_user_oss_key(key: str, allowed_prefix: str) -> str:
     return k
 
 
+# 口播/字幕/合成流水线里, 前端会把"上一步产出的 oss_key"回传给后端去 OSS 下载再处理.
+# 这些 key 是服务端生成的 (sources/、digital_human/、uploads/ 等流水线前缀), 没法用单一前缀
+# 白名单校验 (前缀多且会变). 但恶意客户端可以把它换成别的前缀去越权读他人/管理员的私有对象.
+# 这里用"黑名单 + 防穿越": 挡住跨租户敏感前缀 (别人的形象/录屏) 和管理/供应链前缀 (模板/BGM/
+# 安装包), 以及路径穿越; 流水线自身的前缀照常放行, 不影响任何正常功能.
+_OSS_PIPELINE_DENY_PREFIXES = (
+    'avatars/', 'recordings/', 'cover_templates/', 'bgm_library/',
+    'desktop_release/', 'landing_demos/', 'whiteboard_bg/',
+)
+
+
+def _guard_pipeline_oss_key(key: str, field: str = 'oss_key') -> str:
+    """校验流水线回传的 oss_key: 防路径穿越 + 禁止读跨租户/管理/供应链敏感前缀. 非法则 403."""
+    k = (key or '').strip()
+    if not k:
+        return k   # 空 = 没传 (走旧的 source_file 等本地模式), 交给调用方判断
+    low = k.lstrip('/').lower()
+    if '..' in k or '\\' in k or k.startswith('/'):
+        raise HTTPException(403, f"{field} 路径非法")
+    for bad in _OSS_PIPELINE_DENY_PREFIXES:
+        if low.startswith(bad):
+            raise HTTPException(403, f"{field} 不允许访问该前缀")
+    return k
+
+
 @app.post("/api/oss/sign-upload")
 def oss_sign_upload(req: OssSignUploadRequest, request: Request):
     """生成 OSS PUT 签名 URL. 前端用这个 URL 直接 PUT 文件到 OSS, 不再走 NATAPP.
@@ -2650,6 +2677,8 @@ def clean_narration_video_oss_proxy(req: CleanNarrationVideoOssRequest, request:
     """OSS 模式 (推荐): 浏览器已直传到 OSS, 这里转发 oss_key 给 voice-server.
     扣 3 积分 (Whisper ASR)."""
     import requests as _req
+    # oss_key 会被 voice-server oss_download() 下载 — 防越权读他人/管理素材
+    _guard_pipeline_oss_key(req.oss_key, 'oss_key')
     try:
         _uid = _user_id_from_request(request)
         from billing import consume_credits
@@ -2708,6 +2737,8 @@ def finalize_narration_video_proxy(req: FinalizeNarrationVideoRequest, request: 
     """转发到 voice-server: 接 keep_ranges → 剪视频. OSS 模式下输出也存 OSS, 直接返签名 URL.
     扣 5 积分 (口播视频剪辑)."""
     import requests as _req
+    # source_oss_key 会被 voice-server oss_download() 下载 — 防越权读他人/管理素材
+    _guard_pipeline_oss_key(req.source_oss_key, 'source_oss_key')
     # 先扣费 — 不够会 raise 402 阻止合成
     try:
         _uid = _user_id_from_request(request)
@@ -2810,6 +2841,8 @@ def compose_footage_proxy(req: dict, request: Request):
     except Exception as _ce:
         print(f"[compose-credit] 跳过扣费 (拿不到 user): {_ce}", flush=True)
 
+    # narration_oss_key 会被 voice-server oss_download() 下载 (口播/数字人成片) — 防越权读他人/管理素材
+    _guard_pipeline_oss_key(req.get('narration_oss_key'), 'narration_oss_key')
     # SSRF: voice-server 会对每个 asset.url 做 urlopen, 转发前逐个拦内网/环回/元数据地址
     for _shot in (req.get('shots') or []):
         for _asset in (_shot.get('assets') or []):
@@ -3223,6 +3256,25 @@ async def desktop_publish_finalize(request: Request, publish_key: str = Form(...
         raise HTTPException(400, "exe 还没传到 OSS, 请先完成上传")
     if not b.object_exists("desktop_release/latest.yml"):
         raise HTTPException(400, "latest.yml 还没传到 OSS, 请先完成上传")
+
+    # 校验 latest.yml 内容 (供应链防线): 不能只确认"存在"就让它对全网客户端生效 ——
+    # 这份清单会被 electron-updater 读, 决定所有人下载哪个安装包. 下载下来核对:
+    # version 必须跟本次 exe 一致、清单必须引用本次 exe 文件名、必须带 sha512 (合法清单特征),
+    # 防 publish-sign 签的直传 URL 被塞进任意/损坏的 yml 推给所有用户.
+    try:
+        _yml_text = b.get_object("desktop_release/latest.yml").read().decode("utf-8", "ignore")
+    except Exception as _e:
+        raise HTTPException(400, f"读取 latest.yml 失败: {_e}")
+    _ymv = _re3.search(r'(?m)^version:\s*[\'"]?([0-9]+\.[0-9]+\.[0-9]+)', _yml_text)
+    if not _ymv:
+        raise HTTPException(400, "latest.yml 里没解析到 version, 不是合法更新清单, 拒绝发布")
+    if _ymv.group(1) != version:
+        raise HTTPException(400, f"latest.yml 的 version ({_ymv.group(1)}) 跟 exe ({version}) 不一致, 拒绝发布")
+    if name not in _yml_text:
+        raise HTTPException(400, "latest.yml 没引用本次 exe 文件名, 拒绝发布")
+    if 'sha512:' not in _yml_text:
+        raise HTTPException(400, "latest.yml 缺 sha512 字段, 不是合法更新清单, 拒绝发布")
+
     try:
         _size = b.head_object(f"desktop_release/{name}").content_length
     except Exception:
@@ -3885,6 +3937,25 @@ def _probe_video_meta(path: str) -> dict:
         return {}
 
 
+def _avatar_file_sig(safe_key: str, exp: int) -> str:
+    """对 avatar 文件下载链接做 HMAC 签名 (绑 key + 过期时间). 用 JWT SECRET_KEY 当密钥."""
+    import hmac as _hmac, hashlib as _hashlib
+    msg = f"{safe_key}:{int(exp)}".encode()
+    return _hmac.new(SECRET_KEY.encode(), msg, _hashlib.sha256).hexdigest()[:32]
+
+
+def _avatar_file_url(avatar_key: str, expires: int = 7 * 24 * 3600) -> str:
+    """生成带签名+时效的形象文件 URL.
+    前端用 <video src> 直连(不带 Authorization 头), 所以不能用 JWT 鉴权,
+    改用签名 URL: 只有 list/upload 这类已登录接口能签发, 别人猜到 avatar_key 也下不了.
+    """
+    import re as _re, time as _t
+    safe_key = _re.sub(r"[^a-zA-Z0-9_]", "", avatar_key)
+    exp = int(_t.time()) + int(expires)
+    sig = _avatar_file_sig(safe_key, exp)
+    return f"/api/digital-human/avatars/{avatar_key}/file?exp={exp}&sig={sig}"
+
+
 @app.get("/api/digital-human/avatars")
 def list_avatars(request: Request):
     """列出【当前登录用户自己的】数字人形象 (必须登录). max_count 按 tier 返回.
@@ -3904,7 +3975,7 @@ def list_avatars(request: Request):
         items = []
         for row in rows:
             d = row_to_dict(row)
-            d["file_url"] = f"/api/digital-human/avatars/{d['avatar_key']}/file"
+            d["file_url"] = _avatar_file_url(d['avatar_key'])
             items.append(d)
         return {
             "items": items,
@@ -4008,7 +4079,7 @@ async def upload_avatar(
         "width": meta.get("width"),
         "height": meta.get("height"),
         "file_size": file_size,
-        "file_url": f"/api/digital-human/avatars/{avatar_key}/file",
+        "file_url": _avatar_file_url(avatar_key),
     }
 
 
@@ -4054,11 +4125,20 @@ def delete_avatar(avatar_key: str, request: Request):
 
 
 @app.get("/api/digital-human/avatars/{avatar_key}/file")
-def serve_avatar_file(avatar_key: str):
-    """提供形象视频文件 (用于前端预览/试播)"""
+def serve_avatar_file(avatar_key: str, exp: int = 0, sig: str = ""):
+    """提供形象视频文件 (用于前端预览/试播).
+
+    鉴权: 用签名 URL (list/upload 接口签发, 见 _avatar_file_url). <video src> 直连
+    不带 Authorization 头, 所以不能用 JWT; 改成校验 exp+sig, 防别人猜 avatar_key 越权下载.
+    """
     from fastapi.responses import FileResponse
-    import re as _re
+    import re as _re, hmac as _hmac, time as _t
     safe_key = _re.sub(r"[^a-zA-Z0-9_]", "", avatar_key)
+    # 校验签名 (常数时间比较) + 未过期
+    if not sig or int(exp or 0) < int(_t.time()):
+        raise HTTPException(403, "链接无效或已过期")
+    if not _hmac.compare_digest(sig, _avatar_file_sig(safe_key, int(exp))):
+        raise HTTPException(403, "链接无效或已过期")
     file_path = os.path.join(DUIX_AVATAR_DIR, f"{safe_key}.mp4")
     if not os.path.exists(file_path):
         raise HTTPException(404, "形象视频未找到")
@@ -4318,11 +4398,20 @@ def submit_digital_human(
 
 
 @app.get("/api/digital-human/task/{job_id}")
-def query_digital_human(job_id: str):
-    """查任务状态: queued(+position) / processing(+progress) / completed(+video_url) / failed."""
+def query_digital_human(job_id: str, request: Request):
+    """查任务状态: queued(+position) / processing(+progress) / completed(+video_url) / failed.
+
+    鉴权: 必须登录 + 只能查自己的任务 (任务结果是含本人声音/形象的成片链接).
+    以前没鉴权, 知道 job_id 就能拿别人成片 (IDOR), 已修.
+    """
+    uid = _user_id_from_request(request)   # 没登录 → 401
     job = _dh_jobs.get(job_id)
     if not job:
         raise HTTPException(404, "任务不存在或已过期")
+    # ownership: 任务记了 user_id, 不是自己的直接 403 (job_id 30 天内存活, 防越权)
+    owner_id = int(job.get("user_id") or 0)
+    if owner_id and owner_id != uid:
+        raise HTTPException(403, "无权查看别人的任务")
     st = job["status"]
     if st == "queued":
         pos = _dh_position(job_id)
