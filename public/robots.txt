@@ -1,0 +1,19 @@
+# monoi.cn — 允许搜索引擎与 AI 搜索爬虫抓取
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /account
+
+# AI 搜索爬虫显式放行 (ChatGPT / Claude / Perplexity / 豆包)
+User-agent: GPTBot
+User-agent: OAI-SearchBot
+User-agent: ChatGPT-User
+User-agent: ClaudeBot
+User-agent: anthropic-ai
+User-agent: PerplexityBot
+User-agent: Bytespider
+Allow: /
+Disallow: /admin
+Disallow: /account
+
+Sitemap: https://monoi.cn/sitemap.xml

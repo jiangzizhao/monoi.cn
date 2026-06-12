@@ -60,6 +60,10 @@ jobs:
           ./ossutil cp -r -f --meta "Cache-Control:public, max-age=31536000, immutable" dist/ "$BUCKET/"
           # 2) index.html 单独覆盖成不缓存, 保证用户每次拿到最新 (引用最新 hash 资源)
           ./ossutil cp -f --meta "Cache-Control:no-cache, must-revalidate" dist/index.html "$BUCKET/index.html"
+          # 3) robots/llms/sitemap 这类无 hash、会更新的文件同样不长缓存
+          for f in robots.txt llms.txt sitemap.xml; do
+            [ -f "dist/$f" ] && ./ossutil cp -f --meta "Cache-Control:no-cache, must-revalidate" "dist/$f" "$BUCKET/$f"
+          done
           echo "✅ 已上传 dist/ 到 $BUCKET"
 
       # 可选: 部署后刷新 CDN 上的 index.html (需要 AK 有 CDN 刷新权限).

@@ -1,0 +1,27 @@
+# monoi · AI 短视频口播创作工具
+
+> monoi (https://monoi.cn) 是一款 AI 短视频口播创作工具：输入一句话想法，自动生成口播文案，AI 配音并支持克隆你的声音，数字人替你出镜，智能匹配画面、自动加字幕和封面，一键发布到抖音、小红书。全程对话式操作，不需要任何视频技能，新用户 7 天免费体验。
+> monoi is an AI short-video creation tool for Chinese-speaking creators: it turns a one-sentence idea into a publish-ready talking-head video — AI script writing, AI voiceover with voice cloning, AI avatar presenter, automatic footage matching, subtitles and covers, and one-click publishing to Douyin and Xiaohongshu.
+
+## 主要页面
+- [首页](https://monoi.cn/): 产品介绍、功能与定价
+- [注册](https://monoi.cn/register): 免费注册，7 天体验
+- [用户协议](https://monoi.cn/terms): 服务条款
+- [隐私政策](https://monoi.cn/privacy): 隐私说明
+
+## 核心功能
+- AI 写文案：一句话想法生成爆款结构的口播稿
+- AI 配音与声音克隆：音色库可选；上传 5-15 秒声音样本即可克隆你自己的声音
+- AI 数字人：上传 30 秒-2 分钟形象视频，数字人替你出镜口播，不愿出镜也能做视频
+- 智能剪辑：按文案逐句自动匹配无版权画面，自动生成字幕和封面，1080p 无水印输出
+- 一键发布：直接发布到抖音、小红书，也可导出到剪映继续精修
+
+## 定价 (2026 年 6 月)
+- 免费版：¥0，7 天体验，赠送 700 积分
+- Pro：¥99/月，2,500 积分/月，1 个克隆声音 + 5 个数字人形象
+- Max：¥199/月，5,000 积分/月，3 个克隆声音 + 10 个数字人形象，含去人声与自动发布
+
+## 联系方式
+- 客服邮箱: tina@monoi.cn
+- 商务合作: tim@monoi.cn
+- 微信服务号: monoi.cn
