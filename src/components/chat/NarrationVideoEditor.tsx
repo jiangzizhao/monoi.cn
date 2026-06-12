@@ -343,38 +343,43 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
     })
   }, [allWords])
 
-  // 画波形 (绿=保留 / 红=删除). currentTime 不进依赖 — 播放头单独用 div, 避免每秒重绘
+  // 画波形 (绿=保留 / 红=删除). currentTime 不进依赖 — 播放头单独用 div, 避免每秒重绘.
+  // 关键: 位图用【固定分辨率】(按"视口宽 × 最大放大8倍"算, 不随当前 waveZoom 变), 放大时纯靠
+  // CSS width:100% 横向拉伸. 这样 ① 不会因位图随放大膨胀过大被浏览器判失效→整片空白
+  // (就是之前"一放大声纹就没了"的根因); ② 不用放大瞬间重读 clientWidth (那时常读到 0 → 画进
+  // 1px 位图 → 看不见). 放大不再触发位图重绘, 只 CSS 缩放已画好的波形.
   useEffect(() => {
     const canvas = waveCanvasRef.current
     const wrap = waveWrapRef.current
     if (!canvas || !wrap) return
     const draw = () => {
       const dpr = window.devicePixelRatio || 1
-      const cssW = canvas.clientWidth || wrap.clientWidth
+      const viewW = wrap.parentElement?.clientWidth || wrap.clientWidth || 600   // 滚动视口宽(不随放大变)
       const cssH = canvas.clientHeight || 64
-      canvas.width = Math.max(1, Math.floor(cssW * dpr))
-      canvas.height = Math.max(1, Math.floor(cssH * dpr))
+      const bmpW = Math.min(16000, Math.max(600, Math.round(viewW * 8 * dpr)))    // 8 = 最大放大倍数; 封顶 16000 防超浏览器画布上限
+      const bmpH = Math.max(1, Math.round(cssH * dpr))
+      if (canvas.width !== bmpW) canvas.width = bmpW
+      if (canvas.height !== bmpH) canvas.height = bmpH
       const ctx = canvas.getContext('2d')
       if (!ctx) return
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-      ctx.clearRect(0, 0, cssW, cssH)
-      const mid = cssH / 2
+      ctx.clearRect(0, 0, bmpW, bmpH)            // 直接按位图像素坐标画 (不用 setTransform)
+      const mid = bmpH / 2
       const n = peaks.length
-      const bw = cssW / n
       const dur = data.duration || 1
+      const bw = bmpW / Math.max(1, n)
       for (let i = 0; i < n; i++) {
         const t = (i / n) * dur
         const inKeep = keepRanges.some(([s, e]) => t >= s && t <= e)
-        const h = Math.max(1, peaks[i] * (cssH * 0.42))
+        const h = Math.max(dpr, peaks[i] * (bmpH * 0.42))
         ctx.fillStyle = inKeep ? 'rgba(16,185,129,0.9)' : 'rgba(239,68,68,0.30)'
         ctx.fillRect(i * bw, mid - h, Math.max(1, bw * 0.75), h * 2)
       }
     }
     draw()
     const ro = new ResizeObserver(draw)
-    ro.observe(wrap)
+    ro.observe(wrap.parentElement || wrap)       // 观察滚动视口(尺寸稳定), 不观察会随放大变宽的内层
     return () => ro.disconnect()
-  }, [peaks, keepRanges, data.duration, waveZoom])
+  }, [peaks, keepRanges, data.duration])          // 去掉 waveZoom — 放大纯 CSS 拉伸, 不重绘位图
 
   // 波形上按住拖选 → 留下选区(像剪映, 等点"剪掉"才删); 单击 → 跳转 + 清掉选区
   useEffect(() => {
