@@ -344,10 +344,11 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
   }, [allWords])
 
   // 画波形 (绿=保留 / 红=删除). currentTime 不进依赖 — 播放头单独用 div, 避免每秒重绘.
-  // 关键: 位图用【固定分辨率】(按"视口宽 × 最大放大8倍"算, 不随当前 waveZoom 变), 放大时纯靠
-  // CSS width:100% 横向拉伸. 这样 ① 不会因位图随放大膨胀过大被浏览器判失效→整片空白
-  // (就是之前"一放大声纹就没了"的根因); ② 不用放大瞬间重读 clientWidth (那时常读到 0 → 画进
-  // 1px 位图 → 看不见). 放大不再触发位图重绘, 只 CSS 缩放已画好的波形.
+  // 关键: 位图宽度 = 【当前缩放下声纹的实际显示宽度】(视口宽 × waveZoom), 每档缩放按需重绘.
+  //   - 跟显示宽 1:1(×dpr): 1× 不会因位图过大被压缩到看不见(上一版"固定超大位图"在 1× 整片消失的根因),
+  //     8× 也不会因位图过大超浏览器上限失效("一放大就没"的更早那版根因). 两头都稳.
+  //   - 显示宽用 viewW×waveZoom 直接算(不读 canvas.clientWidth, 放大瞬间常读到 0 → 画进 0 宽位图).
+  //   - 封顶 16000 防超画布上限(超宽屏 ×8 时轻微上采样, 但绝不消失).
   useEffect(() => {
     const canvas = waveCanvasRef.current
     const wrap = waveWrapRef.current
@@ -355,8 +356,9 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
     const draw = () => {
       const dpr = window.devicePixelRatio || 1
       const viewW = wrap.parentElement?.clientWidth || wrap.clientWidth || 600   // 滚动视口宽(不随放大变)
+      const dispW = Math.max(1, viewW * waveZoom)                                 // 当前缩放下声纹实际显示宽度
       const cssH = canvas.clientHeight || 64
-      const bmpW = Math.min(16000, Math.max(600, Math.round(viewW * 8 * dpr)))    // 8 = 最大放大倍数; 封顶 16000 防超浏览器画布上限
+      const bmpW = Math.min(16000, Math.max(300, Math.round(dispW * dpr)))        // 位图 ≈ 显示宽 → 每档都清晰、都不消失
       const bmpH = Math.max(1, Math.round(cssH * dpr))
       if (canvas.width !== bmpW) canvas.width = bmpW
       if (canvas.height !== bmpH) canvas.height = bmpH
@@ -377,9 +379,9 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
     }
     draw()
     const ro = new ResizeObserver(draw)
-    ro.observe(wrap.parentElement || wrap)       // 观察滚动视口(尺寸稳定), 不观察会随放大变宽的内层
+    ro.observe(wrap.parentElement || wrap)       // 视口尺寸变(非放大)时也重绘
     return () => ro.disconnect()
-  }, [peaks, keepRanges, data.duration])          // 去掉 waveZoom — 放大纯 CSS 拉伸, 不重绘位图
+  }, [peaks, keepRanges, data.duration, waveZoom])   // waveZoom 回依赖: 每档缩放按显示宽重画位图
 
   // 波形上按住拖选 → 留下选区(像剪映, 等点"剪掉"才删); 单击 → 跳转 + 清掉选区
   useEffect(() => {
