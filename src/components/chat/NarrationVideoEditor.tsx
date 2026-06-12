@@ -313,7 +313,7 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
   // 峰值: 优先后端预算的; 没有就按"哪段有词"合成 (能看出说话/空白即可)
   const peaks = useMemo<number[]>(() => {
     if (Array.isArray(data.waveform) && data.waveform.length > 8) return data.waveform
-    const N = 360
+    const N = 1600
     const dur = data.duration || 1
     const hash = (i: number) => { const x = Math.sin(i * 12.9898) * 43758.5453; return x - Math.floor(x) }
     const arr = new Array<number>(N)
@@ -372,7 +372,7 @@ export function NarrationVideoEditor({ data, apiBase, onCancel, onDone }: Props)
         const inKeep = keepRanges.some(([s, e]) => t >= s && t <= e)
         const h = Math.max(dpr, peaks[i] * (bmpH * 0.42))
         ctx.fillStyle = inKeep ? 'rgba(16,185,129,0.9)' : 'rgba(239,68,68,0.30)'
-        ctx.fillRect(i * bw, mid - h, Math.max(1, bw * 0.75), h * 2)
+        ctx.fillRect(i * bw, mid - h, Math.max(1, bw + 0.5), h * 2)   // 满宽相接 → 实心波形, 像剪映/AU (不是稀疏竖条)
       }
     }
     draw()
