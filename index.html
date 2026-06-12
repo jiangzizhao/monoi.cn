@@ -1,14 +1,78 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/logo.png" media="(prefers-color-scheme: light)" />
     <link rel="icon" type="image/png" href="/logo-dark.png" media="(prefers-color-scheme: dark)" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>monoi · AI 短视频口播工具</title>
+    <title>monoi · AI 短视频口播创作工具 - 写文案 / 配音 / 数字人 / 一键成片</title>
+    <meta name="description" content="monoi 是 AI 短视频口播创作工具：一句话想法自动生成口播文案，AI 配音支持克隆你的声音，数字人替你出镜，智能匹配画面、自动加字幕封面，一键发布到抖音、小红书。新用户 7 天免费体验。" />
+    <meta name="keywords" content="AI 短视频,口播视频,AI 文案,AI 配音,声音克隆,数字人,智能剪辑,自动字幕,抖音,小红书" />
+    <link rel="canonical" href="https://monoi.cn/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="monoi" />
+    <meta property="og:url" content="https://monoi.cn/" />
+    <meta property="og:title" content="monoi · AI 短视频口播创作工具" />
+    <meta property="og:description" content="把一句话想法变成爆款口播视频：AI 写文案、配音、数字人出镜、智能剪辑加字幕，一键发布到抖音、小红书。" />
+    <meta property="og:image" content="https://monoi.cn/logo.png" />
+    <meta property="og:locale" content="zh_CN" />
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "Organization",
+          "@id": "https://monoi.cn/#organization",
+          "name": "monoi",
+          "url": "https://monoi.cn/",
+          "logo": {
+            "@type": "ImageObject",
+            "url": "https://monoi.cn/logo.png"
+          }
+        },
+        {
+          "@type": "WebSite",
+          "@id": "https://monoi.cn/#website",
+          "url": "https://monoi.cn/",
+          "name": "monoi",
+          "inLanguage": "zh-CN",
+          "publisher": { "@id": "https://monoi.cn/#organization" }
+        },
+        {
+          "@type": "SoftwareApplication",
+          "@id": "https://monoi.cn/#app",
+          "name": "monoi",
+          "url": "https://monoi.cn/",
+          "description": "AI 短视频口播创作工具：一句话想法自动生成口播文案，AI 配音与声音克隆，数字人出镜，智能匹配画面、自动加字幕封面，一键发布到抖音、小红书。",
+          "applicationCategory": "MultimediaApplication",
+          "operatingSystem": "Web",
+          "inLanguage": "zh-CN",
+          "offers": {
+            "@type": "Offer",
+            "price": "0",
+            "priceCurrency": "CNY",
+            "description": "新用户 7 天免费体验"
+          },
+          "featureList": [
+            "AI 口播文案生成",
+            "AI 配音与声音克隆",
+            "AI 数字人出镜",
+            "智能匹配画面与自动字幕",
+            "一键发布到抖音、小红书"
+          ],
+          "publisher": { "@id": "https://monoi.cn/#organization" }
+        }
+      ]
+    }
+    </script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <header style="max-width:640px;margin:0 auto;padding:48px 24px;font-family:system-ui,-apple-system,sans-serif">
+        <h1 style="font-size:24px;font-weight:700;margin:0 0 12px">monoi · AI 短视频口播创作工具</h1>
+        <p style="font-size:15px;line-height:1.7;color:#888;margin:0">把一句话想法变成能直接发布的口播视频：AI 写文案、配音、克隆你的声音、数字人替你出镜，自动配画面加字幕，一键发布到抖音、小红书。</p>
+      </header>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
