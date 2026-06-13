@@ -2855,12 +2855,14 @@ def compose_footage_proxy(req: dict, request: Request):
 
     # narration_oss_key 会被 voice-server oss_download() 下载 (口播/数字人成片) — 防越权读他人/管理素材
     _guard_pipeline_oss_key(req.get('narration_oss_key'), 'narration_oss_key')
-    # SSRF: voice-server 会对每个 asset.url 做 urlopen, 转发前逐个拦内网/环回/元数据地址
+    # SSRF: voice-server 会对每个 asset.url 做 urlopen, 转发前逐个拦内网/环回/元数据地址.
+    # 素材 oss_key 也会被 voice-server oss_download — 同样过前缀黑名单, 防猜到别人 user_footage/ 等 key 越权读.
     for _shot in (req.get('shots') or []):
         for _asset in (_shot.get('assets') or []):
             _au = _asset.get('url')
             if _au:
                 _require_safe_url(_au)
+            _guard_pipeline_oss_key(_asset.get('oss_key'), 'asset.oss_key')
 
     try:
         resp = _req.post(
@@ -2879,6 +2881,11 @@ def compose_footage_proxy(req: dict, request: Request):
 def compose_jianying_draft_proxy(req: dict):
     """转发到 voice-server: 拼剪映草稿 zip + 上传 OSS 返签名 URL"""
     import requests as _req
+    # 跟 compose-footage 一样: narration + 每个素材的 oss_key 都过前缀黑名单, 防猜 key 越权读他人素材
+    _guard_pipeline_oss_key(req.get('narration_oss_key'), 'narration_oss_key')
+    for _shot in (req.get('shots') or []):
+        for _asset in (_shot.get('assets') or []):
+            _guard_pipeline_oss_key(_asset.get('oss_key'), 'asset.oss_key')
     try:
         resp = _req.post(f"{VOICE_SERVER_URL}/compose-jianying-draft", json=req, timeout=900)
         if resp.status_code != 200:
