@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { RefreshCw, Pencil, Download, Check, ExternalLink, Play, Upload, Loader2, Package, Lock } from 'lucide-react'
 import JSZip from 'jszip'
@@ -217,12 +217,17 @@ function SentenceRow({ item, index, selected, onToggle, onRefresh, onRotate, onA
               {[...Array(6)].map((_, i) => <div key={i} className="aspect-video rounded-lg bg-[var(--bg-hover)] animate-pulse"/>)}
             </div>
           ) : item.assets && item.assets.length > 0 ? (
-            <div className="grid grid-cols-2 gap-2">
-              {/* 一句展示 2 个素材 (一排); 默认选中第 1 个, 点别的可换; "换一批"出下一组; "上传"用自己的 */}
-              {item.assets.slice(0, 2).map(a => (
-                <AssetThumb key={`${a.source}-${a.id}`} asset={a} selected={isSelected(a)} onSelect={() => onToggle(a)}/>
-              ))}
-            </div>
+            <>
+              {selected.length === 0 && (
+                <div className="text-[11px] text-[var(--text-3)] pb-1.5">点一下选用这句的素材 · 不选则这句不配画面</div>
+              )}
+              <div className="grid grid-cols-2 gap-2">
+                {/* 一句展示 2 个素材 (一排); 默认不选, 用户点哪个用哪个 (再点取消); "换一批"出下一组; "上传"用自己的 */}
+                {item.assets.slice(0, 2).map(a => (
+                  <AssetThumb key={`${a.source}-${a.id}`} asset={a} selected={isSelected(a)} onSelect={() => onToggle(a)}/>
+                ))}
+              </div>
+            </>
           ) : (
             <div className="text-xs text-[var(--text-3)] py-2">暂无结果，试试"换一批"或修改关键词, 或上传自己的</div>
           )}
@@ -254,8 +259,8 @@ export function FootageGrid({ data, videoUrl, segmentTimes, narrationOssKey, onU
     const [p, px] = await Promise.all([searchPexels(keyword, 6), searchPixabay(keyword, 3)])
     const merged = [...p, ...px]
     onUpdate(data.map((it, i) => i === index ? { ...it, assets: merged, loadingAssets: false } : it))
-    // 改完关键词重搜后, 自动选中新的第 1 个 (一句一个)
-    setSelected(prev => ({ ...prev, [index]: merged.length ? [merged[0]] : [] }))
+    // 改完关键词重搜后, 清掉这句的旧选择 (旧素材已不在新结果里) — 不自动选, 让用户自己点
+    setSelected(prev => ({ ...prev, [index]: [] }))
   }
 
   // 换一批: 一排显示 2 个, 这里把已搜到的批次往后转 2 格, 露出下一组 2 个 (即时, 不重搜);
@@ -266,19 +271,11 @@ export function FootageGrid({ data, videoUrl, segmentTimes, narrationOssKey, onU
     if (a.length < 3) { refresh(index, it.search_en?.[0] || ''); return }
     const rotated = [...a.slice(2), ...a.slice(0, 2)]
     onUpdate(data.map((x, i) => i === index ? { ...x, assets: rotated } : x))
-    setSelected(prev => ({ ...prev, [index]: [rotated[0]] }))
+    // 换一批只换展示, 不动选择 — 不自动选, 让用户自己点想要的
   }
 
-  // 每句默认自动选中第 1 个素材 (用户没手动动过的句子) — "一句给一个", 不用逐句点
-  useEffect(() => {
-    setSelected(prev => {
-      const next = { ...prev }; let changed = false
-      data.forEach((it, i) => {
-        if (it.assets && it.assets.length > 0 && next[i] === undefined) { next[i] = [it.assets[0]]; changed = true }
-      })
-      return changed ? next : prev
-    })
-  }, [data])
+  // 不再自动选第 1 个 — 用户反馈"自动选上不想要的还得点掉很麻烦", 改成默认不选,
+  // 由用户自己点想要的素材 (没点的句子合成时不配画面, 只留口播原片).
 
   // 单选: 一句只留 1 个素材. 展示 3 个里点哪个就换成哪个; 点已选中的那个 = 取消 (这句不用素材).
   const toggle = (sentenceIdx: number, asset: VideoAsset) => {
