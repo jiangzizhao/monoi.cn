@@ -4214,6 +4214,10 @@ def _dh_worker_loop():
 
 def _dh_run_job(_req, job_id, job):
     # 1. 把 音频 + 形象 发给家里 agent /generate
+    try:
+        print(f"[dh-worker] job={job_id} 发往家里 agent avatar_path={job.get('avatar_path')} size={os.path.getsize(job['avatar_path'])}", flush=True)
+    except Exception:
+        pass
     with open(job["audio_path"], "rb") as af, open(job["avatar_path"], "rb") as vf:
         r = _req.post(
             f"{DH_AGENT_URL}/generate",
@@ -4307,6 +4311,12 @@ def submit_digital_human(
     avatar_path = os.path.join(DUIX_AVATAR_DIR, f"{safe_key}.mp4")
     if not os.path.exists(avatar_path):
         raise HTTPException(404, "形象不存在, 请重新选择")
+    # 诊断"选了第二个却用第一个": 记实际收到的 avatar_key + 文件大小.
+    # 前端发错 key → 这里就是错形象的 size; 这里对但成片不对 → 家里 HeyGem 复用了缓存模型.
+    try:
+        print(f"[dh] 收到提交 uid={uid} avatar_key={safe_key} avatar_size={os.path.getsize(avatar_path)}", flush=True)
+    except Exception:
+        pass
 
     # ownership 校验: 只能用自己的形象生成 (公共/内置 user_id 为 NULL 放行, admin 例外)
     _ownconn = get_db()
