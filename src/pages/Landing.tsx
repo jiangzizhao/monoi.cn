@@ -37,12 +37,12 @@ const FEATURES = [
 
 const PRICING = [
   {
-    tier: 'free', name: '免费', price: '¥0', period: '7 天体验',
+    tier: 'free', name: '免费', price: '¥0', period: '7 天全功能体验',
     features: [
-      '赠送 700 积分 (7 天免费创作)',
-      '配音预设',
-      '数字人 (1 个形象)',
-      '文案 + 封面',
+      '赠送 1400 积分 (200/天 × 7 天)',
+      '配音 + 克隆声音 + 数字人',
+      '素材匹配 + 一键合成 + 抠图 + 去人声',
+      '1080p 无水印 · 全功能开放',
     ],
     cta: '免费开始',
   },
@@ -211,7 +211,7 @@ export default function Landing() {
             />
             <div className="flex items-center justify-between px-2">
               <span className="text-[11px] text-[var(--text-3)]">
-                ⚡ 新用户 7 天免费 · 每天送 100 积分 · 不需要任何视频技能
+                ⚡ 新用户 7 天全功能免费 · 每天送 200 积分 · 不需要任何视频技能
               </span>
               <button onClick={submitPrompt}
                 className="inline-flex items-center gap-1.5 px-4 py-2 bg-[var(--text)] text-[var(--bg)] rounded-xl text-sm font-medium hover:opacity-80 cursor-pointer whitespace-nowrap flex-shrink-0">
@@ -367,7 +367,7 @@ export default function Landing() {
       {/* =============== 底部 CTA =============== */}
       <section className="px-4 sm:px-6 py-16 sm:py-24 text-center bg-[var(--text)] text-[var(--bg)] mx-4 sm:mx-6 mb-12 rounded-3xl">
         <h2 className="text-3xl sm:text-5xl font-bold mb-4">现在开始你的第一条视频</h2>
-        <p className="text-sm sm:text-base opacity-80 mb-8">新用户 7 天免费 · 每天送 100 积分, 不需要任何视频技能</p>
+        <p className="text-sm sm:text-base opacity-80 mb-8">新用户 7 天全功能免费 · 每天送 200 积分, 不需要任何视频技能</p>
         <button onClick={() => nav('/register')}
           className="inline-flex items-center gap-2 px-8 py-3.5 bg-[var(--bg)] text-[var(--text)] rounded-xl text-base font-medium hover:opacity-90 cursor-pointer">
           免费开始 <Send size={16}/>

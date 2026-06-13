@@ -74,10 +74,10 @@ const COMPARE_ROWS: Array<{
     free: '免费', pro_monthly: '¥99/月', max_monthly: '¥199/月', flagship_yearly: '¥2980/年',
   }},
   { label: '月送积分', values: {
-    free: '100/天 × 7 天', pro_monthly: '2,500', max_monthly: '5,000', flagship_yearly: '6,000/月',
+    free: '200/天 × 7 天', pro_monthly: '2,500', max_monthly: '5,000', flagship_yearly: '6,000/月',
   }},
   { label: '克隆音色', values: {
-    free: '✗', pro_monthly: '1 个', max_monthly: '3 个', flagship_yearly: '5 个',
+    free: '1 个', pro_monthly: '1 个', max_monthly: '3 个', flagship_yearly: '5 个',
   }},
   { label: '数字人形象', values: {
     free: '1 个', pro_monthly: '5 个', max_monthly: '10 个', flagship_yearly: '不限',
@@ -97,22 +97,22 @@ const COMPARE_ROWS: Array<{
     free: '✓', pro_monthly: '✓', max_monthly: '✓', flagship_yearly: '✓',
   }},
   { label: '克隆声音', values: {
-    free: '✗', pro_monthly: '✓', max_monthly: '✓', flagship_yearly: '✓',
+    free: '✓', pro_monthly: '✓', max_monthly: '✓', flagship_yearly: '✓',
   }},
   { label: '素材智能匹配', values: {
-    free: '✗', pro_monthly: '✓', max_monthly: '✓', flagship_yearly: '✓',
+    free: '✓', pro_monthly: '✓', max_monthly: '✓', flagship_yearly: '✓',
   }},
   { label: '口播剪辑导出草稿', values: {
-    free: '✗', pro_monthly: '✓', max_monthly: '✓', flagship_yearly: '✓',
+    free: '✓', pro_monthly: '✓', max_monthly: '✓', flagship_yearly: '✓',
   }},
   { label: '一键合成 (PIP+BGM+字幕)', values: {
-    free: '✗', pro_monthly: '✓', max_monthly: '✓', flagship_yearly: '✓',
+    free: '✓', pro_monthly: '✓', max_monthly: '✓', flagship_yearly: '✓',
   }},
   { label: '抠图人物', values: {
-    free: '✗', pro_monthly: '✓', max_monthly: '✓', flagship_yearly: '✓',
+    free: '✓', pro_monthly: '✓', max_monthly: '✓', flagship_yearly: '✓',
   }},
   { label: '去人声 (Demucs)', values: {
-    free: '✗', pro_monthly: '✗', max_monthly: '✓', flagship_yearly: '✓',
+    free: '✓', pro_monthly: '✓', max_monthly: '✓', flagship_yearly: '✓',
   }},
   { label: '自动发布', values: {
     free: '✗', pro_monthly: '✗', max_monthly: '✓ Beta', flagship_yearly: '✓ Beta',
@@ -131,10 +131,10 @@ function planHighlights(tier: string, p: PlanConfig): string[] {
   // 每档卡片只列**最直观的差异**, 详细对比表里看完整功能.
   if (tier === 'free') {
     return [
-      '赠送 700 积分，享受 7 天免费创作',
-      '配音预设',
-      '数字人 (1 个形象)',
-      '文案 / 封面',
+      '赠送 1400 积分，7 天全功能免费',
+      '配音 + 克隆声音 + 数字人',
+      '素材匹配 + 一键合成 + 抠图 + 去人声',
+      '1080p 无水印导出',
     ]
   }
   if (tier === 'pro_monthly') {
@@ -599,13 +599,13 @@ function MembershipTab({ sub, plans, credits, onUpgrade }: {
           </>
         ) : (
           <>
-            <div className="text-xs text-[var(--text-2)] mb-3">免费体验 · 视频带 monoi 水印</div>
+            <div className="text-xs text-[var(--text-2)] mb-3">新用户 7 天全功能体验 · 1080p 无水印</div>
             {credits?.daily_grant && (
               <div className="space-y-2.5">
                 <UsageBar
                   label={
                     credits.daily_grant.day_in_window === 0
-                      ? `新人体验 · 7 天免费 (首次登录领 100 积分开启)`
+                      ? `新人体验 · 7 天全功能免费 (首次登录领 200 积分开启)`
                       : `新人体验 · 第 ${Math.min(credits.daily_grant.day_in_window, credits.daily_grant.total_cap)}/${credits.daily_grant.total_cap} 天`
                   }
                   used={credits.monthly_used}

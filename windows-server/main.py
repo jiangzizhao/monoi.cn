@@ -2898,12 +2898,11 @@ def compose_jianying_draft_proxy(req: dict):
 @app.post("/api/voice/remove-vocals")
 async def remove_vocals_proxy(request: Request):
     """转发到 voice-server: demucs 去人声. 重消耗 (CPU 2-5 min), 扣 15 积分.
-    Max 套餐起才能用 (Free / Pro 拒绝)."""
+    全功能开放: 登录即可用, 按积分扣费 (不再限套餐)."""
     import requests as _req
     try:
         _uid = _user_id_from_request(request)
-        from billing import consume_credits, check_feature_tier
-        check_feature_tier(_uid, '去人声', 'max_monthly')
+        from billing import consume_credits
         consume_credits(_uid, 'remove_vocals', 15, ref_id='')
     except HTTPException: raise
     except Exception as _ce:
@@ -3669,8 +3668,7 @@ async def cover_remove_bg_proxy(request: Request):
     """转发到 voice-server: 人物图 → rembg 抠图 → 描边 → OSS. multipart 透传.
 
     扣费: 缓存命中 (cached=true) 不扣; 缓存未命中 (真跑了 rembg) 扣 2 积分.
-    准入: Pro 套餐及以上 (免费用户被 check_feature_tier 挡, 抛 402).
-    admin 不受 tier 限制 (检查内做了 try/except, 实际靠 admin 不在 PLANS 里跳过)."""
+    准入: 全功能开放, 登录即可用 (不再限套餐, 按积分扣费)."""
     import requests as _req
     # 试 auth — 拿不到不报错, 没登录也允许调 (但不会被扣费, 缓存照命中)
     try:
@@ -3687,8 +3685,7 @@ async def cover_remove_bg_proxy(request: Request):
             from billing import get_db as _gdb
             _ar = _gdb().execute("SELECT is_admin FROM users WHERE id = ?", (_uid,)).fetchone()
             if not (_ar and _ar['is_admin']):
-                from billing import check_feature_tier
-                check_feature_tier(_uid, '人物抠图', 'pro_monthly')
+                pass  # 全功能开放: 人物抠图不再限套餐, 登录即可用 (按积分扣费)
         except HTTPException:
             raise
         except Exception as _te:

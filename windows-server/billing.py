@@ -123,14 +123,14 @@ PLANS = {
 FREE_PLAN = {
     'name': '免费',
     'price_yuan': 0,
-    'monthly_credits': 700,                           # 显示用: 免费 100/天 × 7 天 = 700 (实际走 daily grant, 见 DAILY_FREE_GRANT_AMOUNT)
+    'monthly_credits': 1400,                          # 显示用: 免费 200/天 × 7 天 = 1400 (实际走 daily grant, 见 DAILY_FREE_GRANT_AMOUNT)
     'credit_pack_rate': 10,                           # ¥1=10 标准
     'digital_human_quota': 3,
-    'max_avatars': 1,                                 # 免费只 1 个形象
-    'max_footage': 3,                                 # 免费素材库 3 个
-    'max_video_minutes': 5,
-    'max_resolution': '480p',
-    'clone_voice_slots': 0,
+    'max_avatars': 1,                                 # 免费只 1 个形象 (存储配额, 功能不锁)
+    'max_footage': 3,                                 # 免费素材库 3 个 (存储配额, 功能不锁)
+    'max_video_minutes': 60,                          # 全功能体验: 时长放开
+    'max_resolution': '1080p',                        # 全功能体验: 高清
+    'clone_voice_slots': 1,                           # 全功能体验: 可克隆 1 个音色
     'multi_platform_accounts': 1,
     'team_seats': 0,
     'priority_gpu': False,
@@ -139,9 +139,9 @@ FREE_PLAN = {
     'vip_support': False,
     'early_access': False,
     'api_access': False,
-    'unlimited_duration': False,
+    'unlimited_duration': True,                       # 全功能体验: 不限时长
     'referral_boost': False,
-    'watermark': True,                                # 带 monoi 水印
+    'watermark': False,                               # 全功能体验: 无水印 (新用户 7 天全功能开放)
     'support_response_hours': 48,
 }
 
@@ -554,7 +554,7 @@ def init_billing_tables():
 # ============================== 积分 helpers ==============================
 
 
-DAILY_FREE_GRANT_AMOUNT = 100      # free 用户每天送多少 (60→100: 让免费用户每天能做 1 个基础 2 分钟作品)
+DAILY_FREE_GRANT_AMOUNT = 200      # free 用户每天送多少 (100→200: 新用户 7 天全功能体验, 每天 200 共 1400)
 FREE_TRIAL_WINDOW_DAYS = 7         # 从第一次领起算的日历日窗口. 过期 → 永久停送.
 
 # 兼容老引用 (准备移除)

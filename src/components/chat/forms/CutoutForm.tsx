@@ -1,8 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { X, Download, Sticker, AlertCircle } from 'lucide-react'
 import { PersonLibrary } from './PersonLibrary'
-import { fetchMyCredits, chargeCredit } from '../../../services/billing'
-import { UpgradeGate } from '../../UpgradeGate'
+import { chargeCredit } from '../../../services/billing'
 
 interface Props {
   onClose: () => void
@@ -10,22 +9,12 @@ interface Props {
 
 /** 独立的人物抠图功能 — 不绑封面模板. 复用 PersonLibrary (我的人物库) + 加下载按钮.
  * 后端限制: user_person_cutout 表每用户最多 10 个 (超额时后端自动删最旧的).
- * 准入: Pro 套餐及以上 (免费用户挡 + 升级 modal). */
+ * 准入: 全功能开放, 登录即可用 (按积分扣费, 下载抠图 2 积分/张). */
 export function CutoutForm({ onClose }: Props) {
-  const [tier, setTier] = useState<string | null>(null)  // null = 还没查, 'free' / 'pro_monthly' 等
   const [selectedOssKey, setSelectedOssKey] = useState('')
   const [selectedUrl, setSelectedUrl] = useState('')
   const [uploading, setUploading] = useState(false)
   const [err, setErr] = useState('')
-
-  useEffect(() => {
-    fetchMyCredits().then(c => setTier(c.tier)).catch(() => setTier('free'))
-  }, [])
-
-  // 免费用户 → 弹升级 modal, 关掉外层 Form
-  if (tier === 'free') {
-    return <UpgradeGate featureName="人物抠图" minTier="Pro" onClose={onClose}/>
-  }
 
   // 默认 stroke 配置 — 抠图器独立用, 不带描边 (用户原图样)
   const STROKE = { enabled: false, color: '#FFFFFF', width: 0 }
