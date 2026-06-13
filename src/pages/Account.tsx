@@ -12,7 +12,7 @@ import {
   fetchPlans, fetchMyCredits, fetchMySubscription, fetchMyReferralCode,
   fetchMyReferrerStatus, fetchMyReferrerBalance, fetchCreditLog, fetchMyOrders,
   fetchMyProfile, updateProfile, changePassword, fetchMyReferralRecords, rebindPhone,
-  checkReferrerUpgrade,
+  checkReferrerUpgrade, submitWithdraw,
   type PlansResponse, type PlanConfig, type CreditBalance, type UserSubscription,
   type ReferralCode, type ReferrerStatus, type ReferrerBalance, type CreditLogEntry,
   type OrderEntry,
@@ -962,6 +962,7 @@ function ReferralTab({ refCode, refStatus, refBalance, onShowQr, onReload }: {
   const [records, setRecords] = useState<{ referred_users: ReferredUser[]; commissions: CommissionDetail[] } | null>(null)
   const [guideOpen, setGuideOpen] = useState(false)
   const [applyOpen, setApplyOpen] = useState(false)
+  const [withdrawOpen, setWithdrawOpen] = useState(false)
   const [subTab, setSubTab] = useState<'users' | 'commissions'>('users')
   const [upgrading, setUpgrading] = useState(false)
 
@@ -1065,6 +1066,16 @@ function ReferralTab({ refCode, refStatus, refBalance, onShowQr, onReload }: {
           <Stat label="累计推广流水" value={`¥${(refStatus.total_revenue_brought || 0).toFixed(2)}`}/>
           <Stat label="现金余额" value={`¥${(refBalance?.cash_balance || 0).toFixed(2)}`}/>
         </div>
+        {refStatus.level !== 'normal' && (
+          <button
+            onClick={() => setWithdrawOpen(true)}
+            disabled={(refBalance?.cash_balance || 0) < 100}
+            className="mt-3 w-full py-2.5 rounded-lg bg-[var(--text)] text-[var(--bg)] text-sm hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer">
+            {(refBalance?.cash_balance || 0) >= 100
+              ? `申请提现 (可提 ¥${(refBalance?.cash_balance || 0).toFixed(2)})`
+              : '现金余额满 ¥100 才能申请提现'}
+          </button>
+        )}
         {refStatus.level === 'normal' && (
           <div className="mt-3 text-[11px] text-[var(--text-3)] leading-relaxed">
             普通用户推荐拿积分奖励. 累计带来 5 个付费用户或 ¥500 流水后升级认证推广员 (现金 30% 持续分成). 月推 20 人或 ¥3000 流水升核心合伙人 (50% 首单 + 15%×3 续费).
@@ -1315,11 +1326,11 @@ function ReferralTab({ refCode, refStatus, refBalance, onShowQr, onReload }: {
             </p>
             <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-hover)] p-4 flex flex-col gap-2">
               <div className="text-xs text-[var(--text-3)]">客服微信</div>
-              <div className="text-base font-mono font-semibold text-[var(--text)] tracking-wide">monoi_kefu</div>
+              <div className="text-base font-mono font-semibold text-[var(--text)] tracking-wide">monoi_tina</div>
               <div className="text-[11px] text-[var(--text-3)]">备注: <b>申请推广升级</b> + 你的注册手机号</div>
             </div>
             <button onClick={() => {
-              navigator.clipboard.writeText('monoi_kefu').then(() => alert('微信号已复制, 打开微信加好友吧'))
+              navigator.clipboard.writeText('monoi_tina').then(() => alert('微信号已复制, 打开微信加好友吧'))
             }}
               className="py-2 rounded-lg bg-[var(--text)] text-[var(--bg)] text-sm hover:opacity-80 cursor-pointer">
               复制微信号
@@ -1327,7 +1338,90 @@ function ReferralTab({ refCode, refStatus, refBalance, onShowQr, onReload }: {
           </div>
         </div>
       )}
+
+      {withdrawOpen && (
+        <WithdrawModal
+          balance={refBalance?.cash_balance || 0}
+          onClose={() => setWithdrawOpen(false)}
+          onDone={onReload}
+        />
+      )}
     </>
+  )
+}
+
+function WithdrawModal({ balance, onClose, onDone }: { balance: number; onClose: () => void; onDone: () => void }) {
+  const [amount, setAmount] = useState(Math.floor(balance))
+  const [method, setMethod] = useState<'wechat' | 'alipay'>('wechat')
+  const [account, setAccount] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [msg, setMsg] = useState('')
+  const [done, setDone] = useState(false)
+
+  const submit = async () => {
+    setMsg('')
+    if (amount < 100) { setMsg('最低提现 ¥100'); return }
+    if (amount > balance) { setMsg('超过现金余额'); return }
+    if (!account.trim()) { setMsg(method === 'wechat' ? '请填收款微信号' : '请填支付宝账号'); return }
+    setSubmitting(true)
+    try {
+      await submitWithdraw(amount, method, account.trim())
+      setDone(true)
+      onDone()
+      setTimeout(onClose, 1600)
+    } catch (e: any) {
+      setMsg(e?.message || '提交失败')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} className="relative bg-[var(--bg-card)] border border-[var(--border)] rounded-2xl shadow-ios-lg w-full max-w-sm p-6 flex flex-col gap-4">
+        <button onClick={onClose} className="absolute top-4 right-4 p-1 rounded text-[var(--text-3)] hover:bg-[var(--bg-hover)] cursor-pointer"><X size={14}/></button>
+        <div className="text-base font-semibold">申请提现</div>
+        {done ? (
+          <div className="text-sm text-[var(--text-2)] py-4 text-center leading-relaxed">
+            <Check size={28} className="mx-auto mb-2 text-green-500"/>
+            提现申请已提交,审核通过后转账到账。
+          </div>
+        ) : (
+          <>
+            <div className="text-xs text-[var(--text-3)]">现金余额 ¥{balance.toFixed(2)} · 最低提现 ¥100</div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs text-[var(--text-2)]">提现金额 (元)</label>
+              <input type="number" value={amount} min={100} max={Math.floor(balance)}
+                onChange={e => setAmount(Math.max(0, Math.floor(Number(e.target.value) || 0)))}
+                className="bg-[var(--bg-input)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[var(--text-3)]"/>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs text-[var(--text-2)]">收款方式</label>
+              <div className="flex gap-2">
+                {(['wechat', 'alipay'] as const).map(m => (
+                  <button key={m} onClick={() => setMethod(m)}
+                    className={`flex-1 py-2 rounded-lg text-sm border cursor-pointer transition-colors ${method === m ? 'border-[var(--text)] bg-[var(--text)] text-[var(--bg)]' : 'border-[var(--border)] text-[var(--text-2)] hover:bg-[var(--bg-hover)]'}`}>
+                    {m === 'wechat' ? '微信' : '支付宝'}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs text-[var(--text-2)]">{method === 'wechat' ? '收款微信号' : '支付宝账号'}</label>
+              <input value={account} onChange={e => setAccount(e.target.value)}
+                placeholder={method === 'wechat' ? '微信号 (方便客服转账)' : '支付宝账号 (手机/邮箱)'}
+                className="bg-[var(--bg-input)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[var(--text-3)]"/>
+            </div>
+            {msg && <div className="text-xs text-red-400">{msg}</div>}
+            <button onClick={submit} disabled={submitting}
+              className="py-2.5 rounded-lg bg-[var(--text)] text-[var(--bg)] text-sm hover:opacity-80 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2">
+              {submitting ? <><Loader2 size={14} className="animate-spin"/> 提交中</> : '提交提现申请'}
+            </button>
+            <div className="text-[11px] text-[var(--text-3)] leading-relaxed">提交后由客服审核打款,1-3 个工作日到账。</div>
+          </>
+        )}
+      </div>
+    </div>
   )
 }
 
