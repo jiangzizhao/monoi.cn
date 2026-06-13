@@ -353,6 +353,18 @@ def init_db():
         )
     """)
     conn.execute("""
+        CREATE TABLE IF NOT EXISTS user_footage (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            oss_key TEXT UNIQUE NOT NULL,
+            media_type TEXT NOT NULL,           -- 'image' | 'video'
+            name TEXT,
+            duration_seconds REAL,
+            file_size INTEGER,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS tts_tasks (
             task_id TEXT PRIMARY KEY,
             user_id INTEGER,
@@ -2594,7 +2606,7 @@ class OssSignUploadRequest(BaseModel):
 
 
 # 白名单, 防恶意客户端传随便 prefix 把文件传到非预期路径
-_ALLOWED_UPLOAD_PREFIXES = {'uploads', 'cover_templates', 'bgm_library', 'avatars', 'landing_demos', 'whiteboard_bg', 'recordings', 'desktop_release'}
+_ALLOWED_UPLOAD_PREFIXES = {'uploads', 'cover_templates', 'bgm_library', 'avatars', 'landing_demos', 'whiteboard_bg', 'recordings', 'desktop_release', 'user_footage'}
 
 
 def _validate_user_oss_key(key: str, allowed_prefix: str) -> str:
@@ -3892,6 +3904,18 @@ def _get_max_avatars(user_id: Optional[int]) -> int:
         return int(sub.get('max_avatars', MAX_AVATARS_PER_USER))
     except Exception:
         return MAX_AVATARS_PER_USER
+
+
+def _get_max_footage(user_id: Optional[int]) -> int:
+    """按用户 tier 返回个人素材库能存几个. -1 = 不限. 没 user_id 返回 3 (免费档)."""
+    if user_id is None:
+        return 3
+    try:
+        from billing import get_user_subscription
+        sub = get_user_subscription(user_id)
+        return int(sub.get('max_footage', 3))
+    except Exception:
+        return 3
 os.makedirs(DUIX_DATA_DIR, exist_ok=True)
 os.makedirs(DUIX_AVATAR_DIR, exist_ok=True)
 
@@ -4143,6 +4167,114 @@ def serve_avatar_file(avatar_key: str, exp: int = 0, sig: str = ""):
     if not os.path.exists(file_path):
         raise HTTPException(404, "形象视频未找到")
     return FileResponse(file_path, media_type="video/mp4")
+
+
+# ============== 个人素材库 (用户长期保存自己的图片/视频素材, 匹配时可选用) ==============
+# 存 OSS user_footage/ 前缀 (持久, 不走 24h lifecycle). 配额按 tier (免3/Pro20/Max50/旗舰不限).
+# 单文件: 图片 ≤10MB, 视频 ≤50MB·30s (大小以 OSS HEAD 为准, 防前端伪报占空间).
+class FootageRegisterReq(BaseModel):
+    oss_key: str
+    media_type: str                       # 'image' | 'video'
+    name: Optional[str] = ''
+    duration_seconds: Optional[float] = None
+    file_size: Optional[int] = None
+
+
+@app.get("/api/footage-library")
+def list_footage(request: Request):
+    """列出当前用户的个人素材库 (必须登录). 返回带签名 GET URL."""
+    user_id = _user_id_from_request(request)
+    from oss_helper import oss_sign_get
+    conn = get_db(); conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            "SELECT * FROM user_footage WHERE user_id = ? ORDER BY id DESC LIMIT 200",
+            (user_id,),
+        ).fetchall()
+        items = []
+        for row in rows:
+            d = row_to_dict(row)
+            try: d["url"] = oss_sign_get(d["oss_key"], expires=6 * 3600)
+            except Exception: d["url"] = ""
+            items.append(d)
+        return {"items": items, "count": len(items), "max_count": _get_max_footage(user_id)}
+    finally:
+        conn.close()
+
+
+@app.post("/api/footage-library")
+def register_footage(req: FootageRegisterReq, request: Request):
+    """登记一条已直传到 OSS (user_footage/ 前缀) 的素材到个人素材库. 配额 + 大小按 tier 校验."""
+    user_id = _user_id_from_request(request)
+    key = _validate_user_oss_key(req.oss_key, 'user_footage')   # 前缀 + 防穿越, 否则 403
+    mt = (req.media_type or '').strip().lower()
+    if mt not in ('image', 'video'):
+        raise HTTPException(400, "media_type 必须是 image 或 video")
+
+    # 真实大小以 OSS 为准 (防前端伪报塞大文件占空间); 超限删掉已传对象 + 拒绝
+    try:
+        from oss_helper import _get_bucket
+        real_size = int(_get_bucket().head_object(key).content_length or 0)
+    except Exception:
+        real_size = int(req.file_size or 0)
+    _limit = 10 * 1024 * 1024 if mt == 'image' else 50 * 1024 * 1024
+    if real_size and real_size > _limit:
+        try:
+            from oss_helper import oss_delete; oss_delete(key)
+        except Exception: pass
+        raise HTTPException(400, f"素材太大: {'图片最大 10MB' if mt == 'image' else '视频最大 50MB'}")
+    if mt == 'video' and req.duration_seconds and req.duration_seconds > 31:
+        try:
+            from oss_helper import oss_delete; oss_delete(key)
+        except Exception: pass
+        raise HTTPException(400, "视频素材最长 30 秒, 请剪短再传")
+
+    _max = _get_max_footage(user_id)
+    conn = get_db(); conn.row_factory = sqlite3.Row
+    try:
+        cnt = conn.execute("SELECT COUNT(*) FROM user_footage WHERE user_id = ?", (user_id,)).fetchone()[0]
+        if _max >= 0 and cnt >= _max:
+            try:
+                from oss_helper import oss_delete; oss_delete(key)
+            except Exception: pass
+            raise HTTPException(400, f"已达上限: 当前套餐最多保留 {_max} 个素材, 升级套餐或先删一个再传")
+        conn.execute(
+            "INSERT OR IGNORE INTO user_footage (user_id, oss_key, media_type, name, duration_seconds, file_size) VALUES (?,?,?,?,?,?)",
+            (user_id, key, mt, ((req.name or '').strip()[:60] or '素材'), req.duration_seconds, real_size or req.file_size),
+        )
+        conn.commit()
+        row = conn.execute("SELECT * FROM user_footage WHERE oss_key = ?", (key,)).fetchone()
+    finally:
+        conn.close()
+    from oss_helper import oss_sign_get
+    d = row_to_dict(row) if row else {}
+    try: d["url"] = oss_sign_get(key, expires=6 * 3600)
+    except Exception: d["url"] = ""
+    return {"success": True, **d}
+
+
+@app.delete("/api/footage-library/{item_id}")
+def delete_footage(item_id: int, request: Request):
+    """删自己的素材 (鉴权 + ownership). 同时删 OSS 对象."""
+    user_id = _user_id_from_request(request)
+    conn = get_db()
+    try:
+        row = conn.execute("SELECT user_id, oss_key FROM user_footage WHERE id = ?", (item_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "素材不存在")
+        if int(row[0]) != user_id:
+            raise HTTPException(403, "无权删除别人的素材")
+        oss_key = row[1]
+        conn.execute("DELETE FROM user_footage WHERE id = ?", (item_id,))
+        conn.commit()
+    finally:
+        conn.close()
+    try:
+        from oss_helper import oss_delete
+        oss_delete(oss_key)
+    except Exception as _e:
+        print(f"[footage] OSS 删除失败 (DB 已删): {_e}", flush=True)
+    return {"success": True}
 
 
 # ============== 数字人排队 + 家里 agent 路由 ==============

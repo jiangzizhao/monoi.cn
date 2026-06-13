@@ -48,6 +48,7 @@ PLANS = {
         'credit_pack_rate': 15,                       # 加买积分 ¥1=15 (1.5x 标准)
         'digital_human_quota': 30,                    # 月配额
         'max_avatars': 5,                             # 数字人形象数量上限
+        'max_footage': 20,                            # 个人素材库数量上限
         'max_video_minutes': 15,                      # 单视频最长时长
         'max_resolution': '720p',                     # 视频导出最高清晰度
         'clone_voice_slots': 1,
@@ -72,6 +73,7 @@ PLANS = {
         'credit_pack_rate': 20,                       # ¥1=20 (2x)
         'digital_human_quota': 100,
         'max_avatars': 10,                            # 数字人形象数量上限
+        'max_footage': 50,                            # 个人素材库数量上限
         'max_video_minutes': 30,
         'max_resolution': '1080p',
         'clone_voice_slots': 3,
@@ -97,6 +99,7 @@ PLANS = {
         'credit_pack_rate': 25,                       # ¥1=25 (2.5x)
         'digital_human_quota': 300,
         'max_avatars': -1,                            # -1 = 不限
+        'max_footage': -1,                            # -1 = 不限
         'max_video_minutes': 60,
         'max_resolution': '4K',
         'clone_voice_slots': 5,
@@ -124,6 +127,7 @@ FREE_PLAN = {
     'credit_pack_rate': 10,                           # ¥1=10 标准
     'digital_human_quota': 3,
     'max_avatars': 1,                                 # 免费只 1 个形象
+    'max_footage': 3,                                 # 免费素材库 3 个
     'max_video_minutes': 5,
     'max_resolution': '480p',
     'clone_voice_slots': 0,
