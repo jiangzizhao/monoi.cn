@@ -30,10 +30,11 @@ export interface VideoAsset {
   thumbnail: string
   preview_url?: string
   source_url: string
-  source: 'pexels' | 'pixabay' | 'upload'   // upload = 用户自传
+  source: 'pexels' | 'pixabay' | 'upload' | 'mine'   // upload = 临时自传; mine = 个人素材库
   duration: number
   selected?: boolean
-  oss_key?: string                          // upload 类型必有, 后端用这个从 OSS 拉
+  oss_key?: string                          // upload/mine 类型必有, 后端用这个从 OSS 拉
+  media_type?: 'image' | 'video'            // mine 素材区分图片/视频 (合成时图片转静帧片段)
 }
 
 export interface StoryboardRowItem {

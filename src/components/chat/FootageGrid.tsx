@@ -1,11 +1,12 @@
 import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { RefreshCw, Pencil, Download, Check, ExternalLink, Play, Upload, Loader2, Package, Lock } from 'lucide-react'
+import { RefreshCw, Pencil, Download, Check, ExternalLink, Play, Upload, Loader2, Package, Lock, Film, X } from 'lucide-react'
 import JSZip from 'jszip'
 import { Badge } from '../ui/Badge'
 import { searchPexels } from '../../services/pexels'
 import { searchPixabay } from '../../services/pixabay'
 import { fetchMyCredits, chargeCredit } from '../../services/billing'
+import { listFootage, type MyFootage } from '../../services/footage'
 import { getToken } from '../../lib/auth'
 import type { FootageSentenceItem, VideoAsset } from '../../types'
 import { TimelinePreview } from './TimelinePreview'
@@ -89,11 +90,12 @@ function AssetThumb({ asset, selected, onSelect }: { asset: VideoAsset; selected
   )
 }
 
-function SentenceRow({ item, index, selected, onToggle, onRefresh, onRotate, onAddAsset }: {
+function SentenceRow({ item, index, selected, onToggle, onRefresh, onRotate, onAddAsset, onOpenMine }: {
   item: FootageSentenceItem; index: number; selected: VideoAsset[]
   onToggle: (a: VideoAsset) => void; onRefresh: (kw: string) => void
   onRotate: () => void
   onAddAsset: (asset: VideoAsset) => void
+  onOpenMine: () => void
 }) {
   const isSelected = (a: VideoAsset) => selected.some(s => s.id === a.id && s.source === a.source)
   const [expanded, setExpanded] = useState(true)
@@ -190,6 +192,9 @@ function SentenceRow({ item, index, selected, onToggle, onRefresh, onRotate, onA
               if (fileRef.current) fileRef.current.value = ''
             }}
           />
+          <button onClick={onOpenMine} className="p-1.5 rounded-lg text-[var(--text-3)] hover:text-[var(--text-2)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer" title="用我的素材库里的素材">
+            <Film size={13}/>
+          </button>
           <button onClick={onRotate} className="p-1.5 rounded-lg text-[var(--text-3)] hover:text-[var(--text-2)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer" title="换一批">
             <RefreshCw size={13}/>
           </button>
@@ -247,6 +252,12 @@ export function FootageGrid({ data, videoUrl, segmentTimes, narrationOssKey, onU
 }) {
   const [selected, setSelected] = useState<Record<number, VideoAsset[]>>({})
   const [previewOpen, setPreviewOpen] = useState(false)
+  // 「我的素材」库选择弹窗: 给哪句选 (null=关) + 库内容
+  const [minePickerIdx, setMinePickerIdx] = useState<number | null>(null)
+  const [mineItems, setMineItems] = useState<MyFootage[]>([])
+  const [mineLoading, setMineLoading] = useState(false)
+  const [mineErr, setMineErr] = useState('')
+  const [mineLoaded, setMineLoaded] = useState(false)
   // 视频包下载进度: 'idle' | '准备中' | `下载 3/9` | '打包中' | '完成'
   const [zipStatus, setZipStatus] = useState<string>('')
   // 免费用户点下载视频包 → 弹升级 modal
@@ -284,6 +295,45 @@ export function FootageGrid({ data, videoUrl, segmentTimes, narrationOssKey, onU
       const isSame = cur.length === 1 && cur[0].id === asset.id && cur[0].source === asset.source
       return { ...prev, [sentenceIdx]: isSame ? [] : [asset] }
     })
+  }
+
+  // 把一个素材放到某句: 加到该句 assets 顶部 + 设为该句唯一选中 (上传/我的素材库 共用)
+  const addAssetToSentence = (idx: number, asset: VideoAsset) => {
+    onUpdate(data.map((it, j) => j === idx ? { ...it, assets: [asset, ...(it.assets || [])] } : it))
+    setSelected(prev => ({ ...prev, [idx]: [asset] }))
+  }
+
+  // 打开「我的素材」库选择弹窗 (首次打开才拉列表)
+  const openMinePicker = async (idx: number) => {
+    setMinePickerIdx(idx)
+    if (mineLoaded) return
+    setMineLoading(true); setMineErr('')
+    try {
+      const d = await listFootage()
+      setMineItems(d.items || [])
+      setMineLoaded(true)
+    } catch (e: any) {
+      setMineErr(e?.message || '加载失败')
+    } finally {
+      setMineLoading(false)
+    }
+  }
+
+  // 从库里选一个素材用到当前句
+  const pickMine = (it: MyFootage) => {
+    if (minePickerIdx === null) return
+    addAssetToSentence(minePickerIdx, {
+      id: `mine_${it.id}`,
+      thumbnail: it.url,
+      preview_url: it.url,
+      source_url: it.url,
+      source: 'mine',
+      media_type: it.media_type,
+      // 图片当素材时让它铺满整句时长 (后端把图转成整句长的静帧片段); 视频用真实时长
+      duration: it.media_type === 'image' ? 999 : (it.duration_seconds || 5),
+      oss_key: it.oss_key,
+    })
+    setMinePickerIdx(null)
   }
 
   const exportList = () => {
@@ -392,12 +442,8 @@ export function FootageGrid({ data, videoUrl, segmentTimes, narrationOssKey, onU
           onToggle={a => toggle(i, a)}
           onRefresh={kw => refresh(i, kw)}
           onRotate={() => rotate(i)}
-          onAddAsset={a => {
-            // 上传的放这句 assets 顶部并直接作为这句唯一选中 (一句一个)
-            const newData = data.map((it, j) => j === i ? { ...it, assets: [a, ...(it.assets || [])] } : it)
-            onUpdate(newData)
-            setSelected(prev => ({ ...prev, [i]: [a] }))
-          }}/>
+          onOpenMine={() => openMinePicker(i)}
+          onAddAsset={a => addAssetToSentence(i, a)}/>
       ))}
       {selTotal > 0 && (
         <div className="flex flex-col gap-2 px-3.5 py-2.5 rounded-xl bg-[var(--bg-hover)] border border-[var(--border)]">
@@ -442,6 +488,42 @@ export function FootageGrid({ data, videoUrl, segmentTimes, narrationOssKey, onU
           selected={selected}
           onClose={() => setPreviewOpen(false)}
         />
+      )}
+
+      {/* 「我的素材」库选择弹窗 — 从个人素材库挑一个用到当前句 */}
+      {minePickerIdx !== null && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={() => setMinePickerIdx(null)}>
+          <div onClick={e => e.stopPropagation()} className="relative bg-[var(--bg-card)] border border-[var(--border)] rounded-2xl shadow-ios-lg w-full max-w-2xl max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between px-5 py-3 border-b border-[var(--border)]">
+              <div className="text-sm font-medium">我的素材库 · 选一个用到第 {minePickerIdx + 1} 句</div>
+              <button onClick={() => setMinePickerIdx(null)} className="p-1 rounded-lg text-[var(--text-3)] hover:text-[var(--text)] hover:bg-[var(--bg-hover)] cursor-pointer"><X size={16}/></button>
+            </div>
+            <div className="p-5 overflow-y-auto">
+              {mineLoading ? (
+                <div className="text-xs text-[var(--text-3)] text-center py-8 flex items-center justify-center gap-2"><Loader2 size={13} className="animate-spin"/> 加载中…</div>
+              ) : mineErr ? (
+                <div className="text-xs text-red-400 text-center py-8">{mineErr}</div>
+              ) : mineItems.length === 0 ? (
+                <div className="text-xs text-[var(--text-3)] text-center py-8 leading-relaxed">
+                  素材库还是空的。<br/>去「账户中心 → 我的素材」上传你自己的图片/视频,这里就能选用了。
+                </div>
+              ) : (
+                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                  {mineItems.map(it => (
+                    <button key={it.id} onClick={() => pickMine(it)}
+                      className="relative aspect-video rounded-lg overflow-hidden border-2 border-transparent hover:border-[var(--text)] bg-black cursor-pointer transition-colors group">
+                      {it.media_type === 'image'
+                        ? <img src={it.url} alt={it.name} className="w-full h-full object-cover"/>
+                        : <video src={it.url} className="w-full h-full object-cover" muted playsInline preload="metadata"/>}
+                      <span className="absolute top-1 left-1 text-[9px] px-1 py-0.5 rounded bg-black/55 text-white">{it.media_type === 'image' ? '图' : '视频'}</span>
+                      <div className="absolute bottom-0 left-0 right-0 px-1.5 py-1 bg-gradient-to-t from-black/75 to-transparent text-[10px] text-white truncate">{it.name}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* 免费用户点 下载视频包 → 升级 Pro/Max modal */}

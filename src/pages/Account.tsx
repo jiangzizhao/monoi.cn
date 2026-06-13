@@ -3,8 +3,9 @@ import { useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, Copy, Check, Crown, Zap, Gem, Gift, ChevronDown, ChevronUp, X,
   QrCode, Download, User, Wallet, History, Share2, Shield, Edit2, Camera,
-  TrendingUp, ArrowRight, Sticker,
+  TrendingUp, ArrowRight, Sticker, Film, Upload, Trash2, Loader2,
 } from 'lucide-react'
+import { listFootage, uploadFootage, deleteFootage, type MyFootage } from '../services/footage'
 import { PersonLibrary } from '../components/chat/forms/PersonLibrary'
 import { QRCodeCanvas } from 'qrcode.react'
 import {
@@ -24,7 +25,7 @@ import { PaymentDialog } from '../components/PaymentDialog'
 
 // ========== 常量 ==========
 
-type TabKey = 'profile' | 'membership' | 'credits' | 'transactions' | 'referral' | 'cutouts' | 'security'
+type TabKey = 'profile' | 'membership' | 'credits' | 'transactions' | 'cutouts' | 'footage' | 'referral' | 'security'
 
 const TABS: { key: TabKey; label: string; Icon: any }[] = [
   { key: 'profile',      label: '个人资料', Icon: User },
@@ -32,6 +33,7 @@ const TABS: { key: TabKey; label: string; Icon: any }[] = [
   { key: 'credits',      label: '充值积分', Icon: Wallet },
   { key: 'transactions', label: '我的账单', Icon: History },
   { key: 'cutouts',      label: '我的人物', Icon: Sticker },
+  { key: 'footage',      label: '我的素材', Icon: Film },
   { key: 'referral',     label: '我的推广', Icon: Share2 },
   { key: 'security',     label: '安全设置', Icon: Shield },
 ]
@@ -318,6 +320,7 @@ export default function Account() {
           {activeTab === 'credits' && <CreditsTab credits={credits} plans={plans} sub={sub} onBuyPack={c => setUpgradeDialog(c)}/>}
           {activeTab === 'transactions' && <TransactionsTab creditLog={creditLog} orders={orders} friendlyName={friendlyName}/>}
           {activeTab === 'cutouts' && <MyCutoutsTab/>}
+          {activeTab === 'footage' && <FootageLibraryTab/>}
           {activeTab === 'referral' && <ReferralTab refCode={refCode} refStatus={refStatus} refBalance={refBalance} onShowQr={() => setQrOpen(true)} onReload={reloadAll}/>}
           {activeTab === 'security' && <SecurityTab me={me} onReload={reloadAll}/>}
         </div>
@@ -1357,6 +1360,105 @@ function ProgressLine({ label, got, need, unit, prefix = '' }: { label: string; 
 
 
 // ========== Tab 6: 安全设置 ==========
+
+// ========== Tab: 我的素材库 (上传/管理自己的图片视频素材, 素材匹配时可选用) ==========
+function FootageLibraryTab() {
+  const [items, setItems] = useState<MyFootage[]>([])
+  const [maxCount, setMaxCount] = useState<number>(3)
+  const [loading, setLoading] = useState(true)
+  const [uploading, setUploading] = useState(false)
+  const [uploadPct, setUploadPct] = useState(0)
+  const [err, setErr] = useState('')
+  const [pendingDel, setPendingDel] = useState<number | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const load = async () => {
+    setLoading(true)
+    try {
+      const d = await listFootage()
+      setItems(d.items || [])
+      setMaxCount(d.max_count)
+    } catch (e: any) { setErr(e?.message || '加载失败') }
+    finally { setLoading(false) }
+  }
+  useEffect(() => { load() }, [])
+
+  const onPick = async (e: { target: HTMLInputElement }) => {
+    const f = e.target.files?.[0]
+    if (fileRef.current) fileRef.current.value = ''
+    if (!f) return
+    setErr(''); setUploading(true); setUploadPct(0)
+    try { await uploadFootage(f, setUploadPct); await load() }
+    catch (e: any) { setErr(e?.message || '上传失败') }
+    finally { setUploading(false); setUploadPct(0) }
+  }
+
+  const onDelete = async (id: number) => {
+    setPendingDel(id)
+    try { await deleteFootage(id); setItems(prev => prev.filter(x => x.id !== id)) }
+    catch (e: any) { setErr(e?.message || '删除失败') }
+    finally { setPendingDel(null) }
+  }
+
+  const unlimited = maxCount < 0
+  const full = !unlimited && items.length >= maxCount
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="p-5 rounded-2xl border border-[var(--border)] bg-[var(--bg-card)]">
+        <div className="text-base font-semibold mb-1">我的素材</div>
+        <div className="text-xs text-[var(--text-3)] leading-relaxed">
+          上传你自己的图片 / 视频素材, 长期保存在这里. 做视频「素材匹配」时, 每句话都能从这里挑用自己的素材
+          (比如你自己的产品画面, 通用素材库里没有的). 已用 <span className="text-[var(--text-2)] font-medium">{items.length}{unlimited ? '' : ` / ${maxCount}`}</span> 个 ·
+          图片 ≤10MB / 视频 ≤50MB·30秒.{!unlimited && ' 想要更多额度可升级套餐.'}
+        </div>
+      </div>
+
+      <div className="p-5 rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] flex flex-col gap-4">
+        <input ref={fileRef} type="file" accept="image/*,video/*" className="hidden" onChange={onPick}/>
+        <button
+          onClick={() => fileRef.current?.click()}
+          disabled={uploading || full}
+          className="py-2.5 rounded-lg bg-[var(--text)] text-[var(--bg)] text-sm hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center justify-center gap-2">
+          {uploading
+            ? <><Loader2 size={14} className="animate-spin"/> 上传中{uploadPct > 0 ? ` ${uploadPct}%` : ''}</>
+            : <><Upload size={14}/> {full ? '已达上限, 先删一个或升级套餐' : '上传素材 (图片 / 视频)'}</>}
+        </button>
+        {err && (
+          <div className="text-xs text-red-400 bg-red-950/20 border border-red-900/30 rounded-lg px-3 py-2">{err}</div>
+        )}
+        {loading ? (
+          <div className="text-xs text-[var(--text-3)] text-center py-6">加载中…</div>
+        ) : items.length === 0 ? (
+          <div className="text-xs text-[var(--text-3)] text-center py-6">还没有素材, 上传你的第一个吧</div>
+        ) : (
+          <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+            {items.map(it => (
+              <div key={it.id} className="relative aspect-video rounded-lg overflow-hidden border border-[var(--border)] bg-black group">
+                {it.media_type === 'image'
+                  ? <img src={it.url} alt={it.name} className="w-full h-full object-cover"/>
+                  : <video src={it.url} className="w-full h-full object-cover" muted playsInline preload="metadata"/>}
+                <span className="absolute top-1 left-1 text-[9px] px-1 py-0.5 rounded bg-black/55 text-white">{it.media_type === 'image' ? '图' : '视频'}</span>
+                <button
+                  onClick={() => onDelete(it.id)}
+                  disabled={pendingDel === it.id}
+                  title="删除"
+                  className="absolute top-1 right-1 w-6 h-6 rounded-md bg-black/55 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-red-500 transition-all cursor-pointer disabled:opacity-50">
+                  {pendingDel === it.id ? <Loader2 size={12} className="animate-spin"/> : <Trash2 size={12}/>}
+                </button>
+                <div className="absolute bottom-0 left-0 right-0 px-1.5 py-1 bg-gradient-to-t from-black/75 to-transparent text-[10px] text-white truncate">{it.name}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="text-[11px] text-[var(--text-3)] px-1 leading-relaxed">
+        用法: 生成视频走到「素材匹配」那步, 每句话点 <Film size={11} className="inline -mt-0.5"/> 「我的素材」就能挑这里的素材用上.
+      </div>
+    </div>
+  )
+}
 
 function MyCutoutsTab() {
   const [selectedOssKey, setSelectedOssKey] = useState('')
